@@ -11,22 +11,19 @@ const generateWavePath = (seed: number): string => {
     return x - Math.floor(x);
   };
 
-  const cp1x = 20 + seededRandom(1) * 30;
-  const cp1y = 15 + seededRandom(2) * 25;
-  const cp2x = 25 + seededRandom(3) * 25;
-  const cp2y = 35 + seededRandom(4) * 20;
-  const midX = 30 + seededRandom(5) * 20;
-  const midY = 50;
-  const cp3x = 25 + seededRandom(6) * 25;
-  const cp3y = 65 + seededRandom(7) * 20;
-  const cp4x = 20 + seededRandom(8) * 30;
-  const cp4y = 80 + seededRandom(9) * 15;
-  const endX = 15 + seededRandom(10) * 25;
+  // Контрольные точки для плавной S-образной кривой
+  const cp1x = 5 + seededRandom(1) * 15;   // 5-20
+  const cp1y = 15 + seededRandom(2) * 15;  // 15-30
+  const midX = 20 + seededRandom(3) * 20;  // 20-40
+  const midY = 45 + seededRandom(4) * 10;  // 45-55
+  const cp2x = 35 + seededRandom(5) * 20;  // 35-55
+  const cp2y = 60 + seededRandom(6) * 15;  // 60-75
+  const endX = 45 + seededRandom(7) * 20;  // 45-65 (ближе к центру)
 
+  // Плавная кривая: начинается из точки (0,0), заканчивается по центру снизу
   return `M 0,0 
-          L ${10 + seededRandom(11) * 15},0
-          C ${cp1x},${cp1y} ${cp2x},${cp2y} ${midX},${midY}
-          C ${cp3x},${cp3y} ${cp4x},${cp4y} ${endX},100
+          Q ${cp1x},${cp1y} ${midX},${midY}
+          Q ${cp2x},${cp2y} ${endX},100
           L 0,100 Z`;
 };
 
@@ -121,14 +118,14 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
 
       {/* Decorative Wave on the Left */}
       <svg 
-        className="absolute left-0 top-0 h-full w-1/3 pointer-events-none"
-        viewBox="0 0 50 100"
+        className="absolute left-0 top-0 h-full w-2/3 pointer-events-none"
+        viewBox="0 0 100 100"
         preserveAspectRatio="none"
       >
         <defs>
-          <linearGradient id={`wave-gradient-${id}`} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="rgba(255,255,255,0.2)" />
-            <stop offset="100%" stopColor="rgba(255,255,255,0.02)" />
+          <linearGradient id={`wave-gradient-${id}`} x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="hsl(217, 91%, 50%)" />
+            <stop offset="100%" stopColor="hsl(224, 76%, 40%)" />
           </linearGradient>
         </defs>
         <path 
