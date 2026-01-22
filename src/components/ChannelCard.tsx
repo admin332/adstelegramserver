@@ -77,33 +77,22 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
     >
-      {/* Background Image & Overlay */}
-      <div className="absolute inset-0">
+      {/* Blue Background - Left Side */}
+      <div className="absolute inset-0 bg-gradient-to-b from-[hsl(217,91%,50%)] to-[hsl(224,76%,48%)]" />
+      
+      {/* Background Image - Right Side with diagonal clip */}
+      <div 
+        className="absolute inset-0"
+        style={{ clipPath: 'polygon(45% 0, 100% 0, 100% 100%, 55% 100%)' }}
+      >
         <img
           src={avatar}
           alt={name}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
       </div>
 
-      {/* Diagonal Blue Background - Left Side */}
-      <svg 
-        className="absolute left-0 top-0 h-full w-full pointer-events-none"
-        viewBox="0 0 100 100"
-        preserveAspectRatio="none"
-      >
-        <defs>
-          <linearGradient id={`blue-bg-${id}`} x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="hsl(217, 91%, 50%)" />
-            <stop offset="100%" stopColor="hsl(224, 76%, 48%)" />
-          </linearGradient>
-        </defs>
-        <path 
-          d="M 0,0 L 45,0 L 55,100 L 0,100 Z"
-          fill={`url(#blue-bg-${id})`}
-        />
-      </svg>
 
       {/* Verified Badge */}
       {verified && (
