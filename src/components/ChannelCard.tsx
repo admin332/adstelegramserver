@@ -90,7 +90,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           alt={name}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
         />
-        <div className="absolute inset-0 bg-primary/40 mix-blend-multiply" />
+        <div className="absolute inset-0 bg-[hsl(217,91%,40%)]/60 mix-blend-multiply" />
       </div>
 
 
