@@ -9,19 +9,19 @@
     --background: 0 0% 0%;
     --foreground: 0 0% 100%;
 
-    --card: 0 0% 7%;
+    --card: 0 0% 7% / 0.7;
     --card-foreground: 0 0% 100%;
 
-    --popover: 0 0% 7%;
+    --popover: 0 0% 7% / 0.9;
     --popover-foreground: 0 0% 100%;
 
     --primary: 211 100% 50%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 0 0% 12%;
+    --secondary: 0 0% 12% / 0.8;
     --secondary-foreground: 0 0% 100%;
 
-    --muted: 0 0% 15%;
+    --muted: 0 0% 15% / 0.8;
     --muted-foreground: 0 0% 60%;
 
     --accent: 211 100% 50%;
@@ -90,7 +90,7 @@
 
 @layer utilities {
   .glass {
-    background: rgba(28, 28, 30, 0.8);
+    background: rgba(10, 10, 12, 0.75);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
   }
@@ -120,7 +120,9 @@
   }
 
   .card-elevated {
-    background: var(--gradient-card);
+    background: rgba(18, 18, 22, 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     box-shadow: var(--shadow-card);
   }
 
