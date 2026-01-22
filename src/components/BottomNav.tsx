@@ -16,11 +16,15 @@ export const BottomNav = () => {
 
   return (
     <>
-      {/* Градиентное затемнение снизу */}
+      {/* Градиентное затемнение с размытием снизу */}
       <div 
-        className="fixed bottom-0 left-0 right-0 h-32 pointer-events-none z-40"
+        className="fixed bottom-0 left-0 right-0 h-36 pointer-events-none z-40"
         style={{
-          background: 'linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0) 100%)'
+          background: 'linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.4) 40%, rgba(0, 0, 0, 0) 100%)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          maskImage: 'linear-gradient(to top, black 0%, black 50%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to top, black 0%, black 50%, transparent 100%)'
         }}
       />
       
