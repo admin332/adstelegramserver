@@ -84,7 +84,10 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           alt={name}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+        {/* Blue filter */}
+        <div className="absolute inset-0 bg-blue-900/50" />
+        {/* Gradient for text readability */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
       </div>
 
       {/* Main Content Grid */}
@@ -97,7 +100,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           <div className="flex flex-col gap-2">
             <div>
               <motion.h3
-                className="text-white font-bold text-lg"
+                className="text-white font-handwriting text-2xl"
                 variants={itemVariants}
               >
                 {name}
