@@ -56,11 +56,6 @@ export const ChannelCard = ({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-foreground truncate">{name}</h3>
-            {premium && (
-              <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-gradient-to-r from-purple-500 to-pink-500">
-                PRO
-              </span>
-            )}
           </div>
           <p className="text-sm text-muted-foreground">@{username}</p>
           <span className="inline-block mt-1 text-2xs font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">
