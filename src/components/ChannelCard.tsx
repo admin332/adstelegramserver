@@ -143,9 +143,6 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
                 <Eye className="w-3.5 h-3.5" />
                 <span>{formatNumber(avgViews)}</span>
               </div>
-              <span className="text-white/60 text-xs bg-white/10 px-2 py-0.5 rounded-full">
-                {category}
-              </span>
             </motion.div>
           </div>
 
