@@ -117,9 +117,21 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
 
       {/* Main Content */}
       <motion.div
-        className="absolute inset-0 p-4 flex flex-col justify-end"
+        className="absolute inset-0 p-4 flex flex-col justify-between"
         variants={itemVariants}
       >
+        {/* Top Left: Subscribers Count */}
+        <div className="flex-1 flex items-center">
+          <motion.div
+            className="text-white font-bold text-3xl flex items-center gap-2"
+            variants={itemVariants}
+          >
+            <Users className="w-6 h-6" />
+            {formatNumber(subscribers)}
+          </motion.div>
+        </div>
+
+        {/* Bottom */}
         <div className="flex items-end justify-between gap-3">
           {/* Left: Info */}
           <div className="flex-1 min-w-0">
@@ -135,17 +147,6 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
             >
               @{username}
             </motion.p>
-
-            {/* Stats Row */}
-            <motion.div
-              className="flex items-center gap-3 mt-2"
-              variants={itemVariants}
-            >
-              <div className="flex items-center gap-1 text-white/80 text-xs">
-                <Users className="w-3.5 h-3.5" />
-                <span>{formatNumber(subscribers)}</span>
-              </div>
-            </motion.div>
           </div>
 
           {/* Right: Price & Actions */}
