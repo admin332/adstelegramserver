@@ -42,7 +42,6 @@ const Index = () => {
       <header className="sticky top-0 z-40 glass px-4 pt-4 pb-2">
         <div className="text-center mb-4">
           <h1 className="font-handwriting text-3xl md:text-4xl text-white">Adsingo</h1>
-          <p className="text-sm text-muted-foreground">Рекламная площадка</p>
         </div>
         <SearchBar onSearch={setSearchQuery} />
       </header>
