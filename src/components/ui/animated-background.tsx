@@ -45,15 +45,15 @@ const AnimatedBackground: React.FC = () => {
         
         float topoLine = smoothstep(0.03, 0.0, abs(ripples));
         
-        vec3 baseColor = vec3(0.0, 0.0, 0.0);
-        vec3 accentColor = vec3(0.0, 0.4, 1.0);
-        vec3 neonColor = vec3(0.0, 0.5, 1.0);
+        vec3 baseColor = vec3(0.04, 0.03, 0.12);  // Deep Space
+        vec3 accentColor = vec3(0.1, 0.3, 0.8);   // Electric Blue
+        vec3 neonColor = vec3(0.6, 0.2, 1.0);     // Neon Purple
         
-        vec3 finalColor = mix(baseColor, accentColor * 0.15, n * 0.4);
-        finalColor += topoLine * neonColor * depth * 0.3;
+        vec3 finalColor = mix(baseColor, accentColor, n * 0.6);
+        finalColor += topoLine * neonColor * depth * 0.4;
         
         float fade = smoothstep(0.1, -1.0, uv.y);
-        finalColor *= (1.0 - length(uv) * 0.4) * (1.0 - fade);
+        finalColor *= (1.0 - length(uv) * 0.45) * (1.0 - fade);
 
         gl_FragColor = vec4(finalColor, 1.0);
       }
