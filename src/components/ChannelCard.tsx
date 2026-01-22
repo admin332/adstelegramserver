@@ -100,7 +100,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           </linearGradient>
         </defs>
         <path 
-          d="M 0,0 L 55,0 L 45,100 L 0,100 Z"
+          d="M 0,0 L 45,0 L 55,100 L 0,100 Z"
           fill={`url(#blue-bg-${id})`}
         />
       </svg>
