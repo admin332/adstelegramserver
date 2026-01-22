@@ -80,7 +80,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       {/* Blue Background - Left Side */}
       <div className="absolute inset-0 bg-gradient-to-b from-[hsl(217,91%,50%)] to-[hsl(224,76%,48%)]" />
       
-      {/* Background Image - Right Side with diagonal clip */}
+      {/* Background Image - Right Side with diagonal clip and blue tint */}
       <div 
         className="absolute inset-0"
         style={{ clipPath: 'polygon(45% 0, 100% 0, 100% 100%, 55% 100%)' }}
@@ -90,7 +90,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           alt={name}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+        <div className="absolute inset-0 bg-primary/40 mix-blend-multiply" />
       </div>
 
 
