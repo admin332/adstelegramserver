@@ -120,8 +120,8 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
         className="absolute inset-0 p-4 flex flex-col justify-between"
         variants={itemVariants}
       >
-        {/* Top Left: Subscribers Count */}
-        <div className="flex-1 flex items-center">
+        {/* Center Left: Subscribers Count */}
+        <div className="absolute left-4 top-1/2 -translate-y-1/2">
           <motion.div
             className="text-white font-bold text-3xl flex items-center gap-2"
             variants={itemVariants}
