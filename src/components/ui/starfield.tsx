@@ -214,15 +214,14 @@ const Starfield: React.FC<StarfieldProps> = ({
     if (!ctx) return;
     ctx.fillStyle = colors.fill;
     ctx.fillRect(0, 0, sd.current.w, sd.current.h);
-    ctx.strokeStyle = starColor;
 
     sd.current.star.arr.forEach(star => {
-      if (star[5] > 0 && star[5] < sd.current.w && star[6] > 0 && star[6] < sd.current.h && star[7]) {
-        ctx.lineWidth = (1 - sd.current.star.colorRatio * star[2]) * 2;
+      if (star[3] > 0 && star[3] < sd.current.w && star[4] > 0 && star[4] < sd.current.h && star[7]) {
+        const size = (1 - sd.current.star.colorRatio * star[2]) * 2;
+        ctx.fillStyle = starColor;
         ctx.beginPath();
-        ctx.moveTo(star[5], star[6]);
-        ctx.lineTo(star[3], star[4]);
-        ctx.stroke();
+        ctx.arc(star[3], star[4], size, 0, Math.PI * 2);
+        ctx.fill();
         ctx.closePath();
       }
     });
