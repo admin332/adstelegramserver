@@ -38,10 +38,10 @@ const AnimatedBackground: React.FC = () => {
         vec2 uv = (gl_FragCoord.xy * 2.0 - u_resolution.xy) / min(u_resolution.x, u_resolution.y);
         
         float depth = 1.0 / (uv.y + 1.15);
-        vec2 gridUv = vec2(uv.x * depth, depth + u_time * 0.15);
+        vec2 gridUv = vec2(uv.x * depth, depth + u_time * 0.05);
         
         float n = noise(gridUv * 3.5);
-        float ripples = sin(gridUv.y * 18.0 + n * 8.0 + u_time * 0.5);
+        float ripples = sin(gridUv.y * 18.0 + n * 8.0 + u_time * 0.15);
         
         float topoLine = smoothstep(0.03, 0.0, abs(ripples));
         
