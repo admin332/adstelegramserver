@@ -115,23 +115,24 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
         </div>
       </div>
 
-      {/* Main Content */}
+      {/* Center Left: Subscribers Count */}
+      <div className="absolute left-4 top-1/2 -translate-y-1/2">
+        <motion.div
+          className="text-white font-bold text-3xl flex items-center gap-2"
+          variants={itemVariants}
+          initial="hidden"
+          animate="visible"
+        >
+          <Users className="w-6 h-6" />
+          {formatNumber(subscribers)}
+        </motion.div>
+      </div>
+
+      {/* Bottom Content */}
       <motion.div
-        className="absolute inset-0 p-4 flex flex-col justify-between"
+        className="absolute inset-x-0 bottom-0 p-4"
         variants={itemVariants}
       >
-        {/* Center Left: Subscribers Count */}
-        <div className="absolute left-4 top-1/2 -translate-y-1/2">
-          <motion.div
-            className="text-white font-bold text-3xl flex items-center gap-2"
-            variants={itemVariants}
-          >
-            <Users className="w-6 h-6" />
-            {formatNumber(subscribers)}
-          </motion.div>
-        </div>
-
-        {/* Bottom */}
         <div className="flex items-end justify-between gap-3">
           {/* Left: Info */}
           <div className="flex-1 min-w-0">
