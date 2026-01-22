@@ -1,4 +1,4 @@
-import { Users, Eye, TrendingUp, Send } from "lucide-react";
+import { Users, Eye, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -87,14 +87,9 @@ export const ChannelCard = ({
             {((avgViews / subscribers) * 100).toFixed(0)}%
           </span>
         </div>
-        <div className="flex items-center gap-2 ml-auto">
-          <div className="w-8 h-8 rounded-full bg-[#29B6F6] flex items-center justify-center cursor-pointer hover:bg-[#03A9F4] transition-colors">
-            <Send className="w-4 h-4 text-white" />
-          </div>
-          <Button size="sm" className="h-8 px-3 text-xs font-medium">
-            Купить
-          </Button>
-        </div>
+        <Button size="sm" className="h-8 px-3 text-xs font-medium ml-auto">
+          Купить
+        </Button>
       </div>
     </div>
   );
