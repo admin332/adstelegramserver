@@ -12,7 +12,7 @@ const AnimatedBackground: React.FC = () => {
         starColor="rgba(255,255,255,1)"
         bgColor="rgba(0,0,0,1)"
         warpFactor={3}
-        opacity={0.15}
+        opacity={1}
       />
     </div>
   );
