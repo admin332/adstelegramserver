@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart } from 'lucide-react';
+import { Heart, Users, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 
 interface ChannelCardProps {
   id: string;
@@ -32,18 +33,16 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   username,
   avatar,
   subscribers,
+  avgViews,
+  category,
   price,
+  verified,
+  premium,
 }) => {
-  const [likes, setLikes] = useState(subscribers);
   const [isLiked, setIsLiked] = useState(false);
 
   const handleLikeClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isLiked) {
-      setLikes(likes - 1);
-    } else {
-      setLikes(likes + 1);
-    }
     setIsLiked(!isLiked);
   };
 
@@ -84,41 +83,81 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           alt={name}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
         />
-        {/* Blue filter */}
-        <div className="absolute inset-0 bg-blue-900/50" />
-        {/* Gradient for text readability */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
       </div>
 
-      {/* Main Content Grid */}
+      {/* Verified Badge */}
+      {verified && (
+        <div className="absolute top-3 left-3 bg-primary/90 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1">
+          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+          Verified
+        </div>
+      )}
+
+      {/* Premium Badge */}
+      {premium && (
+        <div className="absolute top-3 right-3 bg-amber-500/90 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full">
+          ⭐ Premium
+        </div>
+      )}
+
+      {/* Main Content */}
       <motion.div
         className="absolute inset-0 p-4 flex flex-col justify-end"
         variants={itemVariants}
       >
-        <div className="flex items-end justify-between">
-          {/* Left Section: Info & Likes */}
-          <div className="flex flex-col gap-2">
-            <div>
-              <motion.h3
-                className="text-white font-handwriting text-2xl"
-                variants={itemVariants}
-              >
-                {name}
-              </motion.h3>
-              <motion.p
-                className="text-white/70 text-sm"
-                variants={itemVariants}
-              >
-                @{username}
-              </motion.p>
-            </div>
+        <div className="flex items-end justify-between gap-3">
+          {/* Left: Info */}
+          <div className="flex-1 min-w-0">
+            <motion.h3
+              className="text-white font-bold text-lg truncate"
+              variants={itemVariants}
+            >
+              {name}
+            </motion.h3>
+            <motion.p
+              className="text-white/70 text-sm"
+              variants={itemVariants}
+            >
+              @{username}
+            </motion.p>
 
-            {/* Likes */}
+            {/* Stats Row */}
+            <motion.div
+              className="flex items-center gap-3 mt-2"
+              variants={itemVariants}
+            >
+              <div className="flex items-center gap-1 text-white/80 text-xs">
+                <Users className="w-3.5 h-3.5" />
+                <span>{formatNumber(subscribers)}</span>
+              </div>
+              <div className="flex items-center gap-1 text-white/80 text-xs">
+                <Eye className="w-3.5 h-3.5" />
+                <span>{formatNumber(avgViews)}</span>
+              </div>
+              <span className="text-white/60 text-xs bg-white/10 px-2 py-0.5 rounded-full">
+                {category}
+              </span>
+            </motion.div>
+          </div>
+
+          {/* Right: Price & Actions */}
+          <div className="flex flex-col items-end gap-2">
+            <motion.div
+              className="bg-white/10 backdrop-blur-md rounded-2xl px-3 py-1.5 text-center"
+              variants={itemVariants}
+            >
+              <span className="text-white font-bold text-lg">${price}</span>
+              <p className="text-white/60 text-2xs">за пост</p>
+            </motion.div>
+
             <div className="flex items-center gap-2">
               <motion.button
                 onClick={handleLikeClick}
+                className="w-9 h-9 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center hover:bg-white/20 transition-colors"
                 whileTap={{ scale: 0.9 }}
-                className="flex items-center justify-center"
               >
                 <AnimatePresence mode="wait">
                   <motion.div
@@ -136,23 +175,15 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
                   </motion.div>
                 </AnimatePresence>
               </motion.button>
-              <motion.span
-                className="text-white text-sm font-medium"
-                variants={itemVariants}
-              >
-                {formatNumber(likes)}
-              </motion.span>
-            </div>
-          </div>
 
-          {/* Right Section: Price */}
-          <div>
-            <motion.div
-              className="bg-white/10 backdrop-blur-md rounded-2xl px-4 py-2 text-center"
-              variants={itemVariants}
-            >
-              <span className="text-white font-bold text-lg">${price}</span>
-            </motion.div>
+              <Button
+                size="sm"
+                className="h-9 px-4 text-xs font-semibold rounded-full"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Купить
+              </Button>
+            </div>
           </div>
         </div>
       </motion.div>
