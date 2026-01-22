@@ -104,9 +104,15 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
         </div>
       )}
 
-      {/* Category Badge */}
-      <div className="absolute top-3 right-3 bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full">
-        {category}
+      {/* Category & Views Badge */}
+      <div className="absolute top-3 right-3 flex items-center gap-2">
+        <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1">
+          <Eye className="w-3 h-3" />
+          <span>{formatNumber(avgViews)}</span>
+        </div>
+        <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full">
+          {category}
+        </div>
       </div>
 
       {/* Main Content */}
@@ -138,10 +144,6 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
               <div className="flex items-center gap-1 text-white/80 text-xs">
                 <Users className="w-3.5 h-3.5" />
                 <span>{formatNumber(subscribers)}</span>
-              </div>
-              <div className="flex items-center gap-1 text-white/80 text-xs">
-                <Eye className="w-3.5 h-3.5" />
-                <span>{formatNumber(avgViews)}</span>
               </div>
             </motion.div>
           </div>
