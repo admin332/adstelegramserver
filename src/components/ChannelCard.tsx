@@ -94,18 +94,8 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       </div>
 
 
-      {/* Verified Badge */}
-      {verified && (
-        <div className="absolute top-3 left-3 bg-primary/90 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1">
-          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-          </svg>
-          Verified
-        </div>
-      )}
-
-      {/* Category & Views Badge */}
-      <div className="absolute top-3 right-3 flex items-center gap-2">
+      {/* Category & Views Badge - Left */}
+      <div className="absolute top-3 left-3 flex items-center gap-2">
         <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1">
           <Eye className="w-3 h-3" />
           <span>{formatNumber(avgViews)}</span>
@@ -114,6 +104,16 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           {category}
         </div>
       </div>
+
+      {/* Verified Badge - Right */}
+      {verified && (
+        <div className="absolute top-3 right-3 bg-primary/90 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1">
+          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+          Verified
+        </div>
+      )}
 
       {/* Center Left: Subscribers Count */}
       <div className="absolute left-4 top-1/2 -translate-y-1/2">
