@@ -4,7 +4,7 @@ import { CategoryFilters } from "@/components/CategoryFilters";
 import { SearchBar } from "@/components/SearchBar";
 import { StatsCard } from "@/components/StatsCard";
 import { mockChannels } from "@/data/mockChannels";
-import { TrendingUp, Users, Wallet } from "lucide-react";
+import { TrendingUp, Users } from "lucide-react";
 import { useState } from "react";
 
 const Index = () => {
@@ -57,10 +57,10 @@ const Index = () => {
             trend={12}
           />
           <StatsCard
-            icon={<Wallet className="w-5 h-5" />}
-            label="Сделок"
-            value="$1.2M"
-            trend={8}
+            icon={<TrendingUp className="w-5 h-5" />}
+            label="Подписчиков"
+            value="22M"
+            trend={5}
           />
         </div>
 
