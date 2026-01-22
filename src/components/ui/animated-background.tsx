@@ -45,9 +45,9 @@ const AnimatedBackground: React.FC = () => {
         
         float topoLine = smoothstep(0.03, 0.0, abs(ripples));
         
-        vec3 baseColor = vec3(0.04, 0.03, 0.12);  // Deep Space
-        vec3 accentColor = vec3(0.1, 0.3, 0.8);   // Electric Blue
-        vec3 neonColor = vec3(0.6, 0.2, 1.0);     // Neon Purple
+        vec3 baseColor = vec3(0.02, 0.04, 0.1);   // Deep Blue
+        vec3 accentColor = vec3(0.0, 0.4, 1.0);   // iOS Blue
+        vec3 neonColor = vec3(0.2, 0.6, 1.0);     // Neon Cyan
         
         vec3 finalColor = mix(baseColor, accentColor, n * 0.6);
         finalColor += topoLine * neonColor * depth * 0.4;
