@@ -7,12 +7,12 @@ const AnimatedBackground: React.FC = () => {
       <Starfield 
         mouseAdjust={true}
         hyperspace={true}
-        speed={0.5}
+        speed={0.2}
         quantity={128}
         starColor="rgba(255,255,255,1)"
         bgColor="rgba(0,0,0,1)"
-        warpFactor={5}
-        opacity={0.05}
+        warpFactor={3}
+        opacity={0.15}
       />
     </div>
   );
