@@ -25,7 +25,7 @@ const Deals = () => {
   });
 
   return (
-    <div className="min-h-screen bg-background safe-bottom">
+    <div className="min-h-screen bg-transparent safe-bottom">
       {/* Header */}
       <header className="sticky top-0 z-40 glass px-4 pt-6 pb-4">
         <h1 className="text-2xl font-bold text-foreground mb-4">Мои сделки</h1>

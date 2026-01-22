@@ -27,7 +27,7 @@ const Create = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-background safe-bottom">
+    <div className="min-h-screen bg-transparent safe-bottom">
       {/* Header */}
       <header className="px-4 pt-6 pb-4">
         <h1 className="text-2xl font-bold text-foreground">Начать работу</h1>
