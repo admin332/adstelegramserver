@@ -61,7 +61,7 @@ const Channels = () => {
     <div className="min-h-screen bg-transparent safe-bottom">
       {/* Header */}
       <header className="sticky top-0 z-40 glass px-4 pt-4 pb-2">
-        <h1 className="text-2xl font-bold text-foreground mb-4">Каталог каналов</h1>
+        <h1 className="text-2xl font-bold text-white mb-4 text-center">Каталог каналов</h1>
         <SearchBar onSearch={setSearchQuery} onFilterClick={() => setShowFilters(!showFilters)} />
         
         {/* Sort Options */}
