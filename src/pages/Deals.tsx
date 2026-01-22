@@ -28,7 +28,7 @@ const Deals = () => {
     <div className="min-h-screen bg-transparent safe-bottom">
       {/* Header */}
       <header className="sticky top-0 z-40 glass px-4 pt-6 pb-4">
-        <h1 className="text-2xl font-bold text-white mb-4 text-center">Мои сделки</h1>
+        <h1 className="text-2xl font-pacifico text-white mb-4 text-center">Мои сделки</h1>
         
         <div className="flex gap-2 overflow-x-auto hide-scrollbar -mx-4 px-4">
           {filters.map((f) => {

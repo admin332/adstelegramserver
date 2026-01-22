@@ -28,7 +28,7 @@ const Profile = () => {
     <div className="min-h-screen bg-transparent safe-bottom">
       {/* Header */}
       <header className="px-4 pt-6 pb-4 text-center">
-        <h1 className="text-2xl font-bold text-white">Профиль</h1>
+        <h1 className="text-2xl font-pacifico text-white">Профиль</h1>
       </header>
 
       {/* Main Content */}
