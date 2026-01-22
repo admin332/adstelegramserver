@@ -104,12 +104,10 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
         </div>
       )}
 
-      {/* Premium Badge */}
-      {premium && (
-        <div className="absolute top-3 right-3 bg-amber-500/90 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full">
-          ⭐ Premium
-        </div>
-      )}
+      {/* Category Badge */}
+      <div className="absolute top-3 right-3 bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full">
+        {category}
+      </div>
 
       {/* Main Content */}
       <motion.div
