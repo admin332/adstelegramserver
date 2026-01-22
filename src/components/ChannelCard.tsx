@@ -1,8 +1,34 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, Users, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+
+// Генератор случайного волнового пути на основе seed
+const generateWavePath = (seed: number): string => {
+  const seededRandom = (index: number) => {
+    const x = Math.sin(seed * 9999 + index * 1234) * 10000;
+    return x - Math.floor(x);
+  };
+
+  const cp1x = 20 + seededRandom(1) * 30;
+  const cp1y = 15 + seededRandom(2) * 25;
+  const cp2x = 25 + seededRandom(3) * 25;
+  const cp2y = 35 + seededRandom(4) * 20;
+  const midX = 30 + seededRandom(5) * 20;
+  const midY = 50;
+  const cp3x = 25 + seededRandom(6) * 25;
+  const cp3y = 65 + seededRandom(7) * 20;
+  const cp4x = 20 + seededRandom(8) * 30;
+  const cp4y = 80 + seededRandom(9) * 15;
+  const endX = 15 + seededRandom(10) * 25;
+
+  return `M 0,0 
+          L ${10 + seededRandom(11) * 15},0
+          C ${cp1x},${cp1y} ${cp2x},${cp2y} ${midX},${midY}
+          C ${cp3x},${cp3y} ${cp4x},${cp4y} ${endX},100
+          L 0,100 Z`;
+};
 
 interface ChannelCardProps {
   id: string;
@@ -29,6 +55,7 @@ const formatNumber = (num: number): string => {
 };
 
 export const ChannelCard: React.FC<ChannelCardProps> = ({
+  id,
   name,
   username,
   avatar,
@@ -40,6 +67,12 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   premium,
 }) => {
   const [isLiked, setIsLiked] = useState(false);
+
+  // Генерируем уникальную волну для каждой карточки
+  const wavePath = useMemo(() => {
+    const seed = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return generateWavePath(seed);
+  }, [id]);
 
   const handleLikeClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -85,6 +118,24 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
       </div>
+
+      {/* Decorative Wave on the Left */}
+      <svg 
+        className="absolute left-0 top-0 h-full w-1/3 pointer-events-none"
+        viewBox="0 0 50 100"
+        preserveAspectRatio="none"
+      >
+        <defs>
+          <linearGradient id={`wave-gradient-${id}`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="rgba(255,255,255,0.2)" />
+            <stop offset="100%" stopColor="rgba(255,255,255,0.02)" />
+          </linearGradient>
+        </defs>
+        <path 
+          d={wavePath}
+          fill={`url(#wave-gradient-${id})`}
+        />
+      </svg>
 
       {/* Verified Badge */}
       {verified && (
