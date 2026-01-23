@@ -59,7 +59,7 @@ export const PromoBannerCarousel = () => {
                 <img
                   src={banner.src}
                   alt={banner.alt}
-                  className="w-full h-[60px] rounded-lg shadow-md object-cover"
+                  className="w-full h-auto rounded-lg shadow-md"
                 />
               </div>
             </CarouselItem>
