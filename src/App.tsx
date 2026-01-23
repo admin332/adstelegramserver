@@ -10,6 +10,7 @@ import Channels from "./pages/Channels";
 import Create from "./pages/Create";
 import Deals from "./pages/Deals";
 import Profile from "./pages/Profile";
+import Operator from "./pages/Operator";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +33,7 @@ const App = () => (
                 <Route path="/create" element={<Create />} />
                 <Route path="/deals" element={<Deals />} />
                 <Route path="/profile" element={<Profile />} />
+                <Route path="/operator" element={<Operator />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </div>
