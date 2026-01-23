@@ -167,8 +167,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Listen for Supabase Auth state changes (for non-Telegram users)
   useEffect(() => {
+    let isMounted = true;
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        if (!isMounted) return;
+        
         console.log("[Auth] Auth state changed:", event);
         
         // Only handle auth changes if not in Telegram
@@ -180,16 +184,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             .eq("auth_user_id", session.user.id)
             .maybeSingle();
           
-          if (profile) {
+          if (isMounted && profile) {
             setUser(profile as User);
           }
         } else if (event === 'SIGNED_OUT') {
-          setUser(null);
+          if (isMounted) {
+            setUser(null);
+          }
         }
       }
     );
 
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
     };
   }, [isTelegram]);
