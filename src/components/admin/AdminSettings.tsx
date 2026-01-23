@@ -1,10 +1,54 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Settings, Shield, Bell, Database } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Settings, Shield, Bell, Database, FlaskConical, Loader2 } from 'lucide-react';
+import { useAppSettings } from '@/hooks/useAppSettings';
+import { toast } from 'sonner';
 
 export function AdminSettings() {
+  const { testModeEnabled, isLoading, updateTestMode } = useAppSettings();
+
+  const handleTestModeChange = async (enabled: boolean) => {
+    const { error } = await updateTestMode(enabled);
+    if (error) {
+      toast.error('Ошибка при изменении настройки');
+    } else {
+      toast.success(enabled ? 'Тестовый режим включён' : 'Тестовый режим выключен');
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* Режим разработки */}
+      <Card className="bg-card border-border">
+        <CardHeader>
+          <CardTitle className="text-foreground flex items-center gap-2">
+            <FlaskConical className="h-5 w-5" />
+            Режим разработки
+          </CardTitle>
+          <CardDescription>Настройки для тестирования и разработки</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between p-4 rounded-lg bg-background/50 border border-border/50">
+            <div>
+              <p className="font-medium text-foreground">Тестовый аккаунт</p>
+              <p className="text-sm text-muted-foreground">
+                Показывать демо-профиль для пользователей без Telegram авторизации
+              </p>
+            </div>
+            {isLoading ? (
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            ) : (
+              <Switch
+                checked={testModeEnabled}
+                onCheckedChange={handleTestModeChange}
+              />
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Общие настройки */}
       <Card className="bg-card border-border">
         <CardHeader>
           <CardTitle className="text-foreground flex items-center gap-2">
@@ -15,7 +59,7 @@ export function AdminSettings() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-muted-foreground text-sm">
-            Настройки приложения будут доступны после добавления соответствующей функциональности.
+            Дополнительные настройки приложения будут доступны в будущих обновлениях.
           </p>
         </CardContent>
       </Card>
