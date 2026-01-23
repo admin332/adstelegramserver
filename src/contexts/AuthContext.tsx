@@ -47,8 +47,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       console.log("[Auth] Starting authentication...");
 
-      // Initialize Telegram WebApp
-      initTelegramApp();
+      // Initialize Telegram WebApp (with error handling to not block non-Telegram users)
+      try {
+        initTelegramApp();
+      } catch (e) {
+        console.warn("[Auth] Failed to initialize Telegram WebApp:", e);
+      }
 
       // Check if running in Telegram
       const inTelegram = isTelegramMiniApp();
