@@ -172,47 +172,37 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
             </motion.p>
           </div>
 
-          {/* Right: Price & Actions */}
-          <div className="flex flex-col items-end gap-2">
-            <motion.div
-              className="bg-white/10 backdrop-blur-md rounded-2xl px-3 py-1.5 text-center"
-              variants={itemVariants}
+          {/* Right: Actions */}
+          <div className="flex items-center gap-2">
+            <motion.button
+              onClick={handleLikeClick}
+              className="w-9 h-9 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center hover:bg-white/20 transition-colors"
+              whileTap={{ scale: 0.9 }}
             >
-              <span className="text-white font-bold text-lg">${price}</span>
-              <p className="text-white/60 text-2xs">за пост</p>
-            </motion.div>
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={isLiked ? 'liked' : 'unliked'}
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  exit={{ scale: 0 }}
+                >
+                  <Heart
+                    className={cn(
+                      'w-5 h-5 transition-colors',
+                      isLiked ? 'fill-red-500 text-red-500' : 'text-white'
+                    )}
+                  />
+                </motion.div>
+              </AnimatePresence>
+            </motion.button>
 
-            <div className="flex items-center gap-2">
-              <motion.button
-                onClick={handleLikeClick}
-                className="w-9 h-9 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center hover:bg-white/20 transition-colors"
-                whileTap={{ scale: 0.9 }}
-              >
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={isLiked ? 'liked' : 'unliked'}
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    exit={{ scale: 0 }}
-                  >
-                    <Heart
-                      className={cn(
-                        'w-5 h-5 transition-colors',
-                        isLiked ? 'fill-red-500 text-red-500' : 'text-white'
-                      )}
-                    />
-                  </motion.div>
-                </AnimatePresence>
-              </motion.button>
-
-              <Button
-                size="sm"
-                className="h-9 px-4 text-xs font-semibold rounded-full"
-                onClick={(e) => e.stopPropagation()}
-              >
-                Купить
-              </Button>
-            </div>
+            <Button
+              size="sm"
+              className="h-9 px-4 text-xs font-semibold rounded-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Купить
+            </Button>
           </div>
         </div>
       </motion.div>
