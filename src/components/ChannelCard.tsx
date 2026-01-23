@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, Users, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -18,6 +18,8 @@ interface ChannelCardProps {
   rating: number;
   verified: boolean;
   premium?: boolean;
+  isLiked?: boolean;
+  onLikeToggle?: (id: string) => void;
 }
 
 const formatNumber = (num: number): string => {
@@ -42,12 +44,12 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   tonPrice,
   verified,
   premium,
+  isLiked = false,
+  onLikeToggle,
 }) => {
-  const [isLiked, setIsLiked] = useState(false);
-
   const handleLikeClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsLiked(!isLiked);
+    onLikeToggle?.(id);
   };
 
   const cardVariants = {

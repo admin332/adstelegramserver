@@ -3,13 +3,18 @@ import { ChannelCard } from "@/components/ChannelCard";
 import { CategoryFilters } from "@/components/CategoryFilters";
 import { SearchBar } from "@/components/SearchBar";
 import { StatsCard } from "@/components/StatsCard";
+import { FilterChip } from "@/components/FilterChip";
 import { mockChannels } from "@/data/mockChannels";
-import { TrendingUp, Users } from "lucide-react";
+import { useFavorites } from "@/hooks/useFavorites";
+import { TrendingUp, Users, Heart } from "lucide-react";
 import { useState } from "react";
 
 const Index = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
+  const [showFilters, setShowFilters] = useState(false);
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const { favorites, toggleFavorite, isFavorite } = useFavorites();
 
   const filteredChannels = mockChannels.filter((channel) => {
     const matchesSearch = channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -18,7 +23,9 @@ const Index = () => {
     const matchesCategory = activeCategory === "all" || 
       channel.category.toLowerCase() === getCategoryName(activeCategory).toLowerCase();
     
-    return matchesSearch && matchesCategory;
+    const matchesFavorites = !showFavoritesOnly || favorites.includes(channel.id);
+    
+    return matchesSearch && matchesCategory && matchesFavorites;
   });
 
   function getCategoryName(id: string): string {
@@ -43,7 +50,20 @@ const Index = () => {
         <div className="text-center mb-4">
           <h1 className="font-handwriting text-3xl md:text-4xl text-white">Adsingo</h1>
         </div>
-        <SearchBar onSearch={setSearchQuery} />
+        <SearchBar onSearch={setSearchQuery} onFilterClick={() => setShowFilters(!showFilters)} />
+        
+        {/* Filters */}
+        {showFilters && (
+          <div className="flex gap-2 overflow-x-auto hide-scrollbar py-3 -mx-4 px-4 animate-slide-up">
+            <FilterChip
+              active={showFavoritesOnly}
+              onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+              icon={<Heart className="w-4 h-4" />}
+            >
+              Избранное
+            </FilterChip>
+          </div>
+        )}
       </header>
 
       {/* Main Content */}
@@ -79,11 +99,16 @@ const Index = () => {
           <div className="space-y-3">
             {filteredChannels.length > 0 ? (
               filteredChannels.map((channel) => (
-                <ChannelCard key={channel.id} {...channel} />
+                <ChannelCard 
+                  key={channel.id} 
+                  {...channel} 
+                  isLiked={isFavorite(channel.id)}
+                  onLikeToggle={toggleFavorite}
+                />
               ))
             ) : (
               <div className="text-center py-8 text-muted-foreground">
-                Каналы не найдены
+                {showFavoritesOnly ? "Нет избранных каналов" : "Каналы не найдены"}
               </div>
             )}
           </div>
