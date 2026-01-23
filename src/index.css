@@ -203,7 +203,7 @@
   }
 
   .app-container {
-    padding-top: 1.5rem;
+    padding-top: 2rem;
     display: flex;
     flex-direction: column;
     height: 100vh;
