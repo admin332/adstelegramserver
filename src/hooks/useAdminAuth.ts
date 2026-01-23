@@ -75,12 +75,11 @@ export function useAdminAuth() {
       }
     };
 
-    // Set up auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (!isMounted) return;
+    const handleAuthChange = async (session: { user: User } | null) => {
+      if (!isMounted) return;
 
-        if (session?.user) {
+      if (session?.user) {
+        try {
           const isAdmin = await checkAdminRole(session.user.id);
           
           if (isAdmin) {
@@ -95,37 +94,16 @@ export function useAdminAuth() {
               error: null,
             });
           }
-        } else {
+        } catch (err) {
+          console.error('Error in handleAuthChange:', err);
           if (isMounted) {
             setState({
-              user: null,
+              user: session.user,
               isAdmin: false,
               isLoading: false,
-              error: null,
+              error: 'Failed to check admin status',
             });
           }
-        }
-      }
-    );
-
-    // Check initial session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!isMounted) return;
-
-      if (session?.user) {
-        const isAdmin = await checkAdminRole(session.user.id);
-        
-        if (isAdmin) {
-          await ensureUserProfile(session.user);
-        }
-        
-        if (isMounted) {
-          setState({
-            user: session.user,
-            isAdmin,
-            isLoading: false,
-            error: null,
-          });
         }
       } else {
         if (isMounted) {
@@ -137,16 +115,44 @@ export function useAdminAuth() {
           });
         }
       }
+    };
+
+    // Set up auth state listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('[AdminAuth] Auth state changed:', event);
+        await handleAuthChange(session);
+      }
+    );
+
+    // Check initial session
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      console.log('[AdminAuth] Initial session check');
+      await handleAuthChange(session);
     });
+
+    // Safety timeout - prevent infinite loading
+    const timeout = setTimeout(() => {
+      if (isMounted) {
+        setState(prev => {
+          if (prev.isLoading) {
+            console.warn('[AdminAuth] Safety timeout triggered');
+            return { ...prev, isLoading: false };
+          }
+          return prev;
+        });
+      }
+    }, 5000);
 
     return () => {
       isMounted = false;
       subscription.unsubscribe();
+      clearTimeout(timeout);
     };
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    setState(prev => ({ ...prev, isLoading: true, error: null }));
+    setState(prev => ({ ...prev, error: null }));
     
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -158,11 +164,12 @@ export function useAdminAuth() {
       return { success: false, error: error.message };
     }
 
+    // isLoading будет сброшен через onAuthStateChange
     return { success: true, user: data.user };
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
-    setState(prev => ({ ...prev, isLoading: true, error: null }));
+    setState(prev => ({ ...prev, error: null }));
     
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -177,6 +184,7 @@ export function useAdminAuth() {
       return { success: false, error: error.message };
     }
 
+    // isLoading будет сброшен через onAuthStateChange
     return { success: true, user: data.user };
   }, []);
 

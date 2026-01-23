@@ -176,7 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log("[Auth] Auth state changed:", event);
         
         // Only handle auth changes if not in Telegram
-        if (!isTelegram && event === 'SIGNED_IN' && session?.user) {
+        if (!isTelegram && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
           // Reload profile
           const { data: profile } = await supabase
             .from("users")
@@ -184,20 +184,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             .eq("auth_user_id", session.user.id)
             .maybeSingle();
           
-          if (isMounted && profile) {
-            setUser(profile as User);
+          if (isMounted) {
+            setUser(profile as User | null);
+            setIsLoading(false); // Always reset loading
           }
         } else if (event === 'SIGNED_OUT') {
           if (isMounted) {
             setUser(null);
+            setIsLoading(false);
+          }
+        } else if (event === 'INITIAL_SESSION') {
+          // Initial session handled by authenticate()
+          if (isMounted && !session) {
+            setIsLoading(false);
           }
         }
       }
     );
 
+    // Safety timeout - prevent infinite loading
+    const timeout = setTimeout(() => {
+      if (isMounted) {
+        setIsLoading(prev => {
+          if (prev) {
+            console.warn('[Auth] Safety timeout triggered');
+            return false;
+          }
+          return prev;
+        });
+      }
+    }, 5000);
+
     return () => {
       isMounted = false;
       subscription.unsubscribe();
+      clearTimeout(timeout);
     };
   }, [isTelegram]);
 
