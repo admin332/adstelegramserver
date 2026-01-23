@@ -86,12 +86,25 @@
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    padding: 0;
+    background-color: hsl(var(--background));
+    height: 100%;
   }
 
   body {
     @apply text-foreground;
-    overflow-x: hidden;
-    background: transparent;
+    margin: 0;
+    padding: 0;
+    background-color: hsl(var(--background));
+    overflow: hidden;
+    height: 100%;
+  }
+
+  #root {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
   }
 }
 
@@ -187,5 +200,19 @@
     to {
       opacity: 1;
     }
+  }
+
+  .app-container {
+    padding-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    box-sizing: border-box;
+  }
+
+  .scrollable-content {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
