@@ -44,15 +44,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(true);
       setError(null);
 
+      console.log("[Auth] Starting authentication...");
+      console.log("[Auth] window.Telegram:", typeof window !== "undefined" ? window.Telegram : "undefined");
+      console.log("[Auth] WebApp:", window.Telegram?.WebApp);
+      console.log("[Auth] initData:", window.Telegram?.WebApp?.initData?.substring(0, 100));
+
       // Initialize Telegram WebApp
       initTelegramApp();
 
       // Check if running in Telegram
       const inTelegram = isTelegramMiniApp();
+      console.log("[Auth] isTelegramMiniApp:", inTelegram);
       setIsTelegram(inTelegram);
 
       if (!inTelegram) {
         // Not in Telegram - allow browsing but no auth
+        console.log("[Auth] Not in Telegram, skipping auth");
         setIsLoading(false);
         return;
       }
@@ -70,20 +77,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Validate with backend
+      console.log("[Auth] Calling telegram-auth edge function...");
       const { data, error: fnError } = await supabase.functions.invoke("telegram-auth", {
         body: { initData },
       });
 
+      console.log("[Auth] Response:", data, fnError);
+
       if (fnError) {
-        console.error("Auth error:", fnError);
+        console.error("[Auth] Edge function error:", fnError);
         setError("Authentication failed");
         setIsLoading(false);
         return;
       }
 
       if (data?.success && data?.user) {
+        console.log("[Auth] Success! User:", data.user);
         setUser(data.user);
       } else {
+        console.log("[Auth] Failed:", data?.error);
         setError(data?.error || "Authentication failed");
       }
     } catch (err) {
