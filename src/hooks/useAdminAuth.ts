@@ -17,7 +17,6 @@ export function useAdminAuth() {
     error: null,
   });
 
-  // Вынесенные функции для переиспользования
   const checkAdminRole = useCallback(async (userId: string): Promise<boolean> => {
     try {
       const { data, error } = await supabase
@@ -39,75 +38,22 @@ export function useAdminAuth() {
     }
   }, []);
 
-  const ensureUserProfile = useCallback(async (authUser: User) => {
-    try {
-      const { data: existingProfile, error: fetchError } = await supabase
-        .from('users')
-        .select('id')
-        .eq('auth_user_id', authUser.id)
-        .maybeSingle();
-
-      if (fetchError) {
-        console.error('Error checking existing profile:', fetchError);
-        return;
-      }
-
-      if (!existingProfile) {
-        const { error: insertError } = await supabase
-          .from('users')
-          .insert({
-            auth_user_id: authUser.id,
-            first_name: authUser.email?.split('@')[0] || 'Admin',
-            username: authUser.email,
-            is_premium: false,
-          });
-
-        if (insertError) {
-          console.error('Error creating user profile:', insertError);
-        } else {
-          console.log('Created profile for admin user:', authUser.id);
-        }
-      }
-    } catch (err) {
-      console.error('Error ensuring user profile:', err);
-    }
-  }, []);
-
   useEffect(() => {
-    let isMounted = true;
-
-    const handleAuthChange = async (session: { user: User } | null) => {
-      if (!isMounted) return;
-
-      if (session?.user) {
-        try {
-          const isAdmin = await checkAdminRole(session.user.id);
-          
-          if (isAdmin) {
-            await ensureUserProfile(session.user);
-          }
-          
-          if (isMounted) {
+    // Set up auth state listener FIRST
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (session?.user) {
+          // Use setTimeout to avoid potential race conditions
+          setTimeout(async () => {
+            const isAdmin = await checkAdminRole(session.user.id);
             setState({
               user: session.user,
               isAdmin,
               isLoading: false,
               error: null,
             });
-          }
-        } catch (err) {
-          console.error('Error in handleAuthChange:', err);
-          if (isMounted) {
-            setState({
-              user: session.user,
-              isAdmin: false,
-              isLoading: false,
-              error: 'Failed to check admin status',
-            });
-          }
-        }
-      } else {
-        if (isMounted) {
+          }, 0);
+        } else {
           setState({
             user: null,
             isAdmin: false,
@@ -116,41 +62,32 @@ export function useAdminAuth() {
           });
         }
       }
-    };
-
-    // Set up auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('[AdminAuth] Auth state changed:', event);
-        await handleAuthChange(session);
-      }
     );
 
-    // Check initial session
+    // THEN check initial session
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      console.log('[AdminAuth] Initial session check');
-      await handleAuthChange(session);
-    });
-
-    // Safety timeout - prevent infinite loading
-    const timeout = setTimeout(() => {
-      if (isMounted) {
-        setState(prev => {
-          if (prev.isLoading) {
-            console.warn('[AdminAuth] Safety timeout triggered');
-            return { ...prev, isLoading: false };
-          }
-          return prev;
+      if (session?.user) {
+        const isAdmin = await checkAdminRole(session.user.id);
+        setState({
+          user: session.user,
+          isAdmin,
+          isLoading: false,
+          error: null,
+        });
+      } else {
+        setState({
+          user: null,
+          isAdmin: false,
+          isLoading: false,
+          error: null,
         });
       }
-    }, 5000);
+    });
 
     return () => {
-      isMounted = false;
       subscription.unsubscribe();
-      clearTimeout(timeout);
     };
-  }, [checkAdminRole, ensureUserProfile]);
+  }, [checkAdminRole]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
@@ -165,32 +102,8 @@ export function useAdminAuth() {
       return { success: false, error: error.message };
     }
 
-    // Сразу обработать успешную авторизацию вместо ожидания onAuthStateChange
-    if (data.user) {
-      try {
-        const isAdmin = await checkAdminRole(data.user.id);
-        if (isAdmin) {
-          await ensureUserProfile(data.user);
-        }
-        setState({
-          user: data.user,
-          isAdmin,
-          isLoading: false,
-          error: null,
-        });
-      } catch (err) {
-        console.error('Error processing login:', err);
-        setState({
-          user: data.user,
-          isAdmin: false,
-          isLoading: false,
-          error: 'Failed to check admin status',
-        });
-      }
-    }
-
     return { success: true, user: data.user };
-  }, [checkAdminRole, ensureUserProfile]);
+  }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
@@ -208,28 +121,8 @@ export function useAdminAuth() {
       return { success: false, error: error.message };
     }
 
-    // После регистрации проверяем роль (обычно нет, но для консистентности)
-    if (data.user) {
-      try {
-        const isAdmin = await checkAdminRole(data.user.id);
-        setState({
-          user: data.user,
-          isAdmin,
-          isLoading: false,
-          error: null,
-        });
-      } catch (err) {
-        setState({
-          user: data.user,
-          isAdmin: false,
-          isLoading: false,
-          error: null,
-        });
-      }
-    }
-
     return { success: true, user: data.user };
-  }, [checkAdminRole]);
+  }, []);
 
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();

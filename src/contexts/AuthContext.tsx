@@ -10,13 +10,12 @@ import {
 
 export interface User {
   id: string;
-  telegram_id?: number | null;
-  auth_user_id?: string | null;
+  telegram_id: number;
   first_name: string;
-  last_name?: string | null;
-  username?: string | null;
-  photo_url?: string | null;
-  language_code?: string | null;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+  language_code?: string;
   is_premium: boolean;
 }
 
@@ -46,83 +45,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(null);
 
       console.log("[Auth] Starting authentication...");
+      console.log("[Auth] window.Telegram:", typeof window !== "undefined" ? window.Telegram : "undefined");
+      console.log("[Auth] WebApp:", window.Telegram?.WebApp);
+      console.log("[Auth] initData:", window.Telegram?.WebApp?.initData?.substring(0, 100));
 
-      // Initialize Telegram WebApp (with error handling to not block non-Telegram users)
-      try {
-        initTelegramApp();
-      } catch (e) {
-        console.warn("[Auth] Failed to initialize Telegram WebApp:", e);
-      }
+      // Initialize Telegram WebApp
+      initTelegramApp();
 
       // Check if running in Telegram
       const inTelegram = isTelegramMiniApp();
       console.log("[Auth] isTelegramMiniApp:", inTelegram);
       setIsTelegram(inTelegram);
 
-      if (inTelegram) {
-        // Telegram Mini App authentication
-        const tgUser = getTelegramUser();
-        setTelegramUser(tgUser);
+      if (!inTelegram) {
+        // Not in Telegram - allow browsing but no auth
+        console.log("[Auth] Not in Telegram, skipping auth");
+        setIsLoading(false);
+        return;
+      }
 
-        const initData = getTelegramInitData();
-        if (!initData) {
-          setError("No Telegram data available");
-          setIsLoading(false);
-          return;
-        }
+      // Get Telegram user data for immediate display
+      const tgUser = getTelegramUser();
+      setTelegramUser(tgUser);
 
-        console.log("[Auth] Calling telegram-auth edge function...");
-        const { data, error: fnError } = await supabase.functions.invoke("telegram-auth", {
-          body: { initData },
-        });
+      // Get initData for backend validation
+      const initData = getTelegramInitData();
+      if (!initData) {
+        setError("No Telegram data available");
+        setIsLoading(false);
+        return;
+      }
 
-        console.log("[Auth] Response:", data, fnError);
+      // Validate with backend
+      console.log("[Auth] Calling telegram-auth edge function...");
+      const { data, error: fnError } = await supabase.functions.invoke("telegram-auth", {
+        body: { initData },
+      });
 
-        if (fnError) {
-          console.error("[Auth] Edge function error:", fnError);
-          setError("Authentication failed");
-          setIsLoading(false);
-          return;
-        }
+      console.log("[Auth] Response:", data, fnError);
 
-        if (data?.success && data?.user) {
-          console.log("[Auth] Telegram auth success! User:", data.user);
-          setUser(data.user);
-        } else {
-          console.log("[Auth] Telegram auth failed:", data?.error);
-          setError(data?.error || "Authentication failed");
-        }
+      if (fnError) {
+        console.error("[Auth] Edge function error:", fnError);
+        setError("Authentication failed");
+        setIsLoading(false);
+        return;
+      }
+
+      if (data?.success && data?.user) {
+        console.log("[Auth] Success! User:", data.user);
+        setUser(data.user);
       } else {
-        // Not in Telegram - check Supabase Auth session
-        console.log("[Auth] Not in Telegram, checking Supabase Auth session...");
-        
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session?.user) {
-          console.log("[Auth] Found Supabase Auth session:", session.user.id);
-          
-          // Load profile from public.users by auth_user_id
-          const { data: profile, error: profileError } = await supabase
-            .from("users")
-            .select("*")
-            .eq("auth_user_id", session.user.id)
-            .maybeSingle();
-          
-          if (profileError) {
-            console.error("[Auth] Error loading profile:", profileError);
-          }
-          
-          if (profile) {
-            console.log("[Auth] Found profile:", profile);
-            setUser(profile as User);
-          } else {
-            console.log("[Auth] No profile found for auth user");
-            // User is authenticated but has no profile yet
-            // This is normal - profile is created on first admin login
-          }
-        } else {
-          console.log("[Auth] No Supabase Auth session found");
-        }
+        console.log("[Auth] Failed:", data?.error);
+        setError(data?.error || "Authentication failed");
       }
     } catch (err) {
       console.error("Auth error:", err);
@@ -133,94 +107,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshUser = useCallback(async () => {
-    if (user?.telegram_id) {
-      const { data } = await supabase
-        .from("users")
-        .select("*")
-        .eq("telegram_id", user.telegram_id)
-        .maybeSingle();
-      
-      if (data) {
-        setUser(data as User);
-      }
-    } else if (user?.auth_user_id) {
-      const { data } = await supabase
-        .from("users")
-        .select("*")
-        .eq("auth_user_id", user.auth_user_id)
-        .maybeSingle();
-      
-      if (data) {
-        setUser(data as User);
-      }
+    if (!user?.telegram_id) return;
+    
+    const { data } = await supabase
+      .from("users")
+      .select("*")
+      .eq("telegram_id", user.telegram_id)
+      .single();
+    
+    if (data) {
+      setUser(data as User);
     }
-  }, [user?.telegram_id, user?.auth_user_id]);
+  }, [user?.telegram_id]);
 
-  const logout = useCallback(async () => {
+  const logout = useCallback(() => {
     setUser(null);
     setTelegramUser(null);
-    // Also sign out from Supabase Auth if not in Telegram
-    if (!isTelegram) {
-      await supabase.auth.signOut();
-    }
-  }, [isTelegram]);
-
-  // Listen for Supabase Auth state changes (for non-Telegram users)
-  useEffect(() => {
-    let isMounted = true;
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (!isMounted) return;
-        
-        console.log("[Auth] Auth state changed:", event);
-        
-        // Only handle auth changes if not in Telegram
-        if (!isTelegram && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
-          // Reload profile
-          const { data: profile } = await supabase
-            .from("users")
-            .select("*")
-            .eq("auth_user_id", session.user.id)
-            .maybeSingle();
-          
-          if (isMounted) {
-            setUser(profile as User | null);
-            setIsLoading(false); // Always reset loading
-          }
-        } else if (event === 'SIGNED_OUT') {
-          if (isMounted) {
-            setUser(null);
-            setIsLoading(false);
-          }
-        } else if (event === 'INITIAL_SESSION') {
-          // Initial session handled by authenticate()
-          if (isMounted && !session) {
-            setIsLoading(false);
-          }
-        }
-      }
-    );
-
-    // Safety timeout - prevent infinite loading
-    const timeout = setTimeout(() => {
-      if (isMounted) {
-        setIsLoading(prev => {
-          if (prev) {
-            console.warn('[Auth] Safety timeout triggered');
-            return false;
-          }
-          return prev;
-        });
-      }
-    }, 5000);
-
-    return () => {
-      isMounted = false;
-      subscription.unsubscribe();
-      clearTimeout(timeout);
-    };
-  }, [isTelegram]);
+  }, []);
 
   useEffect(() => {
     authenticate();

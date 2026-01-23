@@ -87,47 +87,27 @@ export function getTelegramUser(): TelegramUser | null {
 export function initTelegramApp(): void {
   const webapp = getTelegramWebApp();
   if (webapp) {
-    try {
-      // Сообщаем Telegram что приложение готово
-      webapp.ready();
-      
-      // Пробуем запросить настоящий Fullscreen (Bot API 7.0+)
-      try {
-        if (typeof webapp.requestFullscreen === 'function') {
-          webapp.requestFullscreen();
-        } else {
-          webapp.expand();
-        }
-      } catch (e) {
-        console.log('[Telegram] Fullscreen not supported, using expand');
-        webapp.expand();
-      }
-      
-      // Отключаем вертикальные свайпы (защита от случайного закрытия)
-      try {
-        if (typeof webapp.disableVerticalSwipes === 'function') {
-          webapp.disableVerticalSwipes();
-        }
-      } catch (e) {
-        console.log('[Telegram] disableVerticalSwipes not supported');
-      }
-      
-      // Включаем подтверждение закрытия
-      try {
-        webapp.enableClosingConfirmation();
-      } catch (e) {
-        console.log('[Telegram] enableClosingConfirmation not supported');
-      }
-      
-      // Устанавливаем цвета
-      try {
-        webapp.setHeaderColor('#1484fb');
-        webapp.setBackgroundColor('#000000');
-      } catch (e) {
-        console.log('[Telegram] setHeaderColor/setBackgroundColor not supported');
-      }
-    } catch (e) {
-      console.warn('[Telegram] Failed to initialize WebApp:', e);
+    // Сообщаем Telegram что приложение готово
+    webapp.ready();
+    
+    // Пробуем запросить настоящий Fullscreen (Bot API 7.0+)
+    if (typeof webapp.requestFullscreen === 'function') {
+      webapp.requestFullscreen();
+    } else {
+      // Fallback для старых версий Telegram - используем expand
+      webapp.expand();
     }
+    
+    // Отключаем вертикальные свайпы (защита от случайного закрытия)
+    if (typeof webapp.disableVerticalSwipes === 'function') {
+      webapp.disableVerticalSwipes();
+    }
+    
+    // Включаем подтверждение закрытия
+    webapp.enableClosingConfirmation();
+    
+    // Устанавливаем синий цвет заголовка
+    webapp.setHeaderColor('#1484fb');
+    webapp.setBackgroundColor('#000000');
   }
 }
