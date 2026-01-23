@@ -29,7 +29,7 @@ const App = () => {
       <TooltipProvider>
         <AuthProvider>
           <AnimatedBackground />
-          <div className="app-container relative z-10">
+          <div className="app-container relative z-10" style={{ paddingTop: isTelegram ? '2.5rem' : '0' }}>
             {/* Синий заголовок только для Telegram Mini App */}
             {isTelegram && (
               <div className="fixed top-0 left-0 right-0 h-10 z-50" style={{ backgroundColor: '#1484fb' }} />
