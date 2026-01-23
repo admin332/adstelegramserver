@@ -1,7 +1,7 @@
 import { BottomNav } from "@/components/BottomNav";
 import { Button } from "@/components/ui/button";
 import { StatsCard } from "@/components/StatsCard";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuthSafe } from "@/contexts/AuthContext";
 import { 
   User, 
   Wallet, 
@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 const Profile = () => {
-  const { user, isLoading, isAuthenticated, isTelegram, telegramUser, error, logout } = useAuth();
+  const { user, isLoading, isAuthenticated, isTelegram, telegramUser, error, logout } = useAuthSafe();
 
   const menuItems = [
     { icon: Wallet, label: "Кошелёк", description: "$1,250.00", action: true },
