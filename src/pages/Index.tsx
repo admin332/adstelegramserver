@@ -4,6 +4,7 @@ import { CategoryFilters } from "@/components/CategoryFilters";
 import { SearchBar } from "@/components/SearchBar";
 import { StatsCard } from "@/components/StatsCard";
 import { FilterChip } from "@/components/FilterChip";
+import { PromoBannerCarousel } from "@/components/PromoBannerCarousel";
 import { mockChannels } from "@/data/mockChannels";
 import { useFavorites } from "@/hooks/useFavorites";
 import { TrendingUp, Users, Heart, DollarSign, ArrowUpDown } from "lucide-react";
@@ -129,6 +130,9 @@ const Index = () => {
             trend={5}
           />
         </div>
+
+        {/* Promo Banners */}
+        <PromoBannerCarousel />
 
         {/* Categories */}
         <section>
