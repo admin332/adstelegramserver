@@ -38,6 +38,43 @@ export function useAdminAuth() {
     }
   }, []);
 
+  // Create or update profile in public.users for admin user
+  const ensureUserProfile = useCallback(async (authUser: User) => {
+    try {
+      // Check if profile already exists
+      const { data: existingProfile, error: fetchError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('auth_user_id', authUser.id)
+        .maybeSingle();
+
+      if (fetchError) {
+        console.error('Error checking existing profile:', fetchError);
+        return;
+      }
+
+      if (!existingProfile) {
+        // Create new profile for admin
+        const { error: insertError } = await supabase
+          .from('users')
+          .insert({
+            auth_user_id: authUser.id,
+            first_name: authUser.email?.split('@')[0] || 'Admin',
+            username: authUser.email,
+            is_premium: false,
+          });
+
+        if (insertError) {
+          console.error('Error creating user profile:', insertError);
+        } else {
+          console.log('Created profile for admin user:', authUser.id);
+        }
+      }
+    } catch (err) {
+      console.error('Error ensuring user profile:', err);
+    }
+  }, []);
+
   useEffect(() => {
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -46,6 +83,12 @@ export function useAdminAuth() {
           // Use setTimeout to avoid potential race conditions
           setTimeout(async () => {
             const isAdmin = await checkAdminRole(session.user.id);
+            
+            // Ensure profile exists for this user
+            if (isAdmin) {
+              await ensureUserProfile(session.user);
+            }
+            
             setState({
               user: session.user,
               isAdmin,
@@ -68,6 +111,12 @@ export function useAdminAuth() {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         const isAdmin = await checkAdminRole(session.user.id);
+        
+        // Ensure profile exists for this user
+        if (isAdmin) {
+          await ensureUserProfile(session.user);
+        }
+        
         setState({
           user: session.user,
           isAdmin,
@@ -87,7 +136,7 @@ export function useAdminAuth() {
     return () => {
       subscription.unsubscribe();
     };
-  }, [checkAdminRole]);
+  }, [checkAdminRole, ensureUserProfile]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
