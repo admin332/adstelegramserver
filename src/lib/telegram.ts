@@ -97,8 +97,8 @@ export function initTelegramApp(): void {
     // Включаем подтверждение закрытия
     webapp.enableClosingConfirmation();
     
-    // Устанавливаем черный цвет для iOS-стиля
-    webapp.setHeaderColor('#000000');
+    // Устанавливаем синий цвет заголовка
+    webapp.setHeaderColor('#1484fb');
     webapp.setBackgroundColor('#000000');
   }
 }
