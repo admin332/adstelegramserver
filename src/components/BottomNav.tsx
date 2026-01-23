@@ -2,6 +2,7 @@ import { Home, Search, PlusCircle, MessageCircle } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navItems = [
   { icon: Home, label: "Главная", path: "/" },
@@ -12,7 +13,12 @@ const navItems = [
 
 export const BottomNav = () => {
   const location = useLocation();
+  const { user, telegramUser } = useAuth();
   const isProfileActive = location.pathname === "/profile";
+  
+  // Get photo and name from authenticated user or Telegram data
+  const displayPhoto = user?.photo_url || telegramUser?.photo_url;
+  const displayName = user?.first_name || telegramUser?.first_name || "U";
 
   return (
     <>
@@ -72,8 +78,10 @@ export const BottomNav = () => {
               "w-8 h-8 transition-transform duration-200",
               isProfileActive && "scale-110 ring-2 ring-primary"
             )}>
-              <AvatarImage src="/placeholder.svg" alt="Profile" />
-              <AvatarFallback className="bg-primary/20 text-primary font-medium text-xs">U</AvatarFallback>
+              <AvatarImage src={displayPhoto} alt="Profile" />
+              <AvatarFallback className="bg-primary/20 text-primary font-medium text-xs">
+                {displayName.charAt(0).toUpperCase()}
+              </AvatarFallback>
             </Avatar>
           </Link>
         </div>
