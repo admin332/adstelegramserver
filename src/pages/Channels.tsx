@@ -4,8 +4,9 @@ import { CategoryFilters } from "@/components/CategoryFilters";
 import { SearchBar } from "@/components/SearchBar";
 import { FilterChip } from "@/components/FilterChip";
 import { mockChannels } from "@/data/mockChannels";
+import { useFavorites } from "@/hooks/useFavorites";
 import { useState } from "react";
-import { ArrowUpDown, DollarSign, Users, TrendingUp } from "lucide-react";
+import { ArrowUpDown, DollarSign, Users, TrendingUp, Heart } from "lucide-react";
 
 type SortOption = "subscribers" | "price" | "engagement" | "rating";
 
@@ -14,6 +15,8 @@ const Channels = () => {
   const [activeCategory, setActiveCategory] = useState("all");
   const [sortBy, setSortBy] = useState<SortOption>("subscribers");
   const [showFilters, setShowFilters] = useState(false);
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const { favorites, toggleFavorite, isFavorite } = useFavorites();
 
   const getCategoryName = (id: string): string => {
     const map: Record<string, string> = {
@@ -40,7 +43,9 @@ const Channels = () => {
         activeCategory === "all" ||
         channel.category.toLowerCase() === getCategoryName(activeCategory).toLowerCase();
       
-      return matchesSearch && matchesCategory;
+      const matchesFavorites = !showFavoritesOnly || favorites.includes(channel.id);
+      
+      return matchesSearch && matchesCategory && matchesFavorites;
     })
     .sort((a, b) => {
       switch (sortBy) {
@@ -64,9 +69,16 @@ const Channels = () => {
         <h1 className="font-handwriting text-3xl md:text-4xl text-white mb-4 text-center">Каталог</h1>
         <SearchBar onSearch={setSearchQuery} onFilterClick={() => setShowFilters(!showFilters)} />
         
-        {/* Sort Options */}
+        {/* Filters */}
         {showFilters && (
           <div className="flex gap-2 overflow-x-auto hide-scrollbar py-3 -mx-4 px-4 animate-slide-up">
+            <FilterChip
+              active={showFavoritesOnly}
+              onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+              icon={<Heart className="w-4 h-4" />}
+            >
+              Избранное
+            </FilterChip>
             <FilterChip
               active={sortBy === "subscribers"}
               onClick={() => setSortBy("subscribers")}
@@ -110,11 +122,18 @@ const Channels = () => {
         <div className="space-y-3">
           {filteredChannels.length > 0 ? (
             filteredChannels.map((channel) => (
-              <ChannelCard key={channel.id} {...channel} />
+              <ChannelCard 
+                key={channel.id} 
+                {...channel} 
+                isLiked={isFavorite(channel.id)}
+                onLikeToggle={toggleFavorite}
+              />
             ))
           ) : (
             <div className="text-center py-12">
-              <p className="text-muted-foreground">Каналы не найдены</p>
+              <p className="text-muted-foreground">
+                {showFavoritesOnly ? "Нет избранных каналов" : "Каналы не найдены"}
+              </p>
               <p className="text-sm text-muted-foreground mt-1">Попробуйте изменить фильтры</p>
             </div>
           )}
