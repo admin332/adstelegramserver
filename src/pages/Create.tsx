@@ -29,7 +29,7 @@ const Create = () => {
   return (
     <div className="min-h-screen bg-transparent safe-bottom">
       {/* Header */}
-      <header className="px-4 pt-6 pb-4 text-center">
+      <header className="px-4 pt-4 pb-4 text-center">
         <h1 className="font-handwriting text-3xl md:text-4xl text-white">Начать</h1>
         <p className="text-muted-foreground mt-1">Выберите свою роль на платформе</p>
       </header>
