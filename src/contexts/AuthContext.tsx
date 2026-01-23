@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { User as SupabaseUser } from "@supabase/supabase-js";
 import { 
@@ -36,6 +36,20 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Default state for useAuthSafe when context is not available
+const defaultAuthState: AuthContextType = {
+  user: null,
+  supabaseUser: null,
+  isLoading: true,
+  isAuthenticated: false,
+  isTelegram: false,
+  isSupabaseAuth: false,
+  error: null,
+  telegramUser: null,
+  logout: async () => {},
+  refreshUser: async () => {},
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
@@ -44,6 +58,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isTelegram, setIsTelegram] = useState(false);
   const [isSupabaseAuth, setIsSupabaseAuth] = useState(false);
   const [telegramUser, setTelegramUser] = useState<TelegramUser | null>(null);
+  
+  // Guard against state updates after unmount
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    console.log("[AuthProvider] Mounted");
+    isMountedRef.current = true;
+    
+    return () => {
+      console.log("[AuthProvider] Unmounted");
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const safeSetState = useCallback(<T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T) => {
+    if (isMountedRef.current) {
+      setter(value);
+    }
+  }, []);
 
   const loadSupabaseUserProfile = useCallback(async (authUser: SupabaseUser) => {
     const { data: profile } = await supabase
@@ -52,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .eq("auth_user_id", authUser.id)
       .maybeSingle();
 
-    if (profile) {
+    if (profile && isMountedRef.current) {
       setUser(profile as User);
       setSupabaseUser(authUser);
       setIsSupabaseAuth(true);
@@ -61,27 +94,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const authenticate = useCallback(async () => {
     try {
-      setIsLoading(true);
-      setError(null);
+      safeSetState(setIsLoading, true);
+      safeSetState(setError, null);
 
       console.log("[Auth] Starting authentication...");
 
       // Check if running in Telegram FIRST
       const inTelegram = isTelegramMiniApp();
       console.log("[Auth] isTelegramMiniApp:", inTelegram);
-      setIsTelegram(inTelegram);
+      safeSetState(setIsTelegram, inTelegram);
 
       if (inTelegram) {
         // Initialize Telegram WebApp ONLY if we're in Telegram
         initTelegramApp();
         // Telegram Mini App auth flow
         const tgUser = getTelegramUser();
-        setTelegramUser(tgUser);
+        safeSetState(setTelegramUser, tgUser);
 
         const initData = getTelegramInitData();
         if (!initData) {
-          setError("No Telegram data available");
-          setIsLoading(false);
+          safeSetState(setError, "No Telegram data available");
+          safeSetState(setIsLoading, false);
           return;
         }
 
@@ -94,17 +127,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (fnError) {
           console.error("[Auth] Edge function error:", fnError);
-          setError("Authentication failed");
-          setIsLoading(false);
+          safeSetState(setError, "Authentication failed");
+          safeSetState(setIsLoading, false);
           return;
         }
 
         if (data?.success && data?.user) {
           console.log("[Auth] Success! User:", data.user);
-          setUser(data.user);
+          safeSetState(setUser, data.user);
         } else {
           console.log("[Auth] Failed:", data?.error);
-          setError(data?.error || "Authentication failed");
+          safeSetState(setError, data?.error || "Authentication failed");
         }
       } else {
         // Check for existing Supabase session (email/password login)
@@ -120,17 +153,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (err) {
       console.error("Auth error:", err);
-      setError("Authentication error");
+      safeSetState(setError, "Authentication error");
     } finally {
-      setIsLoading(false);
+      safeSetState(setIsLoading, false);
     }
-  }, [loadSupabaseUserProfile]);
+  }, [loadSupabaseUserProfile, safeSetState]);
 
   // Listen for Supabase auth state changes
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log("[Auth] Auth state changed:", event);
+        
+        if (!isMountedRef.current) {
+          console.log("[Auth] Skipping state update - component unmounted");
+          return;
+        }
         
         if (event === 'SIGNED_IN' && session?.user && !isTelegram) {
           await loadSupabaseUserProfile(session.user);
@@ -153,7 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq("telegram_id", user.telegram_id)
         .maybeSingle();
       
-      if (data) {
+      if (data && isMountedRef.current) {
         setUser(data as User);
       }
     } else if (user?.auth_user_id) {
@@ -163,7 +201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq("auth_user_id", user.auth_user_id)
         .maybeSingle();
       
-      if (data) {
+      if (data && isMountedRef.current) {
         setUser(data as User);
       }
     }
@@ -173,10 +211,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (isSupabaseAuth) {
       await supabase.auth.signOut();
     }
-    setUser(null);
-    setSupabaseUser(null);
-    setTelegramUser(null);
-    setIsSupabaseAuth(false);
+    if (isMountedRef.current) {
+      setUser(null);
+      setSupabaseUser(null);
+      setTelegramUser(null);
+      setIsSupabaseAuth(false);
+    }
   }, [isSupabaseAuth]);
 
   useEffect(() => {
@@ -196,13 +236,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshUser,
   };
 
+  console.log("[AuthProvider] Rendering with value:", { isLoading, isAuthenticated: !!user, hasUser: !!user });
+
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+/**
+ * Strict hook - throws if used outside AuthProvider
+ * Use this in components that MUST have auth context
+ */
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
+    console.error("[useAuth] Context undefined! Current path:", window.location.pathname);
     throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
+}
+
+/**
+ * Safe hook - returns default state if context unavailable
+ * Use this in UI components that should gracefully handle missing context
+ */
+export function useAuthSafe(): AuthContextType {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    console.warn("[useAuthSafe] Context unavailable, returning default state. Path:", window.location.pathname);
+    return defaultAuthState;
   }
   return context;
 }

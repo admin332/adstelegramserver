@@ -2,7 +2,7 @@ import { Home, Search, PlusCircle, MessageCircle } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuthSafe } from "@/contexts/AuthContext";
 import { useKeyboardVisible } from "@/hooks/useKeyboardVisible";
 
 const navItems = [
@@ -14,7 +14,7 @@ const navItems = [
 
 export const BottomNav = () => {
   const location = useLocation();
-  const { user, telegramUser } = useAuth();
+  const { user, telegramUser } = useAuthSafe();
   const isKeyboardVisible = useKeyboardVisible();
   const isProfileActive = location.pathname === "/profile";
   
