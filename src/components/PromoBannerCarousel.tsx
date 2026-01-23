@@ -43,45 +43,27 @@ export const PromoBannerCarousel = () => {
   }, [api]);
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      <Carousel
-        setApi={setApi}
-        opts={{
-          align: "center",
-          loop: true,
-        }}
-        className="w-full"
-      >
-        <CarouselContent className="-ml-0">
-          {banners.map((banner) => (
-            <CarouselItem key={banner.id} className="pl-0">
-              <div className="flex justify-center">
-                <img
-                  src={banner.src}
-                  alt={banner.alt}
-                  className="w-full h-auto rounded-lg shadow-md"
-                />
-              </div>
-            </CarouselItem>
-          ))}
-        </CarouselContent>
-      </Carousel>
-
-      {/* Индикаторы */}
-      <div className="flex gap-1.5">
-        {banners.map((_, index) => (
-          <button
-            key={index}
-            onClick={() => api?.scrollTo(index)}
-            className={`w-2 h-2 rounded-full transition-all duration-300 ${
-              current === index
-                ? "bg-primary w-4"
-                : "bg-muted-foreground/30 hover:bg-muted-foreground/50"
-            }`}
-            aria-label={`Перейти к баннеру ${index + 1}`}
-          />
+    <Carousel
+      setApi={setApi}
+      opts={{
+        align: "center",
+        loop: true,
+      }}
+      className="w-full"
+    >
+      <CarouselContent className="-ml-0">
+        {banners.map((banner) => (
+          <CarouselItem key={banner.id} className="pl-0">
+            <div className="flex justify-center">
+              <img
+                src={banner.src}
+                alt={banner.alt}
+                className="w-full h-auto rounded-lg shadow-md"
+              />
+            </div>
+          </CarouselItem>
         ))}
-      </div>
-    </div>
+      </CarouselContent>
+    </Carousel>
   );
 };
