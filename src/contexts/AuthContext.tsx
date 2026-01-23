@@ -1,6 +1,5 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { User as SupabaseUser } from "@supabase/supabase-js";
 import { 
   getTelegramInitData, 
   getTelegramUser, 
@@ -11,213 +10,120 @@ import {
 
 export interface User {
   id: string;
-  telegram_id: number | null;
+  telegram_id: number;
   first_name: string;
   last_name?: string;
   username?: string;
   photo_url?: string;
   language_code?: string;
   is_premium: boolean;
-  auth_user_id?: string;
 }
 
 interface AuthContextType {
   user: User | null;
-  supabaseUser: SupabaseUser | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   isTelegram: boolean;
-  isSupabaseAuth: boolean;
   error: string | null;
   telegramUser: TelegramUser | null;
-  logout: () => Promise<void>;
+  logout: () => void;
   refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Default state for useAuthSafe when context is not available
-const defaultAuthState: AuthContextType = {
-  user: null,
-  supabaseUser: null,
-  isLoading: true,
-  isAuthenticated: false,
-  isTelegram: false,
-  isSupabaseAuth: false,
-  error: null,
-  telegramUser: null,
-  logout: async () => {},
-  refreshUser: async () => {},
-};
-
-export function AuthProvider({ children }: { children: ReactNode }) {
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isTelegram, setIsTelegram] = useState(false);
-  const [isSupabaseAuth, setIsSupabaseAuth] = useState(false);
   const [telegramUser, setTelegramUser] = useState<TelegramUser | null>(null);
-  
-  // Guard against state updates after unmount
-  const isMountedRef = useRef(true);
-
-  useEffect(() => {
-    console.log("[AuthProvider] Mounted");
-    isMountedRef.current = true;
-    
-    return () => {
-      console.log("[AuthProvider] Unmounted");
-      isMountedRef.current = false;
-    };
-  }, []);
-
-  const safeSetState = useCallback(<T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T) => {
-    if (isMountedRef.current) {
-      setter(value);
-    }
-  }, []);
-
-  const loadSupabaseUserProfile = useCallback(async (authUser: SupabaseUser) => {
-    const { data: profile } = await supabase
-      .from("users")
-      .select("*")
-      .eq("auth_user_id", authUser.id)
-      .maybeSingle();
-
-    if (profile && isMountedRef.current) {
-      setUser(profile as User);
-      setSupabaseUser(authUser);
-      setIsSupabaseAuth(true);
-    }
-  }, []);
 
   const authenticate = useCallback(async () => {
     try {
-      safeSetState(setIsLoading, true);
-      safeSetState(setError, null);
+      setIsLoading(true);
+      setError(null);
 
       console.log("[Auth] Starting authentication...");
+      console.log("[Auth] window.Telegram:", typeof window !== "undefined" ? window.Telegram : "undefined");
+      console.log("[Auth] WebApp:", window.Telegram?.WebApp);
+      console.log("[Auth] initData:", window.Telegram?.WebApp?.initData?.substring(0, 100));
 
-      // Check if running in Telegram FIRST
+      // Initialize Telegram WebApp
+      initTelegramApp();
+
+      // Check if running in Telegram
       const inTelegram = isTelegramMiniApp();
       console.log("[Auth] isTelegramMiniApp:", inTelegram);
-      safeSetState(setIsTelegram, inTelegram);
+      setIsTelegram(inTelegram);
 
-      if (inTelegram) {
-        // Initialize Telegram WebApp ONLY if we're in Telegram
-        initTelegramApp();
-        // Telegram Mini App auth flow
-        const tgUser = getTelegramUser();
-        safeSetState(setTelegramUser, tgUser);
+      if (!inTelegram) {
+        // Not in Telegram - allow browsing but no auth
+        console.log("[Auth] Not in Telegram, skipping auth");
+        setIsLoading(false);
+        return;
+      }
 
-        const initData = getTelegramInitData();
-        if (!initData) {
-          safeSetState(setError, "No Telegram data available");
-          safeSetState(setIsLoading, false);
-          return;
-        }
+      // Get Telegram user data for immediate display
+      const tgUser = getTelegramUser();
+      setTelegramUser(tgUser);
 
-        console.log("[Auth] Calling telegram-auth edge function...");
-        const { data, error: fnError } = await supabase.functions.invoke("telegram-auth", {
-          body: { initData },
-        });
+      // Get initData for backend validation
+      const initData = getTelegramInitData();
+      if (!initData) {
+        setError("No Telegram data available");
+        setIsLoading(false);
+        return;
+      }
 
-        console.log("[Auth] Response:", data, fnError);
+      // Validate with backend
+      console.log("[Auth] Calling telegram-auth edge function...");
+      const { data, error: fnError } = await supabase.functions.invoke("telegram-auth", {
+        body: { initData },
+      });
 
-        if (fnError) {
-          console.error("[Auth] Edge function error:", fnError);
-          safeSetState(setError, "Authentication failed");
-          safeSetState(setIsLoading, false);
-          return;
-        }
+      console.log("[Auth] Response:", data, fnError);
 
-        if (data?.success && data?.user) {
-          console.log("[Auth] Success! User:", data.user);
-          safeSetState(setUser, data.user);
-        } else {
-          console.log("[Auth] Failed:", data?.error);
-          safeSetState(setError, data?.error || "Authentication failed");
-        }
+      if (fnError) {
+        console.error("[Auth] Edge function error:", fnError);
+        setError("Authentication failed");
+        setIsLoading(false);
+        return;
+      }
+
+      if (data?.success && data?.user) {
+        console.log("[Auth] Success! User:", data.user);
+        setUser(data.user);
       } else {
-        // Check for existing Supabase session (email/password login)
-        console.log("[Auth] Checking Supabase session...");
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session?.user) {
-          console.log("[Auth] Found Supabase session:", session.user.email);
-          await loadSupabaseUserProfile(session.user);
-        } else {
-          console.log("[Auth] No session found");
-        }
+        console.log("[Auth] Failed:", data?.error);
+        setError(data?.error || "Authentication failed");
       }
     } catch (err) {
       console.error("Auth error:", err);
-      safeSetState(setError, "Authentication error");
+      setError("Authentication error");
     } finally {
-      safeSetState(setIsLoading, false);
+      setIsLoading(false);
     }
-  }, [loadSupabaseUserProfile, safeSetState]);
-
-  // Listen for Supabase auth state changes
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log("[Auth] Auth state changed:", event);
-        
-        if (!isMountedRef.current) {
-          console.log("[Auth] Skipping state update - component unmounted");
-          return;
-        }
-        
-        if (event === 'SIGNED_IN' && session?.user && !isTelegram) {
-          await loadSupabaseUserProfile(session.user);
-        } else if (event === 'SIGNED_OUT') {
-          setUser(null);
-          setSupabaseUser(null);
-          setIsSupabaseAuth(false);
-        }
-      }
-    );
-
-    return () => subscription.unsubscribe();
-  }, [isTelegram, loadSupabaseUserProfile]);
+  }, []);
 
   const refreshUser = useCallback(async () => {
-    if (user?.telegram_id) {
-      const { data } = await supabase
-        .from("users")
-        .select("*")
-        .eq("telegram_id", user.telegram_id)
-        .maybeSingle();
-      
-      if (data && isMountedRef.current) {
-        setUser(data as User);
-      }
-    } else if (user?.auth_user_id) {
-      const { data } = await supabase
-        .from("users")
-        .select("*")
-        .eq("auth_user_id", user.auth_user_id)
-        .maybeSingle();
-      
-      if (data && isMountedRef.current) {
-        setUser(data as User);
-      }
+    if (!user?.telegram_id) return;
+    
+    const { data } = await supabase
+      .from("users")
+      .select("*")
+      .eq("telegram_id", user.telegram_id)
+      .single();
+    
+    if (data) {
+      setUser(data as User);
     }
-  }, [user?.telegram_id, user?.auth_user_id]);
+  }, [user?.telegram_id]);
 
-  const logout = useCallback(async () => {
-    if (isSupabaseAuth) {
-      await supabase.auth.signOut();
-    }
-    if (isMountedRef.current) {
-      setUser(null);
-      setSupabaseUser(null);
-      setTelegramUser(null);
-      setIsSupabaseAuth(false);
-    }
-  }, [isSupabaseAuth]);
+  const logout = useCallback(() => {
+    setUser(null);
+    setTelegramUser(null);
+  }, []);
 
   useEffect(() => {
     authenticate();
@@ -225,44 +131,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value: AuthContextType = {
     user,
-    supabaseUser,
     isLoading,
     isAuthenticated: !!user,
     isTelegram,
-    isSupabaseAuth,
     error,
     telegramUser,
     logout,
     refreshUser,
   };
 
-  console.log("[AuthProvider] Rendering with value:", { isLoading, isAuthenticated: !!user, hasUser: !!user });
-
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-/**
- * Strict hook - throws if used outside AuthProvider
- * Use this in components that MUST have auth context
- */
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    console.error("[useAuth] Context undefined! Current path:", window.location.pathname);
     throw new Error("useAuth must be used within an AuthProvider");
-  }
-  return context;
-}
-
-/**
- * Safe hook - returns default state if context unavailable
- * Use this in UI components that should gracefully handle missing context
- */
-export function useAuthSafe(): AuthContextType {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    console.warn("[useAuthSafe] Context unavailable, returning default state. Path:", window.location.pathname);
-    return defaultAuthState;
   }
   return context;
 }

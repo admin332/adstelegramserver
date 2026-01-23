@@ -1,7 +1,7 @@
 import { BottomNav } from "@/components/BottomNav";
 import { Button } from "@/components/ui/button";
 import { StatsCard } from "@/components/StatsCard";
-import { useAuthSafe } from "@/contexts/AuthContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { 
   User, 
   Wallet, 
@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 const Profile = () => {
-  const { user, isLoading, isAuthenticated, isTelegram, telegramUser, error, logout } = useAuthSafe();
+  const { user, isLoading, isAuthenticated, isTelegram, telegramUser, error } = useAuth();
 
   const menuItems = [
     { icon: Wallet, label: "Кошелёк", description: "$1,250.00", action: true },
@@ -42,8 +42,8 @@ const Profile = () => {
     );
   }
 
-  // Not authenticated
-  if (!isAuthenticated) {
+  // Not in Telegram warning
+  if (!isTelegram) {
     return (
       <div className="min-h-screen bg-transparent safe-bottom">
         <header className="px-4 pt-4 pb-4 text-center">
@@ -55,9 +55,9 @@ const Profile = () => {
             <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
               <User className="w-8 h-8 text-muted-foreground" />
             </div>
-            <h2 className="text-lg font-semibold text-foreground mb-2">Войдите в аккаунт</h2>
+            <h2 className="text-lg font-semibold text-foreground mb-2">Откройте в Telegram</h2>
             <p className="text-sm text-muted-foreground">
-              Откройте через Telegram Mini App или войдите через панель оператора
+              Для авторизации откройте приложение через Telegram Mini App
             </p>
           </div>
         </main>
@@ -172,7 +172,7 @@ const Profile = () => {
         </div>
 
         {/* Logout */}
-        <Button variant="destructive" className="w-full" onClick={logout}>
+        <Button variant="destructive" className="w-full">
           <LogOut className="w-5 h-5" />
           Выйти
         </Button>

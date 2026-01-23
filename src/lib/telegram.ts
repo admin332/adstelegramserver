@@ -91,43 +91,23 @@ export function initTelegramApp(): void {
     webapp.ready();
     
     // Пробуем запросить настоящий Fullscreen (Bot API 7.0+)
-    try {
-      if (typeof webapp.requestFullscreen === 'function') {
-        webapp.requestFullscreen();
-      } else {
-        webapp.expand();
-      }
-    } catch (e) {
-      console.warn("[Telegram] Fullscreen not supported, using expand:", e);
-      try {
-        webapp.expand();
-      } catch (expandError) {
-        console.warn("[Telegram] expand also failed:", expandError);
-      }
+    if (typeof webapp.requestFullscreen === 'function') {
+      webapp.requestFullscreen();
+    } else {
+      // Fallback для старых версий Telegram - используем expand
+      webapp.expand();
     }
     
     // Отключаем вертикальные свайпы (защита от случайного закрытия)
-    try {
-      if (typeof webapp.disableVerticalSwipes === 'function') {
-        webapp.disableVerticalSwipes();
-      }
-    } catch (e) {
-      console.warn("[Telegram] disableVerticalSwipes not supported:", e);
+    if (typeof webapp.disableVerticalSwipes === 'function') {
+      webapp.disableVerticalSwipes();
     }
     
     // Включаем подтверждение закрытия
-    try {
-      webapp.enableClosingConfirmation();
-    } catch (e) {
-      console.warn("[Telegram] enableClosingConfirmation not supported:", e);
-    }
+    webapp.enableClosingConfirmation();
     
     // Устанавливаем синий цвет заголовка
-    try {
-      webapp.setHeaderColor('#1484fb');
-      webapp.setBackgroundColor('#000000');
-    } catch (e) {
-      console.warn("[Telegram] setHeaderColor/setBackgroundColor not supported:", e);
-    }
+    webapp.setHeaderColor('#1484fb');
+    webapp.setBackgroundColor('#000000');
   }
 }
