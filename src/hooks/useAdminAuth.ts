@@ -17,86 +17,118 @@ export function useAdminAuth() {
     error: null,
   });
 
-  const checkAdminRole = useCallback(async (userId: string): Promise<boolean> => {
-    try {
-      const { data, error } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', userId)
-        .eq('role', 'admin')
-        .maybeSingle();
+  useEffect(() => {
+    let isMounted = true;
 
-      if (error) {
-        console.error('Error checking admin role:', error);
+    const checkAdminRole = async (userId: string): Promise<boolean> => {
+      try {
+        const { data, error } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', userId)
+          .eq('role', 'admin')
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error checking admin role:', error);
+          return false;
+        }
+
+        return !!data;
+      } catch (err) {
+        console.error('Error checking admin role:', err);
         return false;
       }
+    };
 
-      return !!data;
-    } catch (err) {
-      console.error('Error checking admin role:', err);
-      return false;
-    }
-  }, []);
-
-  // Create or update profile in public.users for admin user
-  const ensureUserProfile = useCallback(async (authUser: User) => {
-    try {
-      // Check if profile already exists
-      const { data: existingProfile, error: fetchError } = await supabase
-        .from('users')
-        .select('id')
-        .eq('auth_user_id', authUser.id)
-        .maybeSingle();
-
-      if (fetchError) {
-        console.error('Error checking existing profile:', fetchError);
-        return;
-      }
-
-      if (!existingProfile) {
-        // Create new profile for admin
-        const { error: insertError } = await supabase
+    const ensureUserProfile = async (authUser: User) => {
+      try {
+        const { data: existingProfile, error: fetchError } = await supabase
           .from('users')
-          .insert({
-            auth_user_id: authUser.id,
-            first_name: authUser.email?.split('@')[0] || 'Admin',
-            username: authUser.email,
-            is_premium: false,
-          });
+          .select('id')
+          .eq('auth_user_id', authUser.id)
+          .maybeSingle();
 
-        if (insertError) {
-          console.error('Error creating user profile:', insertError);
-        } else {
-          console.log('Created profile for admin user:', authUser.id);
+        if (fetchError) {
+          console.error('Error checking existing profile:', fetchError);
+          return;
         }
-      }
-    } catch (err) {
-      console.error('Error ensuring user profile:', err);
-    }
-  }, []);
 
-  useEffect(() => {
-    // Set up auth state listener FIRST
+        if (!existingProfile) {
+          const { error: insertError } = await supabase
+            .from('users')
+            .insert({
+              auth_user_id: authUser.id,
+              first_name: authUser.email?.split('@')[0] || 'Admin',
+              username: authUser.email,
+              is_premium: false,
+            });
+
+          if (insertError) {
+            console.error('Error creating user profile:', insertError);
+          } else {
+            console.log('Created profile for admin user:', authUser.id);
+          }
+        }
+      } catch (err) {
+        console.error('Error ensuring user profile:', err);
+      }
+    };
+
+    // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        if (!isMounted) return;
+
         if (session?.user) {
-          // Use setTimeout to avoid potential race conditions
-          setTimeout(async () => {
-            const isAdmin = await checkAdminRole(session.user.id);
-            
-            // Ensure profile exists for this user
-            if (isAdmin) {
-              await ensureUserProfile(session.user);
-            }
-            
+          const isAdmin = await checkAdminRole(session.user.id);
+          
+          if (isAdmin) {
+            await ensureUserProfile(session.user);
+          }
+          
+          if (isMounted) {
             setState({
               user: session.user,
               isAdmin,
               isLoading: false,
               error: null,
             });
-          }, 0);
+          }
         } else {
+          if (isMounted) {
+            setState({
+              user: null,
+              isAdmin: false,
+              isLoading: false,
+              error: null,
+            });
+          }
+        }
+      }
+    );
+
+    // Check initial session
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!isMounted) return;
+
+      if (session?.user) {
+        const isAdmin = await checkAdminRole(session.user.id);
+        
+        if (isAdmin) {
+          await ensureUserProfile(session.user);
+        }
+        
+        if (isMounted) {
+          setState({
+            user: session.user,
+            isAdmin,
+            isLoading: false,
+            error: null,
+          });
+        }
+      } else {
+        if (isMounted) {
           setState({
             user: null,
             isAdmin: false,
@@ -105,38 +137,13 @@ export function useAdminAuth() {
           });
         }
       }
-    );
-
-    // THEN check initial session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        const isAdmin = await checkAdminRole(session.user.id);
-        
-        // Ensure profile exists for this user
-        if (isAdmin) {
-          await ensureUserProfile(session.user);
-        }
-        
-        setState({
-          user: session.user,
-          isAdmin,
-          isLoading: false,
-          error: null,
-        });
-      } else {
-        setState({
-          user: null,
-          isAdmin: false,
-          isLoading: false,
-          error: null,
-        });
-      }
     });
 
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
     };
-  }, [checkAdminRole, ensureUserProfile]);
+  }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
