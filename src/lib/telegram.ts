@@ -26,6 +26,7 @@ export interface TelegramWebApp {
   viewportStableHeight: number;
   headerColor: string;
   backgroundColor: string;
+  isVerticalSwipesEnabled: boolean;
   themeParams: {
     bg_color?: string;
     text_color?: string;
@@ -39,6 +40,8 @@ export interface TelegramWebApp {
   setBackgroundColor: (color: string) => void;
   enableClosingConfirmation: () => void;
   disableClosingConfirmation: () => void;
+  disableVerticalSwipes: () => void;
+  enableVerticalSwipes: () => void;
 }
 
 declare global {
@@ -80,7 +83,22 @@ export function getTelegramUser(): TelegramUser | null {
 export function initTelegramApp(): void {
   const webapp = getTelegramWebApp();
   if (webapp) {
+    // Сообщаем Telegram что приложение готово
     webapp.ready();
+    
+    // Разворачиваем на весь экран
     webapp.expand();
+    
+    // Отключаем вертикальные свайпы (защита от случайного закрытия)
+    if (typeof webapp.disableVerticalSwipes === 'function') {
+      webapp.disableVerticalSwipes();
+    }
+    
+    // Включаем подтверждение закрытия
+    webapp.enableClosingConfirmation();
+    
+    // Устанавливаем черный цвет для iOS-стиля
+    webapp.setHeaderColor('#000000');
+    webapp.setBackgroundColor('#000000');
   }
 }

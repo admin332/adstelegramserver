@@ -18,19 +18,23 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <AuthProvider>
-        <AnimatedBackground />
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/channels" element={<Channels />} />
-            <Route path="/create" element={<Create />} />
-            <Route path="/deals" element={<Deals />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
+        <div className="app-container">
+          <AnimatedBackground />
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <div className="scrollable-content">
+              <Routes>
+                <Route path="/" element={<Index />} />
+                <Route path="/channels" element={<Channels />} />
+                <Route path="/create" element={<Create />} />
+                <Route path="/deals" element={<Deals />} />
+                <Route path="/profile" element={<Profile />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </div>
+          </BrowserRouter>
+        </div>
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
