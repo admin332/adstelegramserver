@@ -98,15 +98,6 @@ const Profile = () => {
 
       {/* Main Content */}
       <main className="px-4 space-y-6">
-        {/* Индикатор тестового режима */}
-        {isTestMode && (
-          <div className="bg-warning/10 border border-warning/30 rounded-xl p-3 flex items-center gap-3">
-            <FlaskConical className="w-5 h-5 text-warning shrink-0" />
-            <p className="text-sm text-warning">
-              Тестовый режим — демо-профиль для просмотра дизайна
-            </p>
-          </div>
-        )}
 
         {/* Error message */}
         {error && !isTestMode && (
