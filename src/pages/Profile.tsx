@@ -42,8 +42,8 @@ const Profile = () => {
     );
   }
 
-  // Not in Telegram warning
-  if (!isTelegram) {
+  // Not authenticated at all
+  if (!isAuthenticated && !isTelegram) {
     return (
       <div className="min-h-screen bg-transparent safe-bottom">
         <header className="px-4 pt-4 pb-4 text-center">
@@ -55,9 +55,9 @@ const Profile = () => {
             <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
               <User className="w-8 h-8 text-muted-foreground" />
             </div>
-            <h2 className="text-lg font-semibold text-foreground mb-2">Откройте в Telegram</h2>
+            <h2 className="text-lg font-semibold text-foreground mb-2">Войдите в аккаунт</h2>
             <p className="text-sm text-muted-foreground">
-              Для авторизации откройте приложение через Telegram Mini App
+              Откройте приложение через Telegram или войдите как администратор
             </p>
           </div>
         </main>
