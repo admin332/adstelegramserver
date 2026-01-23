@@ -2,6 +2,7 @@ import { BottomNav } from "@/components/BottomNav";
 import { Button } from "@/components/ui/button";
 import { StatsCard } from "@/components/StatsCard";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAppSettings } from "@/hooks/useAppSettings";
 import { 
   User, 
   Wallet, 
@@ -14,11 +15,22 @@ import {
   CreditCard,
   Star,
   Crown,
-  Loader2
+  Loader2,
+  FlaskConical
 } from "lucide-react";
 
 const Profile = () => {
   const { user, isLoading, isAuthenticated, isTelegram, telegramUser, error } = useAuth();
+  const { testModeEnabled, isLoading: settingsLoading } = useAppSettings();
+
+  // Демо-данные для тестового режима
+  const demoUser = {
+    first_name: "Тестовый",
+    last_name: "Пользователь",
+    username: "test_user",
+    photo_url: null as string | null,
+    is_premium: true,
+  };
 
   const menuItems = [
     { icon: Wallet, label: "Кошелёк", description: "$1,250.00", action: true },
@@ -30,7 +42,7 @@ const Profile = () => {
   ];
 
   // Loading state
-  if (isLoading) {
+  if (isLoading || settingsLoading) {
     return (
       <div className="min-h-screen bg-transparent safe-bottom flex items-center justify-center">
         <div className="text-center">
@@ -42,8 +54,11 @@ const Profile = () => {
     );
   }
 
-  // Not in Telegram warning
-  if (!isTelegram) {
+  // Определяем, используем ли тестовый режим
+  const isTestMode = !isTelegram && testModeEnabled;
+
+  // Not in Telegram warning (только если тестовый режим выключен)
+  if (!isTelegram && !testModeEnabled) {
     return (
       <div className="min-h-screen bg-transparent safe-bottom">
         <header className="px-4 pt-4 pb-4 text-center">
@@ -67,12 +82,12 @@ const Profile = () => {
     );
   }
 
-  // Get display data from authenticated user or Telegram user
-  const displayName = user?.first_name || telegramUser?.first_name || "Пользователь";
-  const displayLastName = user?.last_name || telegramUser?.last_name;
-  const displayUsername = user?.username || telegramUser?.username;
-  const displayPhoto = user?.photo_url || telegramUser?.photo_url;
-  const isPremium = user?.is_premium || telegramUser?.is_premium;
+  // Get display data - используем демо-данные в тестовом режиме
+  const displayName = isTestMode ? demoUser.first_name : (user?.first_name || telegramUser?.first_name || "Пользователь");
+  const displayLastName = isTestMode ? demoUser.last_name : (user?.last_name || telegramUser?.last_name);
+  const displayUsername = isTestMode ? demoUser.username : (user?.username || telegramUser?.username);
+  const displayPhoto = isTestMode ? demoUser.photo_url : (user?.photo_url || telegramUser?.photo_url);
+  const isPremium = isTestMode ? demoUser.is_premium : (user?.is_premium || telegramUser?.is_premium);
 
   return (
     <div className="min-h-screen bg-transparent safe-bottom">
@@ -83,8 +98,18 @@ const Profile = () => {
 
       {/* Main Content */}
       <main className="px-4 space-y-6">
+        {/* Индикатор тестового режима */}
+        {isTestMode && (
+          <div className="bg-warning/10 border border-warning/30 rounded-xl p-3 flex items-center gap-3">
+            <FlaskConical className="w-5 h-5 text-warning shrink-0" />
+            <p className="text-sm text-warning">
+              Тестовый режим — демо-профиль для просмотра дизайна
+            </p>
+          </div>
+        )}
+
         {/* Error message */}
-        {error && (
+        {error && !isTestMode && (
           <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-4 text-center">
             <p className="text-sm text-destructive">{error}</p>
           </div>
