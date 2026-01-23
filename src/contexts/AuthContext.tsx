@@ -66,15 +66,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       console.log("[Auth] Starting authentication...");
 
-      // Initialize Telegram WebApp
-      initTelegramApp();
-
-      // Check if running in Telegram
+      // Check if running in Telegram FIRST
       const inTelegram = isTelegramMiniApp();
       console.log("[Auth] isTelegramMiniApp:", inTelegram);
       setIsTelegram(inTelegram);
 
       if (inTelegram) {
+        // Initialize Telegram WebApp ONLY if we're in Telegram
+        initTelegramApp();
         // Telegram Mini App auth flow
         const tgUser = getTelegramUser();
         setTelegramUser(tgUser);
