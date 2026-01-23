@@ -55,6 +55,16 @@ const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
   const mouse = useRef({ x: 0, y: 0 });
   const cursor = useRef({ x: 0, y: 0 });
   const animationFrameRef = useRef<number | null>(null);
+  
+  // Fixed initial parameters - don't change on resize
+  const initialParams = useRef({
+    w: 0,
+    h: 0,
+    x: 0,
+    y: 0,
+    z: 0,
+    initialized: false,
+  });
 
   const sd = useRef({
     w: 0,
@@ -81,9 +91,21 @@ const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
     if (el) {
       sd.current.w = el.clientWidth;
       sd.current.h = el.clientHeight;
-      sd.current.x = Math.round(sd.current.w / 2);
-      sd.current.y = Math.round(sd.current.h / 2);
-      sd.current.z = (sd.current.w + sd.current.h) / 2;
+      
+      // Fix animation parameters only on first initialization
+      if (!initialParams.current.initialized) {
+        initialParams.current.w = sd.current.w;
+        initialParams.current.h = sd.current.h;
+        initialParams.current.x = Math.round(sd.current.w / 2);
+        initialParams.current.y = Math.round(sd.current.h / 2);
+        initialParams.current.z = (sd.current.w + sd.current.h) / 2;
+        initialParams.current.initialized = true;
+      }
+      
+      // Use fixed parameters for animation calculations
+      sd.current.x = initialParams.current.x;
+      sd.current.y = initialParams.current.y;
+      sd.current.z = initialParams.current.z;
       sd.current.star.colorRatio = 1 / sd.current.z;
 
       if (cursor.current.x === 0 || cursor.current.y === 0) {
@@ -125,39 +147,23 @@ const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
   const resize = () => {
     if (!sd.current.ctx?.canvas) return;
 
-    const oldStar = { ...sd.current.star };
-    measureViewport();
-    sd.current.cw = sd.current.ctx?.canvas.width;
-    sd.current.ch = sd.current.ctx?.canvas.height;
+    const el = canvasRef.current?.parentElement;
+    if (!el) return;
 
-    if (sd.current.cw !== sd.current.w || sd.current.ch !== sd.current.h) {
-      sd.current.x = Math.round(sd.current.w / 2);
-      sd.current.y = Math.round(sd.current.h / 2);
-      sd.current.z = (sd.current.w + sd.current.h) / 2;
-      sd.current.star.colorRatio = 1 / sd.current.z;
+    const newW = el.clientWidth;
+    const newH = el.clientHeight;
 
-      const rw = sd.current.w / sd.current.cw;
-      const rh = sd.current.h / sd.current.ch;
-
-      sd.current.ctx.canvas.width = sd.current.w;
-      sd.current.ctx.canvas.height = sd.current.h;
-
-      if (!sd.current.star.arr.length) {
-        bigBang();
-      } else {
-        sd.current.star.arr = sd.current.star.arr.map((star, i) => {
-          const newStar = [...star];
-          newStar[0] = oldStar.arr[i][0] * rw;
-          newStar[1] = oldStar.arr[i][1] * rh;
-          newStar[3] = sd.current.x + (newStar[0] / newStar[2]) * ratio;
-          newStar[4] = sd.current.y + (newStar[1] / newStar[2]) * ratio;
-          return newStar;
-        });
-      }
-
+    // Only update canvas size for rendering, don't recalculate star parameters
+    if (sd.current.ctx.canvas.width !== newW || sd.current.ctx.canvas.height !== newH) {
+      sd.current.ctx.canvas.width = newW;
+      sd.current.ctx.canvas.height = newH;
+      sd.current.w = newW;
+      sd.current.h = newH;
       sd.current.ctx.fillStyle = colors.fill;
       sd.current.ctx.strokeStyle = starColor;
     }
+    
+    // Keep x, y, z and star positions fixed - they use initialParams
   };
 
   const update = () => {
@@ -215,12 +221,21 @@ const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
     ctx.fillRect(0, 0, sd.current.w, sd.current.h);
     ctx.strokeStyle = starColor;
 
+    // Calculate offset to center animation when canvas size differs from initial
+    const offsetX = (sd.current.w - initialParams.current.w) / 2;
+    const offsetY = (sd.current.h - initialParams.current.h) / 2;
+
     sd.current.star.arr.forEach(star => {
-      if (star[5] > 0 && star[5] < sd.current.w && star[6] > 0 && star[6] < sd.current.h && star[7]) {
+      const drawX5 = star[5] + offsetX;
+      const drawX3 = star[3] + offsetX;
+      const drawY6 = star[6] + offsetY;
+      const drawY4 = star[4] + offsetY;
+      
+      if (drawX5 > 0 && drawX5 < sd.current.w && drawY6 > 0 && drawY6 < sd.current.h && star[7]) {
         ctx.lineWidth = (1 - sd.current.star.colorRatio * star[2]) * 2;
         ctx.beginPath();
-        ctx.moveTo(star[5], star[6]);
-        ctx.lineTo(star[3], star[4]);
+        ctx.moveTo(drawX5, drawY6);
+        ctx.lineTo(drawX3, drawY4);
         ctx.stroke();
         ctx.closePath();
       }

@@ -37,6 +37,7 @@ export type Database = {
       }
       users: {
         Row: {
+          auth_user_id: string | null
           created_at: string | null
           first_name: string
           id: string
@@ -44,11 +45,12 @@ export type Database = {
           language_code: string | null
           last_name: string | null
           photo_url: string | null
-          telegram_id: number
+          telegram_id: number | null
           updated_at: string | null
           username: string | null
         }
         Insert: {
+          auth_user_id?: string | null
           created_at?: string | null
           first_name: string
           id?: string
@@ -56,11 +58,12 @@ export type Database = {
           language_code?: string | null
           last_name?: string | null
           photo_url?: string | null
-          telegram_id: number
+          telegram_id?: number | null
           updated_at?: string | null
           username?: string | null
         }
         Update: {
+          auth_user_id?: string | null
           created_at?: string | null
           first_name?: string
           id?: string
@@ -68,7 +71,7 @@ export type Database = {
           language_code?: string | null
           last_name?: string | null
           photo_url?: string | null
-          telegram_id?: number
+          telegram_id?: number | null
           updated_at?: string | null
           username?: string | null
         }
