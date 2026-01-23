@@ -50,7 +50,7 @@ export const PromoBannerCarousel = () => {
           align: "center",
           loop: true,
         }}
-        className="w-full max-w-[300px]"
+        className="w-full"
       >
         <CarouselContent className="-ml-0">
           {banners.map((banner) => (
@@ -59,7 +59,7 @@ export const PromoBannerCarousel = () => {
                 <img
                   src={banner.src}
                   alt={banner.alt}
-                  className="w-[300px] h-[60px] rounded-lg shadow-md object-cover"
+                  className="w-full h-[60px] rounded-lg shadow-md object-cover"
                 />
               </div>
             </CarouselItem>
