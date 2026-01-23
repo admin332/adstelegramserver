@@ -129,16 +129,21 @@ serve(async (req) => {
     }
 
     if (!initData) {
+      console.log("[telegram-auth] No initData provided");
       return new Response(
         JSON.stringify({ error: "No initData provided" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
+    console.log("[telegram-auth] Received initData, length:", initData.length);
+
     // Validate Telegram data
     const validation = await validateTelegramData(initData, botToken);
+    console.log("[telegram-auth] Validation result:", validation.valid, "User:", validation.data?.user?.id);
     
     if (!validation.valid || !validation.data?.user) {
+      console.log("[telegram-auth] Validation failed");
       return new Response(
         JSON.stringify({ error: "Invalid Telegram data" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -146,6 +151,7 @@ serve(async (req) => {
     }
 
     const telegramUser = validation.data.user;
+    console.log("[telegram-auth] User data:", telegramUser.id, telegramUser.first_name);
 
     // Create Supabase client with service role
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
