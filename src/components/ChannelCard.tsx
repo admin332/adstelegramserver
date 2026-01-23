@@ -118,7 +118,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       {/* Center Left: Subscribers Count */}
       <div className="absolute left-4 top-1/2 -translate-y-1/2">
         <motion.div
-          className="text-white font-handwriting text-4xl flex items-center gap-2 pb-1 border-b-2 border-black"
+          className="text-white font-bold text-3xl flex items-center gap-2 pb-1 border-b-2 border-black"
           variants={itemVariants}
           initial="hidden"
           animate="visible"
