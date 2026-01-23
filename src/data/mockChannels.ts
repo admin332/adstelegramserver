@@ -7,6 +7,7 @@ export interface Channel {
   avgViews: number;
   category: string;
   price: number;
+  tonPrice: number;
   rating: number;
   verified: boolean;
   premium?: boolean;
@@ -25,6 +26,7 @@ export const mockChannels: Channel[] = [
     avgViews: 45000,
     category: "Крипто",
     price: 350,
+    tonPrice: 50,
     rating: 4.8,
     verified: true,
     premium: true,
@@ -38,6 +40,7 @@ export const mockChannels: Channel[] = [
     avgViews: 32000,
     category: "Игры",
     price: 200,
+    tonPrice: 30,
     rating: 4.6,
     verified: true,
   },
@@ -50,6 +53,7 @@ export const mockChannels: Channel[] = [
     avgViews: 78000,
     category: "Новости",
     price: 500,
+    tonPrice: 80,
     rating: 4.9,
     verified: true,
     premium: true,
@@ -63,6 +67,7 @@ export const mockChannels: Channel[] = [
     avgViews: 25000,
     category: "Лайфстайл",
     price: 150,
+    tonPrice: 25,
     rating: 4.5,
     verified: false,
   },
@@ -75,6 +80,7 @@ export const mockChannels: Channel[] = [
     avgViews: 52000,
     category: "Бизнес",
     price: 400,
+    tonPrice: 60,
     rating: 4.7,
     verified: true,
   },
@@ -87,6 +93,7 @@ export const mockChannels: Channel[] = [
     avgViews: 41000,
     category: "Еда",
     price: 180,
+    tonPrice: 35,
     rating: 4.4,
     verified: true,
   },
@@ -99,6 +106,7 @@ export const mockChannels: Channel[] = [
     avgViews: 65000,
     category: "Путешествия",
     price: 320,
+    tonPrice: 55,
     rating: 4.8,
     verified: true,
     premium: true,
@@ -112,6 +120,7 @@ export const mockChannels: Channel[] = [
     avgViews: 48000,
     category: "Музыка",
     price: 250,
+    tonPrice: 40,
     rating: 4.6,
     verified: false,
   },
