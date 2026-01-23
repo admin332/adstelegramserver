@@ -134,7 +134,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       {/* Center Right: TON Price */}
       <div className="absolute right-4 top-1/2 -translate-y-1/2">
         <motion.div
-          className="font-bold text-3xl flex items-center gap-2 pb-1 border-b-2 border-black"
+          className="font-bold text-3xl flex items-center gap-2"
           variants={itemVariants}
           initial="hidden"
           animate="visible"
