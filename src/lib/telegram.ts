@@ -27,6 +27,10 @@ export interface TelegramWebApp {
   headerColor: string;
   backgroundColor: string;
   isVerticalSwipesEnabled: boolean;
+  // Fullscreen API (Bot API 7.0+)
+  isFullscreen?: boolean;
+  requestFullscreen?: () => void;
+  exitFullscreen?: () => void;
   themeParams: {
     bg_color?: string;
     text_color?: string;
@@ -86,8 +90,13 @@ export function initTelegramApp(): void {
     // Сообщаем Telegram что приложение готово
     webapp.ready();
     
-    // Разворачиваем на весь экран
-    webapp.expand();
+    // Пробуем запросить настоящий Fullscreen (Bot API 7.0+)
+    if (typeof webapp.requestFullscreen === 'function') {
+      webapp.requestFullscreen();
+    } else {
+      // Fallback для старых версий Telegram - используем expand
+      webapp.expand();
+    }
     
     // Отключаем вертикальные свайпы (защита от случайного закрытия)
     if (typeof webapp.disableVerticalSwipes === 'function') {
