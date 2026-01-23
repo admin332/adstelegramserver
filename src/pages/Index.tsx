@@ -136,7 +136,7 @@ const Index = () => {
 
         {/* Categories */}
         <section>
-          <h2 className="text-lg font-semibold text-foreground mb-3">Категории</h2>
+          <h2 className="text-lg font-semibold text-foreground mb-1.5">Категории</h2>
           <CategoryFilters onCategoryChange={setActiveCategory} />
         </section>
 
