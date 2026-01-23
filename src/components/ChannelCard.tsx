@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, Users, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import TonIcon from '@/assets/ton-icon.svg';
 
 interface ChannelCardProps {
   id: string;
@@ -13,6 +14,7 @@ interface ChannelCardProps {
   avgViews: number;
   category: string;
   price: number;
+  tonPrice: number;
   rating: number;
   verified: boolean;
   premium?: boolean;
@@ -37,6 +39,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   avgViews,
   category,
   price,
+  tonPrice,
   verified,
   premium,
 }) => {
@@ -125,6 +128,25 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
         >
           <Users className="w-6 h-6" />
           {formatNumber(subscribers)}
+        </motion.div>
+      </div>
+
+      {/* Center Right: TON Price */}
+      <div className="absolute right-4 top-1/2 -translate-y-1/2">
+        <motion.div
+          className="font-bold text-3xl flex items-center gap-2"
+          variants={itemVariants}
+          initial="hidden"
+          animate="visible"
+        >
+          <img 
+            src={TonIcon} 
+            alt="TON" 
+            className="w-6 h-6" 
+          />
+          <span className="text-[hsl(217,91%,60%)]">
+            {tonPrice}
+          </span>
         </motion.div>
       </div>
 
