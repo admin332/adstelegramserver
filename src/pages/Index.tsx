@@ -6,27 +6,45 @@ import { StatsCard } from "@/components/StatsCard";
 import { FilterChip } from "@/components/FilterChip";
 import { mockChannels } from "@/data/mockChannels";
 import { useFavorites } from "@/hooks/useFavorites";
-import { TrendingUp, Users, Heart } from "lucide-react";
+import { TrendingUp, Users, Heart, DollarSign, ArrowUpDown } from "lucide-react";
 import { useState } from "react";
+
+type SortOption = "subscribers" | "price" | "engagement" | "rating";
 
 const Index = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [sortBy, setSortBy] = useState<SortOption>("subscribers");
   const { favorites, toggleFavorite, isFavorite } = useFavorites();
 
-  const filteredChannels = mockChannels.filter((channel) => {
-    const matchesSearch = channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      channel.username.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesCategory = activeCategory === "all" || 
-      channel.category.toLowerCase() === getCategoryName(activeCategory).toLowerCase();
-    
-    const matchesFavorites = !showFavoritesOnly || favorites.includes(channel.id);
-    
-    return matchesSearch && matchesCategory && matchesFavorites;
-  });
+  const filteredChannels = mockChannels
+    .filter((channel) => {
+      const matchesSearch = channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        channel.username.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      const matchesCategory = activeCategory === "all" || 
+        channel.category.toLowerCase() === getCategoryName(activeCategory).toLowerCase();
+      
+      const matchesFavorites = !showFavoritesOnly || favorites.includes(channel.id);
+      
+      return matchesSearch && matchesCategory && matchesFavorites;
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case "subscribers":
+          return b.subscribers - a.subscribers;
+        case "price":
+          return a.price - b.price;
+        case "engagement":
+          return (b.avgViews / b.subscribers) - (a.avgViews / a.subscribers);
+        case "rating":
+          return b.rating - a.rating;
+        default:
+          return 0;
+      }
+    });
 
   function getCategoryName(id: string): string {
     const map: Record<string, string> = {
@@ -61,6 +79,34 @@ const Index = () => {
               icon={<Heart className="w-4 h-4" />}
             >
               Избранное
+            </FilterChip>
+            <FilterChip
+              active={sortBy === "subscribers"}
+              onClick={() => setSortBy("subscribers")}
+              icon={<Users className="w-4 h-4" />}
+            >
+              Подписчики
+            </FilterChip>
+            <FilterChip
+              active={sortBy === "price"}
+              onClick={() => setSortBy("price")}
+              icon={<DollarSign className="w-4 h-4" />}
+            >
+              Цена
+            </FilterChip>
+            <FilterChip
+              active={sortBy === "engagement"}
+              onClick={() => setSortBy("engagement")}
+              icon={<TrendingUp className="w-4 h-4" />}
+            >
+              Вовлечённость
+            </FilterChip>
+            <FilterChip
+              active={sortBy === "rating"}
+              onClick={() => setSortBy("rating")}
+              icon={<ArrowUpDown className="w-4 h-4" />}
+            >
+              Рейтинг
             </FilterChip>
           </div>
         )}
