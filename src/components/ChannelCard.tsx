@@ -132,7 +132,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       </div>
 
       {/* Center Right: TON Price */}
-      <div className="absolute right-4 top-1/2 -translate-y-1/2">
+      <div className="absolute right-4 top-1/2 -translate-y-1/2 text-right">
         <motion.div
           className="font-bold text-3xl flex items-center gap-2"
           variants={itemVariants}
@@ -148,6 +148,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
             {tonPrice}
           </span>
         </motion.div>
+        <span className="text-white/60 text-xs">за 24 часа</span>
       </div>
 
       {/* Bottom Content */}
