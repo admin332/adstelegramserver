@@ -93,7 +93,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           alt={name}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-l from-transparent via-black/30 to-black/70" />
       </div>
 
 
@@ -144,7 +144,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
             alt="TON" 
             className="w-6 h-6" 
           />
-          <span className="text-[hsl(217,91%,60%)]">
+          <span className="text-white">
             {tonPrice}
           </span>
         </motion.div>
