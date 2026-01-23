@@ -20,7 +20,7 @@ const App = () => (
       <AuthProvider>
         <div className="app-container">
           {/* Синий заголовок для отступа */}
-          <div className="fixed top-0 left-0 right-0 h-8 z-50" style={{ backgroundColor: '#1484fb' }} />
+          <div className="fixed top-0 left-0 right-0 h-10 z-50" style={{ backgroundColor: '#1484fb' }} />
           <AnimatedBackground />
           <Toaster />
           <Sonner />
