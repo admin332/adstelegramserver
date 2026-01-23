@@ -88,7 +88,7 @@
     -moz-osx-font-smoothing: grayscale;
     margin: 0;
     padding: 0;
-    background-color: hsl(var(--background));
+    background-color: transparent;
     height: 100%;
   }
 
@@ -96,7 +96,7 @@
     @apply text-foreground;
     margin: 0;
     padding: 0;
-    background-color: hsl(var(--background));
+    background-color: transparent;
     overflow: hidden;
     height: 100%;
   }

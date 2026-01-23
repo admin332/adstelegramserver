@@ -18,10 +18,10 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <AuthProvider>
-        <div className="app-container">
+        <AnimatedBackground />
+        <div className="app-container relative z-10">
           {/* Синий заголовок для отступа */}
           <div className="fixed top-0 left-0 right-0 h-10 z-50" style={{ backgroundColor: '#1484fb' }} />
-          <AnimatedBackground />
           <Toaster />
           <Sonner />
           <BrowserRouter>
