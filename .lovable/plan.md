@@ -1,174 +1,141 @@
 
 
-## План: Исправление логики добавления модераторов к существующим каналам
+## План: Скрытие полей для существующих каналов и изменение текста кнопки
 
-### Проблема
-
-При попытке модератора добавить канал `@newstutox` система выдаёт ошибку "Этот канал уже зарегистрирован", вместо того чтобы добавить его как менеджера.
-
-**Причины:**
-1. Таблица `channel_admins` пуста — каналы были созданы ДО миграции
-2. Функция `verify-channel` не обрабатывает случай "канал существует, но пользователь — админ в Telegram"
+### Задача
+При добавлении канала, который уже существует в системе, скрыть выбор категории и стоимости, а текст кнопки изменить на "Я менеджер".
 
 ---
 
-### Текущий флоу (неправильный)
+### Изменения в AddChannelWizard.tsx
 
-```text
-Модератор добавляет канал
-         ↓
-verify-channel проверяет: канал существует?
-         ↓
-Да → Ошибка: "Канал уже зарегистрирован" ❌
-```
-
-### Правильный флоу
-
-```text
-Модератор добавляет канал
-         ↓
-verify-channel проверяет: канал существует?
-         ↓
-Да → Проверить: пользователь админ в Telegram?
-         ↓
-Да → Добавить в channel_admins как manager ✅
-         ↓
-Вернуть успех: "Вы добавлены как менеджер"
-```
-
----
-
-### Изменения
-
-| Файл | Действие | Описание |
-|------|----------|----------|
-| `supabase/functions/verify-channel/index.ts` | Изменить | При существующем канале — добавлять как менеджера |
-| **SQL миграция** | Создать | Заполнить `channel_admins` для существующих каналов |
-| `src/components/create/AddChannelWizard.tsx` | Изменить | Показать корректное сообщение при добавлении как менеджера |
-
----
-
-### 1. Изменение verify-channel
-
-Вместо текущего:
+**1. Добавить состояние для отслеживания существующего канала:**
 ```typescript
-if (existingChannel) {
-  return Response({ error: "Этот канал уже зарегистрирован" });
-}
+const [isExistingChannel, setIsExistingChannel] = useState(false);
 ```
 
-Новая логика:
+**2. Обновить debounce-эффект (preview-channel):**
+
+При получении превью канала проверять, есть ли он уже в базе:
 ```typescript
-if (existingChannel) {
-  // Канал существует — проверяем, можно ли добавить пользователя как менеджера
-  
-  // 1. Проверить, уже есть ли пользователь в channel_admins
-  const { data: existingAdmin } = await supabase
-    .from("channel_admins")
-    .select("id, role")
-    .eq("channel_id", existingChannel.id)
-    .eq("user_id", userData.id)
-    .maybeSingle();
-
-  if (existingAdmin) {
-    return Response({
-      success: true,
-      message: "Вы уже являетесь администратором этого канала",
-      role: existingAdmin.role,
-      isExistingAdmin: true,
-      channel: existingChannel
-    });
-  }
-
-  // 2. Проверить права в Telegram (уже сделано выше — userIsAdmin)
-  if (!userIsAdmin) {
-    return Response({ error: "Вы не являетесь администратором этого канала" });
-  }
-
-  // 3. Добавить как менеджера (не owner, потому что owner уже есть)
-  const isCreator = userMember?.status === "creator";
-  const role = isCreator ? "owner" : "manager";
-  
-  const { error: adminInsertError } = await supabase
-    .from("channel_admins")
-    .insert({
-      channel_id: existingChannel.id,
-      user_id: userData.id,
-      role,
-      telegram_member_status: userMember?.status,
-      permissions: role === "owner"
-        ? { can_edit_posts: true, can_view_stats: true, can_view_finance: true, can_withdraw: true, can_manage_admins: true }
-        : { can_edit_posts: true, can_view_stats: true, can_view_finance: false, can_withdraw: false, can_manage_admins: false },
-      last_verified_at: new Date().toISOString(),
-    });
-
-  return Response({
-    success: true,
-    message: `Вы добавлены как ${role === 'owner' ? 'владелец' : 'менеджер'} канала`,
-    role,
-    isNewAdmin: true,
-    channel: existingChannel
+// В ответе от preview-channel добавить флаг exists
+if (data.success) {
+  setChannelPreview({
+    avatar_url: data.avatar_url,
+    title: data.title,
   });
+  setIsExistingChannel(data.exists || false); // Новый флаг
 }
 ```
 
----
-
-### 2. SQL миграция для существующих каналов
-
-Создать записи в `channel_admins` для каналов, у которых есть `owner_id`:
-
-```sql
--- Добавить владельцев существующих каналов в channel_admins
-INSERT INTO public.channel_admins (channel_id, user_id, role, permissions, telegram_member_status)
-SELECT 
-  c.id as channel_id,
-  c.owner_id as user_id,
-  'owner'::channel_role as role,
-  '{"can_edit_posts": true, "can_view_stats": true, "can_view_finance": true, "can_withdraw": true, "can_manage_admins": true, "can_approve_ads": true}'::jsonb as permissions,
-  'creator' as telegram_member_status
-FROM public.channels c
-WHERE c.owner_id IS NOT NULL
-AND NOT EXISTS (
-  SELECT 1 FROM public.channel_admins ca 
-  WHERE ca.channel_id = c.id AND ca.user_id = c.owner_id
-);
-```
-
----
-
-### 3. Обновление AddChannelWizard
-
-Обработать новый ответ от API:
+**3. Условно скрыть категорию и цены (Step 2):**
 
 ```typescript
-if (result.success) {
-  if (result.isNewAdmin) {
-    // Пользователь добавлен как менеджер к существующему каналу
-    toast({
-      title: `Добавлены как ${result.role === 'owner' ? 'владелец' : 'менеджер'}`,
-      description: "Теперь вы можете управлять этим каналом",
-    });
-  } else if (result.isExistingAdmin) {
-    // Уже был админом
-    toast({
-      title: "Вы уже управляете этим каналом",
-      description: `Ваша роль: ${result.role}`,
-    });
-  }
-  
-  setVerifiedChannel(result.channel);
-  setStep(3);
+{/* Категория — скрыть если канал существует */}
+{!isExistingChannel && (
+  <div className="space-y-2">
+    <Label>Категория</Label>
+    <Select ...>
+      ...
+    </Select>
+  </div>
+)}
+
+{/* Стоимость — скрыть если канал существует */}
+{!isExistingChannel && (
+  <div className="space-y-2">
+    <Label>Стоимость размещения (TON за пост)</Label>
+    ...
+  </div>
+)}
+```
+
+**4. Изменить текст кнопки:**
+
+```typescript
+<Button 
+  onClick={handleVerifyChannel} 
+  className="flex-1"
+  disabled={isVerifying || !channelData.username || (!isExistingChannel && !channelData.category)}
+>
+  {isVerifying ? (
+    <>
+      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+      Проверка...
+    </>
+  ) : isExistingChannel ? (
+    <>
+      Я менеджер
+      <ArrowRight className="w-4 h-4 ml-2" />
+    </>
+  ) : (
+    <>
+      Проверить канал
+      <ArrowRight className="w-4 h-4 ml-2" />
+    </>
+  )}
+</Button>
+```
+
+**5. Обновить валидацию:**
+
+Убрать проверку категории, если канал существует:
+```typescript
+disabled={isVerifying || !channelData.username || (!isExistingChannel && !channelData.category)}
+```
+
+**6. Обновить handleVerifyChannel:**
+
+Не требовать категорию для существующих каналов:
+```typescript
+if (!cleanUsername) {
+  toast({
+    title: "Укажите канал",
+    description: "Введите username канала",
+    variant: "destructive",
+  });
+  return;
 }
+
+// Требуем категорию только для новых каналов
+if (!isExistingChannel && !channelData.category) {
+  toast({
+    title: "Выберите категорию",
+    description: "Категория обязательна для нового канала",
+    variant: "destructive",
+  });
+  return;
+}
+```
+
+---
+
+### Обновление Edge Function preview-channel
+
+Добавить проверку существования канала в базе:
+
+```typescript
+// В preview-channel добавить:
+const { data: existingChannel } = await supabase
+  .from("channels")
+  .select("id")
+  .eq("username", cleanUsername)
+  .maybeSingle();
+
+return new Response(JSON.stringify({
+  success: true,
+  avatar_url: avatarUrl,
+  title: chatInfo.title,
+  exists: !!existingChannel, // Новый флаг
+}));
 ```
 
 ---
 
 ### Результат
 
-После изменений:
-- Модератор `@newstutox` сможет добавить себя как менеджера
-- Существующие владельцы каналов появятся в `channel_admins`
-- Система корректно различает "создание канала" и "присоединение к каналу"
-- UI показывает понятное сообщение о роли пользователя
+| Сценарий | Категория | Стоимость | Кнопка |
+|----------|-----------|-----------|--------|
+| Новый канал | Показать | Показать | "Проверить канал" |
+| Существующий канал | Скрыть | Скрыть | "Я менеджер" |
 
