@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { ExpirationTimer } from "@/components/deals/ExpirationTimer";
+import { DealCountdown } from "@/components/deals/DealCountdown";
 import TonIcon from "@/assets/ton-icon.svg";
 import { formatDistanceToNow } from "date-fns";
 import { ru } from "date-fns/locale";
@@ -20,6 +21,7 @@ interface DealCardProps {
   scheduledAt: string | null;
   createdAt: string;
   expiresAt: string | null;
+  postedAt: string | null;
   channel: {
     title: string | null;
     avatar_url: string | null;
@@ -114,6 +116,7 @@ export const DealCard = ({
   scheduledAt,
   createdAt,
   expiresAt,
+  postedAt,
   channel,
   campaign,
   usdEquivalent,
@@ -155,12 +158,51 @@ export const DealCard = ({
     return `${days}д`;
   };
 
+  // Calculate completion time (posted_at + duration_hours)
+  const completionTime = postedAt 
+    ? new Date(new Date(postedAt).getTime() + durationHours * 60 * 60 * 1000).toISOString()
+    : null;
+
+  // Determine which countdown to show
+  const showPublicationCountdown = 
+    (status === "escrow" || status === "in_progress") && 
+    scheduledAt && 
+    new Date(scheduledAt).getTime() > Date.now();
+
+  const showCompletionCountdown = 
+    status === "in_progress" && 
+    postedAt && 
+    completionTime &&
+    new Date(completionTime).getTime() > Date.now();
+
   return (
     <div className="bg-card rounded-2xl p-4 animate-fade-in relative">
       {/* Timer in top right corner for pending status */}
       {status === "pending" && expiresAt && (
         <div className="absolute top-4 right-4">
           <ExpirationTimer expiresAt={expiresAt} />
+        </div>
+      )}
+
+      {/* Countdown to publication */}
+      {showPublicationCountdown && (
+        <div className="absolute top-4 right-4">
+          <DealCountdown 
+            targetDate={scheduledAt!} 
+            label="до публикации"
+            colorClass="text-blue-500"
+          />
+        </div>
+      )}
+
+      {/* Countdown to completion */}
+      {showCompletionCountdown && (
+        <div className="absolute top-4 right-4">
+          <DealCountdown 
+            targetDate={completionTime!} 
+            label="до завершения"
+            colorClass="text-primary"
+          />
         </div>
       )}
 
