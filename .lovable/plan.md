@@ -2,219 +2,257 @@
 
 ## Задача
 
-Добавить обратный отсчёт в карточку сделки для статусов:
-1. **escrow/in_progress** — обратный отсчёт до публикации (`scheduled_at`) с подписью "до публикации"
-2. **in_progress** (после публикации) — обратный отсчёт до завершения (`posted_at` + `duration_hours`) с подписью "до завершения"
+Добавить автоматическое отклонение неодобренных сделок и возврат средств, если время до публикации истекло, а владелец канала не одобрил заказ.
 
-Таймер отображается в правом верхнем углу карточки (как при ожидании оплаты) и виден обеим сторонам.
+## Проблема
 
-## Текущее состояние
+Сейчас если реклама оплачена (статус `escrow`), но владелец канала не нажал "Одобрить" до `scheduled_at`, ничего не происходит — деньги остаются заблокированы на временном кошельке.
 
-```typescript
-// DealCard.tsx — строки 160-165
-{status === "pending" && expiresAt && (
-  <div className="absolute top-4 right-4">
-    <ExpirationTimer expiresAt={expiresAt} />
-  </div>
-)}
+## Текущая архитектура
+
+```text
+cron.job #1: каждую минуту → check-escrow-payments (проверка оплаты pending сделок)
+cron.job #3: каждый час → publish-scheduled-posts (публикация in_progress сделок)
 ```
-
-Таймер показывается только для `pending` статуса. Для остальных статусов таймера нет.
 
 ## Решение
 
-### Часть 1: Расширить Edge Function
+Расширить функцию `check-escrow-payments` (которая уже запускается каждую минуту) или создать отдельную функцию для проверки просроченных `escrow` сделок с автоматическим возвратом средств.
 
-Добавить `posted_at` в запрос deals:
+Рекомендуемый подход: **отдельная Edge Function** `auto-refund-expired-deals` для разделения ответственности.
 
-```typescript
-// supabase/functions/user-deals/index.ts — строка 103-118
-.select(`
-  id,
-  status,
-  ...
-  posted_at,  // ← добавить
-  ...
-`)
-```
+### Логика работы
 
-И включить в transformedDeals.
+1. Найти сделки со статусом `escrow`, где `scheduled_at < NOW()`
+2. Для каждой такой сделки:
+   - Расшифровать мнемонику эскроу-кошелька
+   - Получить адрес кошелька рекламодателя
+   - Отправить TON обратно (минус комиссия сети)
+   - Обновить статус сделки на `cancelled` с причиной `auto_expired`
+   - Отправить уведомление рекламодателю и владельцу канала
+3. Запускать раз в час через cron
 
-### Часть 2: Обновить типы
+### Часть 1: Новая Edge Function `auto-refund-expired-deals`
 
 ```typescript
-// src/hooks/useUserDeals.ts
-export interface Deal {
-  ...
-  posted_at: string | null;  // ← добавить
-}
+// supabase/functions/auto-refund-expired-deals/index.ts
 
-// src/components/DealCard.tsx (props)
-postedAt: string | null;  // ← добавить
-```
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createDecipheriv } from "node:crypto";
+import { Buffer } from "node:buffer";
+import { mnemonicToPrivateKey } from "@ton/crypto";
+import { WalletContractV4, TonClient, internal, SendMode } from "@ton/ton";
 
-### Часть 3: Создать компонент DealCountdown
-
-Новый универсальный компонент для отображения обратного отсчёта с подписью:
-
-```typescript
-// src/components/deals/DealCountdown.tsx
-interface DealCountdownProps {
-  targetDate: string;
-  label: string;
-  colorClass?: string;
-}
-
-export function DealCountdown({ targetDate, label, colorClass = "text-primary" }) {
-  const [timeLeft, setTimeLeft] = useState("");
-  const [isExpired, setIsExpired] = useState(false);
+// Расшифровка мнемоники
+function decryptMnemonic(encrypted: string, key: string): string {
+  const [ivHex, authTagHex, encryptedData] = encrypted.split(":");
+  const iv = Buffer.from(ivHex, "hex");
+  const authTag = Buffer.from(authTagHex, "hex");
+  const keyBuffer = Buffer.from(key, "hex");
   
-  useEffect(() => {
-    const update = () => {
-      const diff = new Date(targetDate).getTime() - Date.now();
-      
-      if (diff <= 0) {
-        setIsExpired(true);
-        return;
-      }
-      
-      // Форматирование: часы:минуты:секунды или дни
-      const hours = Math.floor(diff / 3600000);
-      const mins = Math.floor((diff % 3600000) / 60000);
-      const secs = Math.floor((diff % 60000) / 1000);
-      
-      if (hours >= 24) {
-        const days = Math.floor(hours / 24);
-        const remainingHours = hours % 24;
-        setTimeLeft(`${days}д ${remainingHours}ч`);
-      } else {
-        setTimeLeft(`${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`);
-      }
-    };
+  const decipher = createDecipheriv("aes-256-gcm", keyBuffer, iv);
+  decipher.setAuthTag(authTag);
+  
+  let decrypted = decipher.update(encryptedData, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  
+  return decrypted;
+}
+
+// Отправка TON с эскроу-кошелька
+async function sendRefund(
+  encryptedMnemonic: string,
+  encryptionKey: string,
+  toAddress: string,
+  amountTon: number
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  try {
+    // 1. Расшифровать мнемонику
+    const mnemonic = decryptMnemonic(encryptedMnemonic, encryptionKey);
+    const mnemonicArray = mnemonic.split(" ");
     
-    update();
-    const interval = setInterval(update, 1000);
-    return () => clearInterval(interval);
-  }, [targetDate]);
-  
-  if (isExpired) return null;
-  
-  return (
-    <div className="flex flex-col items-end">
-      <span className={cn("flex items-center gap-1 text-sm font-medium", colorClass)}>
-        <Clock className="w-3.5 h-3.5" />
-        {timeLeft}
-      </span>
-      <span className="text-[10px] text-muted-foreground">{label}</span>
-    </div>
-  );
+    // 2. Получить keypair
+    const keyPair = await mnemonicToPrivateKey(mnemonicArray);
+    
+    // 3. Создать клиент
+    const client = new TonClient({
+      endpoint: "https://toncenter.com/api/v2/jsonRPC",
+      apiKey: Deno.env.get("TONCENTER_API_KEY"),
+    });
+    
+    // 4. Создать контракт кошелька
+    const wallet = WalletContractV4.create({
+      publicKey: keyPair.publicKey,
+      workchain: 0,
+    });
+    
+    const contract = client.open(wallet);
+    
+    // 5. Проверить баланс
+    const balance = await contract.getBalance();
+    const networkFee = 0.01 * 1_000_000_000n; // ~0.01 TON на комиссию
+    const refundAmount = balance - networkFee;
+    
+    if (refundAmount <= 0n) {
+      return { success: false, error: "Insufficient balance for refund" };
+    }
+    
+    // 6. Получить seqno
+    const seqno = await contract.getSeqno();
+    
+    // 7. Отправить транзакцию
+    await contract.sendTransfer({
+      seqno,
+      secretKey: keyPair.secretKey,
+      sendMode: SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS,
+      messages: [
+        internal({
+          to: toAddress,
+          value: refundAmount,
+          body: "Adsingo refund",
+        }),
+      ],
+    });
+    
+    return { success: true };
+  } catch (error) {
+    console.error("Refund error:", error);
+    return { success: false, error: error.message };
+  }
 }
+
+serve(async (req) => {
+  // Основная логика:
+  // 1. Найти сделки escrow где scheduled_at < NOW()
+  // 2. Для каждой: refund + update status + notify
+});
 ```
 
-### Часть 4: Обновить DealCard
+### Часть 2: Схема базы данных
 
-Добавить логику определения какой таймер показывать:
+Добавить колонку для хранения причины отмены:
 
-```typescript
-// DealCard.tsx
+```sql
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+```
 
-// Вычисляем время завершения (posted_at + duration_hours)
-const completionTime = postedAt 
-  ? new Date(new Date(postedAt).getTime() + durationHours * 60 * 60 * 1000).toISOString()
-  : null;
+Возможные значения: `owner_rejected`, `auto_expired`, `advertiser_cancelled`
 
-// Определяем что показывать
-const showPublicationCountdown = 
-  (status === "escrow" || status === "in_progress") && 
-  scheduledAt && 
-  new Date(scheduledAt).getTime() > Date.now();
+### Часть 3: Cron Job
 
-const showCompletionCountdown = 
-  status === "in_progress" && 
-  postedAt && 
-  completionTime &&
-  new Date(completionTime).getTime() > Date.now();
+Добавить cron job для запуска раз в час (в :30 минут, чтобы не конфликтовать с publish-scheduled-posts):
 
-// Рендеринг в правом верхнем углу
-{status === "pending" && expiresAt && (
-  <div className="absolute top-4 right-4">
-    <ExpirationTimer expiresAt={expiresAt} />
-  </div>
-)}
-
-{showPublicationCountdown && (
-  <div className="absolute top-4 right-4">
-    <DealCountdown 
-      targetDate={scheduledAt!} 
-      label="до публикации"
-      colorClass="text-blue-500"
-    />
-  </div>
-)}
-
-{showCompletionCountdown && (
-  <div className="absolute top-4 right-4">
-    <DealCountdown 
-      targetDate={completionTime!} 
-      label="до завершения"
-      colorClass="text-primary"
-    />
-  </div>
-)}
+```sql
+SELECT cron.schedule(
+  'auto-refund-expired-deals',
+  '30 * * * *', -- каждый час в :30
+  $$
+  SELECT net.http_post(
+    url:='https://fdxyittddmpyhaiijddp.supabase.co/functions/v1/auto-refund-expired-deals',
+    headers:='{"Authorization": "Bearer ANON_KEY"}'::jsonb,
+    body:='{}'::jsonb
+  );
+  $$
+);
 ```
 
 ## Файлы для изменения
 
 | Файл | Изменения |
 |------|-----------|
-| `supabase/functions/user-deals/index.ts` | Добавить `posted_at` в select и transform |
-| `src/hooks/useUserDeals.ts` | Добавить `posted_at` в интерфейс Deal |
-| `src/components/deals/DealCountdown.tsx` | Создать новый компонент |
-| `src/components/DealCard.tsx` | Добавить prop `postedAt`, логику таймеров |
-| `src/pages/Deals.tsx` | Передать `postedAt` в DealCard |
+| `supabase/functions/auto-refund-expired-deals/index.ts` | Создать новую Edge Function |
+| `supabase/config.toml` | Добавить конфигурацию новой функции |
+| База данных | Добавить cron job + колонку cancellation_reason |
 
-## Визуальный результат
+## Потребуется секрет
 
-```text
-┌─────────────────────────────────────┐
-│ [Превью] Летняя акция    2:45:30   │ ← часы:мин:сек
-│          входящий      до публикации│ ← подпись
-│          Канал: @mychannel          │
-│                                     │
-│ 5 TON ≈ $15.00 • 2 поста • 24ч     │
-│─────────────────────────────────────│
-│ 🔵 Оплачено              2 дня назад│
-└─────────────────────────────────────┘
+- `TONCENTER_API_KEY` — для отправки транзакций (может уже быть настроен)
 
-После публикации:
-┌─────────────────────────────────────┐
-│ [Превью] Летняя акция    23:15:42  │
-│          входящий      до завершения│
-│          Канал: @mychannel          │
-│─────────────────────────────────────│
-│ 🟢 Публикуется           5 мин назад│
-└─────────────────────────────────────┘
+## Уведомления
+
+**Рекламодателю:**
+```
+💔 Время публикации истекло
+
+К сожалению, владелец канала {channelTitle} не успел одобрить вашу рекламу до запланированного времени.
+
+💰 Возврат: {amount} TON отправлен на ваш кошелёк.
 ```
 
-## Логика переключения таймеров
+**Владельцу канала:**
+```
+⏰ Сделка автоматически отменена
+
+Вы не одобрили рекламу до запланированного времени публикации.
+
+Средства возвращены рекламодателю.
+```
+
+## Визуальная схема
 
 ```text
-escrow (до scheduled_at)     → "до публикации" (blue)
-in_progress (до scheduled_at) → "до публикации" (blue)
-in_progress (после posted_at) → "до завершения" (primary/green)
-completed                      → без таймера
+┌─────────────────────────────────────────────────────┐
+│              DEAL LIFECYCLE                          │
+├─────────────────────────────────────────────────────┤
+│                                                     │
+│  pending ─(оплата)──► escrow ─(одобрение)──► in_progress ─(публикация)──► completed
+│     │                    │                                                    
+│     │                    │                                                    
+│  (timeout 20m)       (scheduled_at прошёл                                   
+│     ▼                 без одобрения)                                         
+│  expired                 ▼                                                    
+│                      cancelled                                               
+│                   + auto refund                                              
+│                   + уведомления                                              
+│                                                     │
+└─────────────────────────────────────────────────────┘
 ```
 
 ## Техническая детализация
 
-### Форматирование времени
+### Функция расшифровки мнемоники
 
-- **Менее 24 часов**: `HH:MM:SS` (например `2:45:30`)
-- **24+ часов**: `Xд Yч` (например `2д 5ч`)
+Обратная операция к `encryptMnemonic` из `create-deal`:
 
-### Цветовая схема
+```typescript
+function decryptMnemonic(encrypted: string, key: string): string {
+  const [ivHex, authTagHex, encryptedData] = encrypted.split(":");
+  const iv = Buffer.from(ivHex, "hex");
+  const authTag = Buffer.from(authTagHex, "hex");
+  const keyBuffer = Buffer.from(key, "hex");
+  
+  const decipher = createDecipheriv("aes-256-gcm", keyBuffer, iv);
+  decipher.setAuthTag(authTag);
+  
+  let decrypted = decipher.update(encryptedData, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  
+  return decrypted;
+}
+```
 
-- Ожидание оплаты: `text-yellow-500`
-- До публикации: `text-blue-500`
-- До завершения: `text-primary` (зелёный)
+### Получение адреса рекламодателя
+
+Адрес кошелька рекламодателя хранится в `users.wallet_address`. Его мы получаем через JOIN:
+
+```typescript
+const { data: expiredDeals } = await supabase
+  .from("deals")
+  .select(`
+    id,
+    escrow_mnemonic_encrypted,
+    total_price,
+    channel:channels(title, username, owner:users!channels_owner_id_fkey(telegram_id)),
+    advertiser:users!deals_advertiser_id_fkey(telegram_id, wallet_address)
+  `)
+  .eq("status", "escrow")
+  .lt("scheduled_at", now);
+```
+
+### Обработка ошибок
+
+- Если `wallet_address` рекламодателя отсутствует — логируем ошибку, статус не меняем
+- Если транзакция не прошла — логируем, пробуем повторно в следующий запуск
+- Если мнемоника не расшифровывается — критическая ошибка, требует ручного вмешательства
 
