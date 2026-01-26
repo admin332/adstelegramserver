@@ -251,7 +251,23 @@ serve(async (req) => {
 
     console.log("Checking pending deals for escrow payments...");
 
-    // 1. Get all pending deals with escrow addresses
+    const now = new Date().toISOString();
+
+    // 1. First, mark expired deals
+    const { data: expiredDeals, error: expireError } = await supabase
+      .from('deals')
+      .update({ status: 'expired' })
+      .eq('status', 'pending')
+      .lt('expires_at', now)
+      .select('id');
+
+    if (expireError) {
+      console.error("Error marking expired deals:", expireError);
+    } else if (expiredDeals && expiredDeals.length > 0) {
+      console.log(`Marked ${expiredDeals.length} deals as expired`);
+    }
+
+    // 2. Get only active pending deals (not expired)
     const { data: pendingDeals, error: fetchError } = await supabase
       .from('deals')
       .select(`
@@ -271,6 +287,7 @@ serve(async (req) => {
         )
       `)
       .eq('status', 'pending')
+      .gte('expires_at', now)
       .not('escrow_address', 'is', null);
 
     if (fetchError) {

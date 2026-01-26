@@ -14,6 +14,7 @@ export interface Deal {
   escrow_address: string | null;
   scheduled_at: string | null;
   created_at: string;
+  expires_at: string | null;
   channel: {
     id: string;
     title: string | null;
@@ -45,6 +46,7 @@ export function useUserDeals() {
           escrow_address,
           scheduled_at,
           created_at,
+          expires_at,
           channel:channels(id, title, avatar_url, username),
           campaign:campaigns(id, name)
         `)
