@@ -62,7 +62,7 @@ const Create = () => {
           </>
         ) : (
           <h1 className="font-handwriting text-3xl md:text-4xl text-white">
-            {selectedRole === "channel_owner" ? "Добавить" : "Новая кампания"}
+            {selectedRole === "channel_owner" ? "Добавить" : "Кампания"}
           </h1>
         )}
       </header>
