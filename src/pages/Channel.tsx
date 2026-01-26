@@ -175,6 +175,7 @@ const Channel: React.FC = () => {
       <OrderDrawer
         isOpen={isOrderDrawerOpen}
         onClose={() => setIsOrderDrawerOpen(false)}
+        channelId={id!}
         channelName={channel.name}
         pricePerPost={channel.tonPrice}
       />
