@@ -245,8 +245,8 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
             </div>
 
             <div className="space-y-2">
-              <Label>Стоимость размещения ($)</Label>
-              <div className="grid grid-cols-3 gap-2">
+              <Label>Стоимость размещения (TON за пост)</Label>
+              <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground">1/24</span>
                   <Input
@@ -258,22 +258,12 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
                   />
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground">2/48</span>
+                  <span className="text-xs text-muted-foreground">2+/24</span>
                   <Input
                     type="number"
                     placeholder="0"
                     value={channelData.price_2_48}
                     onChange={(e) => setChannelData({ ...channelData, price_2_48: e.target.value })}
-                    className="bg-card border-0"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Пост</span>
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={channelData.price_post}
-                    onChange={(e) => setChannelData({ ...channelData, price_post: e.target.value })}
                     className="bg-card border-0"
                   />
                 </div>
