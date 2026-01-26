@@ -156,6 +156,7 @@ export type Database = {
           price_2_48: number | null
           price_post: number | null
           rating: number | null
+          stats_updated_at: string | null
           subscribers_count: number | null
           successful_ads: number | null
           telegram_chat_id: number | null
@@ -180,6 +181,7 @@ export type Database = {
           price_2_48?: number | null
           price_post?: number | null
           rating?: number | null
+          stats_updated_at?: string | null
           subscribers_count?: number | null
           successful_ads?: number | null
           telegram_chat_id?: number | null
@@ -204,6 +206,7 @@ export type Database = {
           price_2_48?: number | null
           price_post?: number | null
           rating?: number | null
+          stats_updated_at?: string | null
           subscribers_count?: number | null
           successful_ads?: number | null
           telegram_chat_id?: number | null
