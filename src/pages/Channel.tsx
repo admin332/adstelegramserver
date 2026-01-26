@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Star, TrendingUp, Tag, ShoppingCart, BadgeCheck } from 'lucide-react';
+import { Star, TrendingUp, Tag, BadgeCheck } from 'lucide-react';
 import { mockChannels } from '@/data/mockChannels';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -198,11 +198,10 @@ const Channel: React.FC = () => {
             onClick={() => setIsOrderDrawerOpen(true)}
             className="w-full h-14 text-base font-semibold rounded-2xl gap-3"
           >
-            <ShoppingCart className="h-5 w-5" />
-            Заказать рекламу
-            <span className="text-white/80 ml-2">
+            <span className="text-white/80">
               {channel.tonPrice} TON
             </span>
+            Заказать рекламу
           </Button>
         </motion.div>
       </div>
