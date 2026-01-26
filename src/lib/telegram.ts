@@ -31,6 +31,14 @@ export interface TelegramWebApp {
   isFullscreen?: boolean;
   requestFullscreen?: () => void;
   exitFullscreen?: () => void;
+  // BackButton API
+  BackButton: {
+    isVisible: boolean;
+    show: () => void;
+    hide: () => void;
+    onClick: (callback: () => void) => void;
+    offClick: (callback: () => void) => void;
+  };
   themeParams: {
     bg_color?: string;
     text_color?: string;
