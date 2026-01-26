@@ -47,3 +47,6 @@ verify_jwt = false
 
 [functions.create-deal]
 verify_jwt = false
+
+[functions.check-escrow-payments]
+verify_jwt = false
