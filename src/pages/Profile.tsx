@@ -3,9 +3,9 @@ import { Button } from "@/components/ui/button";
 import { StatsCard } from "@/components/StatsCard";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppSettings } from "@/hooks/useAppSettings";
+import WalletSection from "@/components/profile/WalletSection";
 import { 
   User, 
-  Wallet, 
   Settings, 
   HelpCircle, 
   LogOut, 
@@ -30,10 +30,9 @@ const Profile = () => {
   };
 
   const menuItems = [
-    { icon: Wallet, label: "Кошелёк", description: "$1,250.00", action: true },
-    { icon: Shield, label: "Безопасность", action: true },
-    { icon: Settings, label: "Настройки", action: true },
-    { icon: HelpCircle, label: "Помощь", action: true },
+    { icon: Shield, label: "Безопасность" },
+    { icon: Settings, label: "Настройки" },
+    { icon: HelpCircle, label: "Помощь" },
   ];
 
   // Loading state
@@ -141,18 +140,21 @@ const Profile = () => {
           </div>
         </div>
 
+        {/* TON Wallet Section */}
+        <WalletSection />
+
         {/* Stats */}
         <div className="grid grid-cols-2 gap-3">
-          <StatsCard
-            icon={<Wallet className="w-5 h-5" />}
-            label="Баланс"
-            value="$1,250"
-          />
           <StatsCard
             icon={<Star className="w-5 h-5" />}
             label="Сделок"
             value="24"
             trend={15}
+          />
+          <StatsCard
+            icon={<Star className="w-5 h-5" />}
+            label="Рейтинг"
+            value="4.9"
           />
         </div>
 
@@ -170,13 +172,8 @@ const Profile = () => {
                 </div>
                 <div className="flex-1 text-left">
                   <p className="font-medium text-foreground">{item.label}</p>
-                  {item.description && (
-                    <p className="text-sm text-primary">{item.description}</p>
-                  )}
                 </div>
-                {item.action && (
-                  <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                )}
+                <ChevronRight className="w-5 h-5 text-muted-foreground" />
               </button>
             );
           })}
