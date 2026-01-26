@@ -1,0 +1,6 @@
+{
+  "imports": {
+    "@ton/crypto": "npm:@ton/crypto@3",
+    "@ton/ton": "npm:@ton/ton@15"
+  }
+}
