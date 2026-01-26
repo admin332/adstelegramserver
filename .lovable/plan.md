@@ -1,82 +1,165 @@
 
+
 ## Задача
 
-Исправить отображение материала кампании в аватарке карточки сделки для владельцев каналов, сделав его аналогичным отображению в разделе "Мои кампании".
+Добавить обратный отсчёт в карточку сделки для статусов:
+1. **escrow/in_progress** — обратный отсчёт до публикации (`scheduled_at`) с подписью "до публикации"
+2. **in_progress** (после публикации) — обратный отсчёт до завершения (`posted_at` + `duration_hours`) с подписью "до завершения"
 
-## Проблема
+Таймер отображается в правом верхнем углу карточки (как при ожидании оплаты) и виден обеим сторонам.
 
-В `DealCard.tsx` используется компонент `Avatar` с простым fallback (только буква), тогда как в `MyCampaignsList.tsx` используется квадратный блок с:
-- Отображением изображения
-- Иконкой `FileVideo` для видео
-- Иконкой `ImageIcon` если нет медиа
-- Бейджем с количеством медиафайлов
+## Текущее состояние
+
+```typescript
+// DealCard.tsx — строки 160-165
+{status === "pending" && expiresAt && (
+  <div className="absolute top-4 right-4">
+    <ExpirationTimer expiresAt={expiresAt} />
+  </div>
+)}
+```
+
+Таймер показывается только для `pending` статуса. Для остальных статусов таймера нет.
 
 ## Решение
 
-Заменить для `isChannelOwner` стандартный `Avatar` на квадратный блок превью аналогичный `MyCampaignsList`:
+### Часть 1: Расширить Edge Function
 
-### DealCard.tsx — изменения
+Добавить `posted_at` в запрос deals:
 
 ```typescript
-// Добавить импорты
-import { ImageIcon, FileVideo } from "lucide-react";
-
-// Добавить функцию проверки видео
-const isVideoUrl = (url: string) => {
-  const videoExtensions = ['.mp4', '.mov', '.avi', '.webm', '.mkv'];
-  return videoExtensions.some(ext => url.toLowerCase().includes(ext));
-};
-
-// Получить данные для превью кампании
-const getCampaignMediaInfo = (campaign: DealCardProps['campaign']) => {
-  if (!campaign) return { firstMedia: null, mediaCount: 0, isVideo: false };
-  
-  const mediaUrls = campaign.media_urls as string[] | undefined;
-  const firstMedia = mediaUrls?.[0] || campaign.image_url || null;
-  const mediaCount = mediaUrls?.length || (campaign.image_url ? 1 : 0);
-  const isVideo = firstMedia ? isVideoUrl(firstMedia) : false;
-  
-  return { firstMedia, mediaCount, isVideo };
-};
+// supabase/functions/user-deals/index.ts — строка 103-118
+.select(`
+  id,
+  status,
+  ...
+  posted_at,  // ← добавить
+  ...
+`)
 ```
 
-### Логика рендеринга аватара
+И включить в transformedDeals.
 
-Для `isChannelOwner` вместо `<Avatar>` использовать квадратный блок:
+### Часть 2: Обновить типы
 
-```tsx
-{isChannelOwner ? (
-  // Превью кампании как в MyCampaignsList
-  <div className="w-12 h-12 rounded-xl bg-secondary flex items-center justify-center overflow-hidden flex-shrink-0 relative">
-    {campaignMedia.firstMedia ? (
-      campaignMedia.isVideo ? (
-        <div className="w-full h-full flex items-center justify-center bg-card">
-          <FileVideo className="w-5 h-5 text-primary" />
-        </div>
-      ) : (
-        <img
-          src={campaignMedia.firstMedia}
-          alt={displayTitle}
-          className="w-full h-full object-cover"
-        />
-      )
-    ) : (
-      <ImageIcon className="w-5 h-5 text-muted-foreground" />
-    )}
-    {campaignMedia.mediaCount > 1 && (
-      <div className="absolute bottom-0.5 right-0.5 min-w-4 h-4 rounded-full bg-primary flex items-center justify-center px-0.5">
-        <span className="text-[10px] font-medium text-primary-foreground">{campaignMedia.mediaCount}</span>
-      </div>
-    )}
+```typescript
+// src/hooks/useUserDeals.ts
+export interface Deal {
+  ...
+  posted_at: string | null;  // ← добавить
+}
+
+// src/components/DealCard.tsx (props)
+postedAt: string | null;  // ← добавить
+```
+
+### Часть 3: Создать компонент DealCountdown
+
+Новый универсальный компонент для отображения обратного отсчёта с подписью:
+
+```typescript
+// src/components/deals/DealCountdown.tsx
+interface DealCountdownProps {
+  targetDate: string;
+  label: string;
+  colorClass?: string;
+}
+
+export function DealCountdown({ targetDate, label, colorClass = "text-primary" }) {
+  const [timeLeft, setTimeLeft] = useState("");
+  const [isExpired, setIsExpired] = useState(false);
+  
+  useEffect(() => {
+    const update = () => {
+      const diff = new Date(targetDate).getTime() - Date.now();
+      
+      if (diff <= 0) {
+        setIsExpired(true);
+        return;
+      }
+      
+      // Форматирование: часы:минуты:секунды или дни
+      const hours = Math.floor(diff / 3600000);
+      const mins = Math.floor((diff % 3600000) / 60000);
+      const secs = Math.floor((diff % 60000) / 1000);
+      
+      if (hours >= 24) {
+        const days = Math.floor(hours / 24);
+        const remainingHours = hours % 24;
+        setTimeLeft(`${days}д ${remainingHours}ч`);
+      } else {
+        setTimeLeft(`${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`);
+      }
+    };
+    
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [targetDate]);
+  
+  if (isExpired) return null;
+  
+  return (
+    <div className="flex flex-col items-end">
+      <span className={cn("flex items-center gap-1 text-sm font-medium", colorClass)}>
+        <Clock className="w-3.5 h-3.5" />
+        {timeLeft}
+      </span>
+      <span className="text-[10px] text-muted-foreground">{label}</span>
+    </div>
+  );
+}
+```
+
+### Часть 4: Обновить DealCard
+
+Добавить логику определения какой таймер показывать:
+
+```typescript
+// DealCard.tsx
+
+// Вычисляем время завершения (posted_at + duration_hours)
+const completionTime = postedAt 
+  ? new Date(new Date(postedAt).getTime() + durationHours * 60 * 60 * 1000).toISOString()
+  : null;
+
+// Определяем что показывать
+const showPublicationCountdown = 
+  (status === "escrow" || status === "in_progress") && 
+  scheduledAt && 
+  new Date(scheduledAt).getTime() > Date.now();
+
+const showCompletionCountdown = 
+  status === "in_progress" && 
+  postedAt && 
+  completionTime &&
+  new Date(completionTime).getTime() > Date.now();
+
+// Рендеринг в правом верхнем углу
+{status === "pending" && expiresAt && (
+  <div className="absolute top-4 right-4">
+    <ExpirationTimer expiresAt={expiresAt} />
   </div>
-) : (
-  // Стандартный Avatar для канала (для рекламодателя)
-  <Avatar className="w-12 h-12">
-    <AvatarImage src={displayAvatar || undefined} alt={displayTitle} />
-    <AvatarFallback className="bg-secondary text-foreground">
-      {displayInitial}
-    </AvatarFallback>
-  </Avatar>
+)}
+
+{showPublicationCountdown && (
+  <div className="absolute top-4 right-4">
+    <DealCountdown 
+      targetDate={scheduledAt!} 
+      label="до публикации"
+      colorClass="text-blue-500"
+    />
+  </div>
+)}
+
+{showCompletionCountdown && (
+  <div className="absolute top-4 right-4">
+    <DealCountdown 
+      targetDate={completionTime!} 
+      label="до завершения"
+      colorClass="text-primary"
+    />
+  </div>
 )}
 ```
 
@@ -84,24 +167,54 @@ const getCampaignMediaInfo = (campaign: DealCardProps['campaign']) => {
 
 | Файл | Изменения |
 |------|-----------|
-| `src/components/DealCard.tsx` | Добавить `isVideoUrl`, `getCampaignMediaInfo`, условный рендеринг превью |
+| `supabase/functions/user-deals/index.ts` | Добавить `posted_at` в select и transform |
+| `src/hooks/useUserDeals.ts` | Добавить `posted_at` в интерфейс Deal |
+| `src/components/deals/DealCountdown.tsx` | Создать новый компонент |
+| `src/components/DealCard.tsx` | Добавить prop `postedAt`, логику таймеров |
+| `src/pages/Deals.tsx` | Передать `postedAt` в DealCard |
 
 ## Визуальный результат
 
-**Было (для channel_owner):**
-```
-[К] Летняя акция    ← круглый аватар с буквой
-    входящий
-    Канал: @mychannel
+```text
+┌─────────────────────────────────────┐
+│ [Превью] Летняя акция    2:45:30   │ ← часы:мин:сек
+│          входящий      до публикации│ ← подпись
+│          Канал: @mychannel          │
+│                                     │
+│ 5 TON ≈ $15.00 • 2 поста • 24ч     │
+│─────────────────────────────────────│
+│ 🔵 Оплачено              2 дня назад│
+└─────────────────────────────────────┘
+
+После публикации:
+┌─────────────────────────────────────┐
+│ [Превью] Летняя акция    23:15:42  │
+│          входящий      до завершения│
+│          Канал: @mychannel          │
+│─────────────────────────────────────│
+│ 🟢 Публикуется           5 мин назад│
+└─────────────────────────────────────┘
 ```
 
-**Станет:**
-```
-[🖼️] Летняя акция   ← квадратное превью с изображением/видео-иконкой
- [3]  входящий       ← бейдж количества если несколько медиа
-     Канал: @mychannel
+## Логика переключения таймеров
+
+```text
+escrow (до scheduled_at)     → "до публикации" (blue)
+in_progress (до scheduled_at) → "до публикации" (blue)
+in_progress (после posted_at) → "до завершения" (primary/green)
+completed                      → без таймера
 ```
 
-## Приватность
+## Техническая детализация
 
-Изменение затрагивает только роль `channel_owner` — рекламодатели (`advertiser`) продолжают видеть аватарку канала. Материал кампании виден только владельцам канала и их команде (менеджерам), так как эти данные уже отфильтрованы по роли в edge function.
+### Форматирование времени
+
+- **Менее 24 часов**: `HH:MM:SS` (например `2:45:30`)
+- **24+ часов**: `Xд Yч` (например `2д 5ч`)
+
+### Цветовая схема
+
+- Ожидание оплаты: `text-yellow-500`
+- До публикации: `text-blue-500`
+- До завершения: `text-primary` (зелёный)
+
