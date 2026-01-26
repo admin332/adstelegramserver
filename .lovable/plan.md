@@ -1,22 +1,22 @@
 
 
-## План: Отключение приближения на сайте и улучшение работы скрытия меню
+## План: Исправить логику определения видимости клавиатуры
 
-### Текущая ситуация
+### Проблема
 
-Скрытие нижнего меню при открытии клавиатуры **уже реализовано**:
-- Хук `useKeyboardVisible` отслеживает изменения `window.visualViewport`
-- `BottomNav` использует этот хук и возвращает `null` при `isKeyboardVisible === true`
+Текущая реализация сравнивает `window.innerHeight - viewport.height`, что может давать нестабильные результаты при прокрутке viewport. Меню появляется над клавиатурой вместо того, чтобы оставаться скрытым.
 
-Проблема может быть в:
-1. Порог `heightDiff > 150` может быть слишком большим для некоторых устройств
-2. Нет отключения zoom на сайте
+### Решение
 
-### Изменения
+Использовать подход с **сохранением начальной высоты** viewport при монтировании компонента:
 
-#### 1. Улучшить хук `useKeyboardVisible` — `src/hooks/useKeyboardVisible.ts`
+```
+initialHeight (при загрузке) - currentHeight (при resize) > 150px → клавиатура открыта
+```
 
-Уменьшим порог определения клавиатуры и добавим дополнительную логику:
+### Изменения в `src/hooks/useKeyboardVisible.ts`
+
+Полностью переписать хук:
 
 ```typescript
 import { useState, useEffect } from 'react';
@@ -25,99 +25,57 @@ export const useKeyboardVisible = () => {
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
   useEffect(() => {
+    if (!window.visualViewport) return;
+
     const viewport = window.visualViewport;
-    
-    if (viewport) {
-      const handleResize = () => {
-        // Уменьшаем порог до 100px для лучшего определения
-        const heightDiff = window.innerHeight - viewport.height;
-        setIsKeyboardVisible(heightDiff > 100);
-      };
+    const initialHeight = viewport.height; // Сохраняем начальную высоту
+    const threshold = 150; // Клавиатура обычно > 150px
 
-      viewport.addEventListener('resize', handleResize);
-      viewport.addEventListener('scroll', handleResize);
-      
-      return () => {
-        viewport.removeEventListener('resize', handleResize);
-        viewport.removeEventListener('scroll', handleResize);
-      };
-    }
-
-    // Fallback для браузеров без visualViewport
-    const handleFocus = (e: FocusEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        setIsKeyboardVisible(true);
-      }
+    const handleResize = () => {
+      const heightDiff = initialHeight - viewport.height;
+      setIsKeyboardVisible(heightDiff > threshold);
     };
 
-    const handleBlur = () => {
-      setTimeout(() => setIsKeyboardVisible(false), 100);
-    };
-
-    document.addEventListener('focusin', handleFocus);
-    document.addEventListener('focusout', handleBlur);
-
-    return () => {
-      document.removeEventListener('focusin', handleFocus);
-      document.removeEventListener('focusout', handleBlur);
-    };
+    viewport.addEventListener('resize', handleResize);
+    return () => viewport.removeEventListener('resize', handleResize);
   }, []);
 
   return isKeyboardVisible;
 };
 ```
 
-**Изменения:**
-- Порог уменьшен с `150` до `100` пикселей
-- Добавлен слушатель события `scroll` для visualViewport
-- Добавлен `setTimeout` в handleBlur для плавного скрытия
+### Почему это работает лучше
 
----
+| Текущий подход | Новый подход |
+|----------------|--------------|
+| `window.innerHeight - viewport.height` | `initialHeight - viewport.height` |
+| `innerHeight` может меняться | `initialHeight` фиксирован при загрузке |
+| Нестабильно при прокрутке | Стабильное сравнение |
 
-#### 2. Отключить zoom на всём сайте — `index.html`
+### Логика работы
 
-Обновить meta viewport:
+```text
+1. При загрузке страницы:
+   initialHeight = 800px (полный экран)
 
-```html
-<!-- Строка 5 - было: -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+2. Пользователь нажимает на input:
+   → Клавиатура открывается
+   → viewport.height = 500px
+   → heightDiff = 800 - 500 = 300px
+   → 300 > 150 → isKeyboardVisible = true
+   → BottomNav возвращает null
 
-<!-- Станет: -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+3. Пользователь закрывает клавиатуру:
+   → viewport.height = 800px
+   → heightDiff = 800 - 800 = 0px
+   → 0 > 150 → false
+   → isKeyboardVisible = false
+   → BottomNav отображается
 ```
 
----
-
-#### 3. Добавить CSS защиту от zoom — `src/index.css`
-
-Добавить правила в секцию `@layer base`:
-
-```css
-html {
-  touch-action: manipulation;
-}
-
-/* Предотвращает auto-zoom на iOS при фокусе на input */
-input, textarea, select {
-  font-size: 16px !important;
-}
-```
-
----
-
-### Файлы для изменения
+### Файл для изменения
 
 | Файл | Изменение |
 |------|-----------|
-| `src/hooks/useKeyboardVisible.ts` | Улучшить логику определения клавиатуры |
-| `index.html` | Добавить `maximum-scale=1.0, user-scalable=no` |
-| `src/index.css` | Добавить `touch-action: manipulation` и `font-size: 16px` для inputs |
-
----
-
-### Результат
-
-- Нижнее меню скрывается при открытии клавиатуры на всех страницах включая `/create`
-- Приближение (zoom) отключено на всём сайте
-- Нет auto-zoom на iOS при фокусе на текстовые поля
+| `src/hooks/useKeyboardVisible.ts` | Переписать с использованием `initialHeight` |
 
