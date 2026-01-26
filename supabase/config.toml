@@ -41,3 +41,9 @@ verify_jwt = false
 
 [functions.refresh-channel-stats]
 verify_jwt = false
+
+[functions.save-wallet]
+verify_jwt = false
+
+[functions.create-deal]
+verify_jwt = false

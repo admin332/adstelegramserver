@@ -15,7 +15,12 @@ import { Progress } from '@/components/ui/progress';
 import PostQuantitySelector from './PostQuantitySelector';
 import DateTimeSelector from './DateTimeSelector';
 import CampaignSelector from './CampaignSelector';
+import PaymentStep from './PaymentStep';
 import { useUserCampaigns } from '@/hooks/useUserCampaigns';
+import { useTonWallet } from '@/hooks/useTonWallet';
+import { supabase } from '@/integrations/supabase/client';
+import { getTelegramInitData } from '@/lib/telegram';
+import { toast } from 'sonner';
 
 interface OrderDrawerProps {
   isOpen: boolean;
@@ -34,21 +39,24 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
 }) => {
   const navigate = useNavigate();
   const { data: userCampaigns = [] } = useUserCampaigns();
+  const { isConnected: isWalletConnected } = useTonWallet();
   
   const [currentStep, setCurrentStep] = useState(1);
   const [quantity, setQuantity] = useState(1);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedHour, setSelectedHour] = useState(() => {
     const now = new Date();
-    // Минимум через 2 часа
     const minHour = now.getHours() + 2;
     return minHour > 23 ? 0 : minHour;
   });
   const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>([]);
+  
+  // Payment step state
+  const [isCreatingDeal, setIsCreatingDeal] = useState(false);
+  const [escrowAddress, setEscrowAddress] = useState<string | null>(null);
+  const [dealId, setDealId] = useState<string | null>(null);
 
-  // Преобразовать данные из БД в формат для CampaignSelector
   const campaigns = userCampaigns.map(c => {
-    // Берём первое изображение из массива media_urls или fallback на image_url
     const mediaUrls = (c as { media_urls?: string[] }).media_urls;
     const imageUrl = (mediaUrls && mediaUrls.length > 0) 
       ? mediaUrls[0] 
@@ -64,40 +72,93 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
     };
   });
 
-  const totalSteps = 3;
+  const totalSteps = 4;
   const progressValue = (currentStep / totalSteps) * 100;
+  const totalPrice = quantity * pricePerPost;
 
   const stepTitles: Record<number, string> = {
     1: 'Выберите количество постов',
     2: 'Выберите дату и время',
     3: 'Выберите рекламную кампанию',
+    4: 'Оплата',
   };
 
   const stepSubtitles: Record<number, string> = {
     1: `Реклама в канале ${channelName}`,
     2: `Реклама в канале ${channelName}`,
     3: quantity > 1 ? `Выберите ${quantity} кампании` : `Выберите кампанию`,
+    4: `К оплате: ${totalPrice} TON`,
   };
 
-  const handleNext = () => {
-    if (currentStep < totalSteps) {
-      setCurrentStep(currentStep + 1);
-    } else {
-      // Финальный шаг — оформление заказа
-      console.log('Order submitted', {
-        quantity,
-        selectedDate,
-        selectedHour,
-        selectedCampaigns,
+  const createDeal = async () => {
+    setIsCreatingDeal(true);
+    
+    try {
+      const initData = getTelegramInitData();
+      
+      // Формируем дату и время публикации
+      const scheduledDate = new Date(selectedDate);
+      scheduledDate.setHours(selectedHour, 0, 0, 0);
+      
+      const { data, error } = await supabase.functions.invoke('create-deal', {
+        body: {
+          initData,
+          channelId,
+          postsCount: quantity,
+          pricePerPost,
+          totalPrice,
+          scheduledAt: scheduledDate.toISOString(),
+          campaignIds: selectedCampaigns,
+        }
       });
-      onClose();
+      
+      if (error || !data?.success) {
+        throw new Error(data?.error || 'Failed to create deal');
+      }
+      
+      setDealId(data.deal.id);
+      setEscrowAddress(data.deal.escrowAddress);
+    } catch (err) {
+      console.error('Error creating deal:', err);
+      toast.error('Не удалось создать сделку');
+      setCurrentStep(3); // Go back to campaign selection
+    } finally {
+      setIsCreatingDeal(false);
+    }
+  };
+
+  const handleNext = async () => {
+    if (currentStep < totalSteps) {
+      const nextStep = currentStep + 1;
+      setCurrentStep(nextStep);
+      
+      // If moving to payment step, create the deal
+      if (nextStep === 4) {
+        await createDeal();
+      }
     }
   };
 
   const handleBack = () => {
     if (currentStep > 1) {
       setCurrentStep(currentStep - 1);
+      // Reset payment state when going back from payment
+      if (currentStep === 4) {
+        setEscrowAddress(null);
+        setDealId(null);
+      }
     }
+  };
+
+  const handlePaymentComplete = () => {
+    toast.success('Заказ оформлен! Ожидайте подтверждения оплаты.');
+    onClose();
+    // Reset state
+    setCurrentStep(1);
+    setQuantity(1);
+    setSelectedCampaigns([]);
+    setEscrowAddress(null);
+    setDealId(null);
   };
 
   const handleCreateNewCampaign = () => {
@@ -108,7 +169,6 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   const handleDateChange = (date: Date) => {
     setSelectedDate(date);
     
-    // Если выбрана сегодняшняя дата и текущий час недоступен
     if (isToday(date)) {
       const minHour = new Date().getHours() + 2;
       if (selectedHour < minHour) {
@@ -125,16 +185,20 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
         return selectedDate && selectedHour !== undefined;
       case 3:
         return selectedCampaigns.length === quantity;
+      case 4:
+        return false; // Payment step has its own button
       default:
         return false;
     }
   };
 
+  // Don't show "Next" button on payment step
+  const showNextButton = currentStep < 4;
+
   return (
     <Drawer open={isOpen} onOpenChange={onClose}>
       <DrawerContent className="max-h-[85vh]">
         <DrawerHeader className="pb-0">
-          {/* Progress Bar */}
           <div className="flex items-center gap-3 mb-4">
             <Progress value={progressValue} className="flex-1 h-2" />
             <span className="text-sm text-muted-foreground whitespace-nowrap">
@@ -199,11 +263,27 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
                 />
               </motion.div>
             )}
+
+            {currentStep === 4 && (
+              <motion.div
+                key="step4"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+              >
+                <PaymentStep
+                  totalPriceTon={totalPrice}
+                  escrowAddress={escrowAddress}
+                  isCreatingDeal={isCreatingDeal}
+                  onPaymentComplete={handlePaymentComplete}
+                />
+              </motion.div>
+            )}
           </AnimatePresence>
         </div>
 
         <DrawerFooter className="flex-row gap-2">
-          {currentStep > 1 && (
+          {currentStep > 1 && currentStep < 4 && (
             <Button
               variant="ghost"
               onClick={handleBack}
@@ -213,14 +293,16 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
               Назад
             </Button>
           )}
-          <Button
-            onClick={handleNext}
-            disabled={!canProceed()}
-            className="flex-1 h-12 text-base font-semibold rounded-xl"
-          >
-            {currentStep === totalSteps ? 'Оформить заказ' : 'Далее'}
-            {currentStep !== totalSteps && <ArrowRight className="ml-2 h-5 w-5" />}
-          </Button>
+          {showNextButton && (
+            <Button
+              onClick={handleNext}
+              disabled={!canProceed()}
+              className="flex-1 h-12 text-base font-semibold rounded-xl"
+            >
+              Далее
+              <ArrowRight className="ml-2 h-5 w-5" />
+            </Button>
+          )}
         </DrawerFooter>
       </DrawerContent>
     </Drawer>

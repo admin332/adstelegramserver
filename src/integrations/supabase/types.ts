@@ -254,7 +254,11 @@ export type Database = {
           completed_at: string | null
           created_at: string | null
           duration_hours: number
+          escrow_address: string | null
+          escrow_balance: number | null
+          escrow_mnemonic_encrypted: string | null
           id: string
+          payment_verified_at: string | null
           posted_at: string | null
           posts_count: number
           price_per_post: number
@@ -270,7 +274,11 @@ export type Database = {
           completed_at?: string | null
           created_at?: string | null
           duration_hours?: number
+          escrow_address?: string | null
+          escrow_balance?: number | null
+          escrow_mnemonic_encrypted?: string | null
           id?: string
+          payment_verified_at?: string | null
           posted_at?: string | null
           posts_count?: number
           price_per_post: number
@@ -286,7 +294,11 @@ export type Database = {
           completed_at?: string | null
           created_at?: string | null
           duration_hours?: number
+          escrow_address?: string | null
+          escrow_balance?: number | null
+          escrow_mnemonic_encrypted?: string | null
           id?: string
+          payment_verified_at?: string | null
           posted_at?: string | null
           posts_count?: number
           price_per_post?: number
@@ -405,6 +417,7 @@ export type Database = {
           telegram_id: number | null
           updated_at: string | null
           username: string | null
+          wallet_address: string | null
         }
         Insert: {
           auth_user_id?: string | null
@@ -418,6 +431,7 @@ export type Database = {
           telegram_id?: number | null
           updated_at?: string | null
           username?: string | null
+          wallet_address?: string | null
         }
         Update: {
           auth_user_id?: string | null
@@ -431,6 +445,7 @@ export type Database = {
           telegram_id?: number | null
           updated_at?: string | null
           username?: string | null
+          wallet_address?: string | null
         }
         Relationships: []
       }
