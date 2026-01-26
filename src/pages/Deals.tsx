@@ -4,6 +4,7 @@ import { DealCard } from "@/components/DealCard";
 import { FilterChip } from "@/components/FilterChip";
 import { PaymentDialog } from "@/components/deals/PaymentDialog";
 import { useUserDeals, type Deal } from "@/hooks/useUserDeals";
+import { useTonPrice } from "@/hooks/useTonPrice";
 import { Inbox, Clock, CheckCircle2, Wallet, Loader2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -11,6 +12,7 @@ type DealFilter = "all" | "pending" | "active" | "completed";
 
 const Deals = () => {
   const { data: deals, isLoading, refetch } = useUserDeals();
+  const { convertToUsd } = useTonPrice();
   const [filter, setFilter] = useState<DealFilter>("all");
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
 
@@ -94,6 +96,7 @@ const Deals = () => {
               expiresAt={deal.expires_at}
               channel={deal.channel}
               campaign={deal.campaign}
+              usdEquivalent={convertToUsd(deal.total_price)}
               onPayClick={() => handlePayClick(deal)}
             />
           ))

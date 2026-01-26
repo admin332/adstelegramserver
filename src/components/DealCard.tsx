@@ -2,7 +2,6 @@ import { Clock, CheckCircle2, AlertCircle, Wallet, Shield, XCircle, AlertTriangl
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { useTonPrice } from "@/hooks/useTonPrice";
 import { ExpirationTimer } from "@/components/deals/ExpirationTimer";
 import TonIcon from "@/assets/ton-icon.svg";
 import { formatDistanceToNow } from "date-fns";
@@ -27,6 +26,7 @@ interface DealCardProps {
     username: string;
   } | null;
   campaign: { name: string } | null;
+  usdEquivalent: number | null;
   onPayClick?: () => void;
 }
 
@@ -92,13 +92,12 @@ export const DealCard = ({
   expiresAt,
   channel,
   campaign,
+  usdEquivalent,
   onPayClick,
 }: DealCardProps) => {
   const config = statusConfig[status];
   const StatusIcon = config.icon;
-  const { convertToUsd } = useTonPrice();
   
-  const usdEquivalent = convertToUsd(totalPrice);
   const channelTitle = channel?.title || "Канал";
   const channelInitial = channelTitle.charAt(0).toUpperCase();
 
