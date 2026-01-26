@@ -1,74 +1,106 @@
 
 
-## План: Добавить отображение суммы в USD на странице выбора количества постов
+## План: Отключение приближения на сайте и улучшение работы скрытия меню
 
-### Обзор
+### Текущая ситуация
 
-Добавим отображение эквивалента в долларах справа от итоговой суммы в TON в компоненте `PostQuantitySelector`. Будем использовать уже созданный хук `useTonPrice`.
+Скрытие нижнего меню при открытии клавиатуры **уже реализовано**:
+- Хук `useKeyboardVisible` отслеживает изменения `window.visualViewport`
+- `BottomNav` использует этот хук и возвращает `null` при `isKeyboardVisible === true`
 
-### Изменения в `src/components/channel/PostQuantitySelector.tsx`
+Проблема может быть в:
+1. Порог `heightDiff > 150` может быть слишком большим для некоторых устройств
+2. Нет отключения zoom на сайте
 
-#### 1. Добавить импорт хука (строка 5)
+### Изменения
 
-```tsx
-import { useTonPrice } from '@/hooks/useTonPrice';
+#### 1. Улучшить хук `useKeyboardVisible` — `src/hooks/useKeyboardVisible.ts`
+
+Уменьшим порог определения клавиатуры и добавим дополнительную логику:
+
+```typescript
+import { useState, useEffect } from 'react';
+
+export const useKeyboardVisible = () => {
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    
+    if (viewport) {
+      const handleResize = () => {
+        // Уменьшаем порог до 100px для лучшего определения
+        const heightDiff = window.innerHeight - viewport.height;
+        setIsKeyboardVisible(heightDiff > 100);
+      };
+
+      viewport.addEventListener('resize', handleResize);
+      viewport.addEventListener('scroll', handleResize);
+      
+      return () => {
+        viewport.removeEventListener('resize', handleResize);
+        viewport.removeEventListener('scroll', handleResize);
+      };
+    }
+
+    // Fallback для браузеров без visualViewport
+    const handleFocus = (e: FocusEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        setIsKeyboardVisible(true);
+      }
+    };
+
+    const handleBlur = () => {
+      setTimeout(() => setIsKeyboardVisible(false), 100);
+    };
+
+    document.addEventListener('focusin', handleFocus);
+    document.addEventListener('focusout', handleBlur);
+
+    return () => {
+      document.removeEventListener('focusin', handleFocus);
+      document.removeEventListener('focusout', handleBlur);
+    };
+  }, []);
+
+  return isKeyboardVisible;
+};
 ```
 
-#### 2. Использовать хук в компоненте (после строки 21)
+**Изменения:**
+- Порог уменьшен с `150` до `100` пикселей
+- Добавлен слушатель события `scroll` для visualViewport
+- Добавлен `setTimeout` в handleBlur для плавного скрытия
 
-```tsx
-const { tonPrice } = useTonPrice();
-```
+---
 
-#### 3. Обновить блок "Стоимость заказа" (строки 86-108)
+#### 2. Отключить zoom на всём сайте — `index.html`
 
-Добавить отображение суммы в долларах справа от суммы в TON:
+Обновить meta viewport:
 
-```tsx
-{/* Price Calculation */}
-<div className="bg-secondary/50 rounded-2xl p-4">
-  <p className="text-sm text-muted-foreground text-center mb-2">
-    Стоимость заказа
-  </p>
-  <div className="flex items-center justify-center gap-2">
-    <span className="text-muted-foreground">
-      {quantity} × {pricePerPost} TON =
-    </span>
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={totalPrice}
-        initial={{ opacity: 0, scale: 0.8 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.8 }}
-        className="flex items-center gap-1.5 font-bold text-xl"
-      >
-        <img src={TonIcon} alt="TON" className="w-5 h-5" />
-        <span className="text-foreground">{totalPrice}</span>
-      </motion.div>
-    </AnimatePresence>
-    {tonPrice && (
-      <span className="text-sm text-muted-foreground">
-        ≈ ${(totalPrice * tonPrice).toFixed(2)}
-      </span>
-    )}
-  </div>
-</div>
+```html
+<!-- Строка 5 - было: -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<!-- Станет: -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 ```
 
 ---
 
-### Итоговый результат
+#### 3. Добавить CSS защиту от zoom — `src/index.css`
 
-До:
-```
-Стоимость заказа
-2 × 50 TON = [TON icon] 100
-```
+Добавить правила в секцию `@layer base`:
 
-После:
-```
-Стоимость заказа
-2 × 50 TON = [TON icon] 100 ≈ $152.00
+```css
+html {
+  touch-action: manipulation;
+}
+
+/* Предотвращает auto-zoom на iOS при фокусе на input */
+input, textarea, select {
+  font-size: 16px !important;
+}
 ```
 
 ---
@@ -77,5 +109,15 @@ const { tonPrice } = useTonPrice();
 
 | Файл | Изменение |
 |------|-----------|
-| `src/components/channel/PostQuantitySelector.tsx` | Добавить импорт и использование `useTonPrice`, отобразить сумму в USD |
+| `src/hooks/useKeyboardVisible.ts` | Улучшить логику определения клавиатуры |
+| `index.html` | Добавить `maximum-scale=1.0, user-scalable=no` |
+| `src/index.css` | Добавить `touch-action: manipulation` и `font-size: 16px` для inputs |
+
+---
+
+### Результат
+
+- Нижнее меню скрывается при открытии клавиатуры на всех страницах включая `/create`
+- Приближение (zoom) отключено на всём сайте
+- Нет auto-zoom на iOS при фокусе на текстовые поля
 
