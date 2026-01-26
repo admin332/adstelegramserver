@@ -1,35 +1,28 @@
-import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
+async function fetchTonPrice(): Promise<number> {
+  const { data, error } = await supabase.functions.invoke('ton-price');
+  if (error || !data?.price) {
+    throw new Error('Не удалось получить курс TON');
+  }
+  return data.price;
+}
+
 export function useTonPrice() {
-  const [tonPrice, setTonPrice] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchPrice = async () => {
-      try {
-        const { data, error } = await supabase.functions.invoke('ton-price');
-        if (!error && data?.price) {
-          setTonPrice(data.price);
-        }
-      } catch (e) {
-        console.error('Ошибка получения курса TON:', e);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchPrice();
-    
-    // Обновлять каждые 5 минут
-    const interval = setInterval(fetchPrice, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
+  const { data: tonPrice, isLoading: loading } = useQuery({
+    queryKey: ['ton-price'],
+    queryFn: fetchTonPrice,
+    staleTime: 5 * 60 * 1000,      // Данные свежие 5 минут
+    gcTime: 10 * 60 * 1000,        // Кеш хранится 10 минут
+    refetchInterval: 5 * 60 * 1000, // Автообновление каждые 5 минут
+    retry: 2,
+  });
 
   const convertToUsd = (tonAmount: number): number | null => {
     if (!tonPrice) return null;
     return tonAmount * tonPrice;
   };
 
-  return { tonPrice, loading, convertToUsd };
+  return { tonPrice: tonPrice ?? null, loading, convertToUsd };
 }
