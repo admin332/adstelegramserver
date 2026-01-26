@@ -79,8 +79,6 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       variants={cardVariants}
       initial="hidden"
       animate="visible"
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
     >
       {/* Blue Background - Left Side */}
       <div className="absolute inset-0 bg-gradient-to-b from-[hsl(217,91%,50%)] to-[hsl(224,76%,48%)]" />
@@ -93,7 +91,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
         <img
           src={avatar}
           alt={name}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+          className="w-full h-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-black/30 to-black/70" />
       </div>
