@@ -100,7 +100,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
         <img
           src={avatar}
           alt={name}
-          className="w-full h-full object-cover"
+          className="w-full h-full object-contain object-right"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-black/30 to-black/70" />
       </div>
