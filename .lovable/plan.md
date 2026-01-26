@@ -1,141 +1,90 @@
 
 
-## План: Скрытие полей для существующих каналов и изменение текста кнопки
+## План: Исправить валидацию category для существующих каналов
 
-### Задача
-При добавлении канала, который уже существует в системе, скрыть выбор категории и стоимости, а текст кнопки изменить на "Я менеджер".
+### Проблема
 
----
-
-### Изменения в AddChannelWizard.tsx
-
-**1. Добавить состояние для отслеживания существующего канала:**
-```typescript
-const [isExistingChannel, setIsExistingChannel] = useState(false);
-```
-
-**2. Обновить debounce-эффект (preview-channel):**
-
-При получении превью канала проверять, есть ли он уже в базе:
-```typescript
-// В ответе от preview-channel добавить флаг exists
-if (data.success) {
-  setChannelPreview({
-    avatar_url: data.avatar_url,
-    title: data.title,
-  });
-  setIsExistingChannel(data.exists || false); // Новый флаг
-}
-```
-
-**3. Условно скрыть категорию и цены (Step 2):**
+В Edge Function `verify-channel` на строках 236-241 проверка `!category` выполняется **до** проверки существующего канала:
 
 ```typescript
-{/* Категория — скрыть если канал существует */}
-{!isExistingChannel && (
-  <div className="space-y-2">
-    <Label>Категория</Label>
-    <Select ...>
-      ...
-    </Select>
-  </div>
-)}
-
-{/* Стоимость — скрыть если канал существует */}
-{!isExistingChannel && (
-  <div className="space-y-2">
-    <Label>Стоимость размещения (TON за пост)</Label>
+// Текущий код (строки 236-241)
+if (!username || !category) {
+  return new Response(
+    JSON.stringify({ success: false, error: "Не все обязательные поля заполнены" }),
     ...
-  </div>
-)}
-```
-
-**4. Изменить текст кнопки:**
-
-```typescript
-<Button 
-  onClick={handleVerifyChannel} 
-  className="flex-1"
-  disabled={isVerifying || !channelData.username || (!isExistingChannel && !channelData.category)}
->
-  {isVerifying ? (
-    <>
-      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-      Проверка...
-    </>
-  ) : isExistingChannel ? (
-    <>
-      Я менеджер
-      <ArrowRight className="w-4 h-4 ml-2" />
-    </>
-  ) : (
-    <>
-      Проверить канал
-      <ArrowRight className="w-4 h-4 ml-2" />
-    </>
-  )}
-</Button>
-```
-
-**5. Обновить валидацию:**
-
-Убрать проверку категории, если канал существует:
-```typescript
-disabled={isVerifying || !channelData.username || (!isExistingChannel && !channelData.category)}
-```
-
-**6. Обновить handleVerifyChannel:**
-
-Не требовать категорию для существующих каналов:
-```typescript
-if (!cleanUsername) {
-  toast({
-    title: "Укажите канал",
-    description: "Введите username канала",
-    variant: "destructive",
-  });
-  return;
-}
-
-// Требуем категорию только для новых каналов
-if (!isExistingChannel && !channelData.category) {
-  toast({
-    title: "Выберите категорию",
-    description: "Категория обязательна для нового канала",
-    variant: "destructive",
-  });
-  return;
+  );
 }
 ```
 
----
+Это блокирует менеджеров, которые добавляют **существующий** канал, хотя им категория не нужна.
 
-### Обновление Edge Function preview-channel
+### Анализ безопасности (✅ Подтверждено)
 
-Добавить проверку существования канала в базе:
+Проверка Telegram ID реализована **безопасно**:
+- `initData` валидируется через HMAC-SHA256 (строки 21-88)
+- `telegramId` извлекается из **валидированных** данных (строка 233)
+- Проверка прав в Telegram использует верифицированный `telegramId` (строка 293)
+- Frontend не может подделать ID пользователя
 
+### Решение
+
+Изменить порядок проверок в `verify-channel`:
+1. Сначала проверить существование канала
+2. Требовать `category` только для **новых** каналов
+
+### Изменения
+
+| Файл | Действие |
+|------|----------|
+| `supabase/functions/verify-channel/index.ts` | Изменить порядок валидации |
+
+### Код изменений
+
+**Было (строки 236-241):**
 ```typescript
-// В preview-channel добавить:
-const { data: existingChannel } = await supabase
-  .from("channels")
-  .select("id")
-  .eq("username", cleanUsername)
-  .maybeSingle();
-
-return new Response(JSON.stringify({
-  success: true,
-  avatar_url: avatarUrl,
-  title: chatInfo.title,
-  exists: !!existingChannel, // Новый флаг
-}));
+if (!username || !category) {
+  return new Response(
+    JSON.stringify({ success: false, error: "Не все обязательные поля заполнены" }),
+    { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
 ```
 
----
+**Станет:**
+```typescript
+// Username всегда обязателен
+if (!username) {
+  return new Response(
+    JSON.stringify({ success: false, error: "Не указан username канала" }),
+    { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+
+// ... (далее код получения канала, проверка бота)
+
+// После получения existingChannel:
+// Для существующих каналов category не нужна
+// Для новых каналов category обязательна — проверить перед INSERT
+```
+
+Конкретно нужно:
+1. Убрать проверку `!category` на строке 236
+2. Добавить проверку `category` только перед вставкой нового канала (перед строкой 421)
+
+```typescript
+// Перед строкой 421 (INSERT новго канала):
+if (!category) {
+  return new Response(
+    JSON.stringify({ success: false, error: "Выберите категорию для нового канала" }),
+    { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+```
 
 ### Результат
 
-| Сценарий | Категория | Стоимость | Кнопка |
-|----------|-----------|-----------|--------|
-| Новый канал | Показать | Показать | "Проверить канал" |
-| Существующий канал | Скрыть | Скрыть | "Я менеджер" |
+| Сценарий | Категория | Результат |
+|----------|-----------|-----------|
+| Новый канал без категории | Требуется | Ошибка "Выберите категорию" |
+| Существующий канал (менеджер) | Не требуется | Успех — добавлен как менеджер |
 
