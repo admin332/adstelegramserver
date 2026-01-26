@@ -82,6 +82,7 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
   // Preview state
   const [channelPreview, setChannelPreview] = useState<ChannelPreview | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const [isExistingChannel, setIsExistingChannel] = useState(false);
   
   const [channelData, setChannelData] = useState<ChannelData>({
     username: "",
@@ -99,6 +100,7 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
     if (!username || username.length < 3) {
       setChannelPreview(null);
       setIsLoadingPreview(false);
+      setIsExistingChannel(false);
       return;
     }
     
@@ -124,11 +126,14 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
             avatar_url: data.avatar_url,
             title: data.title,
           });
+          setIsExistingChannel(data.exists || false);
         } else {
           setChannelPreview(null);
+          setIsExistingChannel(false);
         }
       } catch {
         setChannelPreview(null);
+        setIsExistingChannel(false);
       } finally {
         setIsLoadingPreview(false);
       }
@@ -140,10 +145,20 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
   const handleVerifyChannel = async () => {
     const cleanUsername = extractUsername(channelData.username);
     
-    if (!cleanUsername || !channelData.category) {
+    if (!cleanUsername) {
       toast({
-        title: "Заполните все поля",
-        description: "Укажите username канала и категорию",
+        title: "Укажите канал",
+        description: "Введите username канала",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Require category only for new channels
+    if (!isExistingChannel && !channelData.category) {
+      toast({
+        title: "Выберите категорию",
+        description: "Категория обязательна для нового канала",
         variant: "destructive",
       });
       return;
@@ -325,70 +340,76 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
               )}
             </div>
 
-            <div className="space-y-2">
-              <Label>Категория</Label>
-              <Select
-                value={channelData.category}
-                onValueChange={(value) => setChannelData({ ...channelData, category: value })}
-              >
-                <SelectTrigger className="bg-card border-0">
-                  <SelectValue placeholder="Выберите категорию" />
-                </SelectTrigger>
-                <SelectContent className="z-[60] bg-card border-0">
-                  {channelCategories.map((category) => {
-                    const Icon = category.icon;
-                    return (
-                      <SelectItem key={category.id} value={category.id}>
-                        <div className="flex items-center gap-2">
-                          <Icon className="w-4 h-4" />
-                          <span>{category.name}</span>
-                        </div>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Category - hide if channel exists */}
+            {!isExistingChannel && (
+              <div className="space-y-2">
+                <Label>Категория</Label>
+                <Select
+                  value={channelData.category}
+                  onValueChange={(value) => setChannelData({ ...channelData, category: value })}
+                >
+                  <SelectTrigger className="bg-card border-0">
+                    <SelectValue placeholder="Выберите категорию" />
+                  </SelectTrigger>
+                  <SelectContent className="z-[60] bg-card border-0">
+                    {channelCategories.map((category) => {
+                      const Icon = category.icon;
+                      return (
+                        <SelectItem key={category.id} value={category.id}>
+                          <div className="flex items-center gap-2">
+                            <Icon className="w-4 h-4" />
+                            <span>{category.name}</span>
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
-            <div className="space-y-2">
-              <Label>Стоимость размещения (TON за пост)</Label>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground">1/24</span>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      placeholder="0"
-                      value={channelData.price_1_24}
-                      onChange={(e) => setChannelData({ ...channelData, price_1_24: e.target.value })}
-                      className="bg-card border-0"
-                    />
-                    {channelData.price_1_24 && tonPrice && (
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        ≈ ${(parseFloat(channelData.price_1_24) * tonPrice).toFixed(2)}
-                      </span>
-                    )}
+            {/* Price - hide if channel exists */}
+            {!isExistingChannel && (
+              <div className="space-y-2">
+                <Label>Стоимость размещения (TON за пост)</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground">1/24</span>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        placeholder="0"
+                        value={channelData.price_1_24}
+                        onChange={(e) => setChannelData({ ...channelData, price_1_24: e.target.value })}
+                        className="bg-card border-0"
+                      />
+                      {channelData.price_1_24 && tonPrice && (
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                          ≈ ${(parseFloat(channelData.price_1_24) * tonPrice).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground">2+/24</span>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      placeholder="0"
-                      value={channelData.price_2_48}
-                      onChange={(e) => setChannelData({ ...channelData, price_2_48: e.target.value })}
-                      className="bg-card border-0"
-                    />
-                    {channelData.price_2_48 && tonPrice && (
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        ≈ ${(parseFloat(channelData.price_2_48) * tonPrice).toFixed(2)}
-                      </span>
-                    )}
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground">2+/24</span>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        placeholder="0"
+                        value={channelData.price_2_48}
+                        onChange={(e) => setChannelData({ ...channelData, price_2_48: e.target.value })}
+                        className="bg-card border-0"
+                      />
+                      {channelData.price_2_48 && tonPrice && (
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                          ≈ ${(parseFloat(channelData.price_2_48) * tonPrice).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           {verificationError && (
@@ -406,12 +427,17 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
             <Button 
               onClick={handleVerifyChannel} 
               className="flex-1"
-              disabled={isVerifying || !channelData.username || !channelData.category}
+              disabled={isVerifying || !channelData.username || (!isExistingChannel && !channelData.category)}
             >
               {isVerifying ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   Проверка...
+                </>
+              ) : isExistingChannel ? (
+                <>
+                  Я менеджер
+                  <ArrowRight className="w-4 h-4 ml-2" />
                 </>
               ) : (
                 <>

@@ -1,3 +1,5 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -93,12 +95,31 @@ Deno.serve(async (req) => {
       avatarUrl = await getFileUrl(botToken, chat.photo.big_file_id);
     }
 
+    // Check if channel already exists in database
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    
+    let exists = false;
+    if (supabaseUrl && supabaseServiceKey) {
+      const supabase = createClient(supabaseUrl, supabaseServiceKey);
+      const cleanUsername = (chat.username || username.replace("@", "")).toLowerCase();
+      
+      const { data: existingChannel } = await supabase
+        .from("channels")
+        .select("id")
+        .ilike("username", cleanUsername)
+        .maybeSingle();
+      
+      exists = !!existingChannel;
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         title: chat.title || null,
         username: chat.username || username.replace("@", ""),
         avatar_url: avatarUrl,
+        exists,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
