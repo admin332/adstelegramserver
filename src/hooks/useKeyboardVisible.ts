@@ -4,42 +4,19 @@ export const useKeyboardVisible = () => {
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
   useEffect(() => {
+    if (!window.visualViewport) return;
+
     const viewport = window.visualViewport;
-    
-    if (viewport) {
-      const handleResize = () => {
-        // Уменьшаем порог до 100px для лучшего определения
-        const heightDiff = window.innerHeight - viewport.height;
-        setIsKeyboardVisible(heightDiff > 100);
-      };
+    const initialHeight = viewport.height; // Сохраняем начальную высоту
+    const threshold = 150; // Клавиатура обычно > 150px
 
-      viewport.addEventListener('resize', handleResize);
-      viewport.addEventListener('scroll', handleResize);
-      
-      return () => {
-        viewport.removeEventListener('resize', handleResize);
-        viewport.removeEventListener('scroll', handleResize);
-      };
-    }
-
-    // Fallback для браузеров без visualViewport
-    const handleFocus = (e: FocusEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        setIsKeyboardVisible(true);
-      }
+    const handleResize = () => {
+      const heightDiff = initialHeight - viewport.height;
+      setIsKeyboardVisible(heightDiff > threshold);
     };
 
-    const handleBlur = () => {
-      setTimeout(() => setIsKeyboardVisible(false), 100);
-    };
-
-    document.addEventListener('focusin', handleFocus);
-    document.addEventListener('focusout', handleBlur);
-
-    return () => {
-      document.removeEventListener('focusin', handleFocus);
-      document.removeEventListener('focusout', handleBlur);
-    };
+    viewport.addEventListener('resize', handleResize);
+    return () => viewport.removeEventListener('resize', handleResize);
   }, []);
 
   return isKeyboardVisible;
