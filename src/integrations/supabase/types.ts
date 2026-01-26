@@ -161,6 +161,7 @@ export type Database = {
           price_post: number | null
           rating: number | null
           recent_posts_stats: Json | null
+          reviews_count: number | null
           stats_updated_at: string | null
           subscribers_count: number | null
           successful_ads: number | null
@@ -192,6 +193,7 @@ export type Database = {
           price_post?: number | null
           rating?: number | null
           recent_posts_stats?: Json | null
+          reviews_count?: number | null
           stats_updated_at?: string | null
           subscribers_count?: number | null
           successful_ads?: number | null
@@ -223,6 +225,7 @@ export type Database = {
           price_post?: number | null
           rating?: number | null
           recent_posts_stats?: Json | null
+          reviews_count?: number | null
           stats_updated_at?: string | null
           subscribers_count?: number | null
           successful_ads?: number | null
@@ -237,6 +240,131 @@ export type Database = {
           {
             foreignKeyName: "channels_owner_id_fkey"
             columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      deals: {
+        Row: {
+          advertiser_id: string
+          campaign_id: string | null
+          channel_id: string
+          completed_at: string | null
+          created_at: string | null
+          duration_hours: number
+          id: string
+          posted_at: string | null
+          posts_count: number
+          price_per_post: number
+          scheduled_at: string | null
+          status: Database["public"]["Enums"]["deal_status"]
+          total_price: number
+          updated_at: string | null
+        }
+        Insert: {
+          advertiser_id: string
+          campaign_id?: string | null
+          channel_id: string
+          completed_at?: string | null
+          created_at?: string | null
+          duration_hours?: number
+          id?: string
+          posted_at?: string | null
+          posts_count?: number
+          price_per_post: number
+          scheduled_at?: string | null
+          status?: Database["public"]["Enums"]["deal_status"]
+          total_price: number
+          updated_at?: string | null
+        }
+        Update: {
+          advertiser_id?: string
+          campaign_id?: string | null
+          channel_id?: string
+          completed_at?: string | null
+          created_at?: string | null
+          duration_hours?: number
+          id?: string
+          posted_at?: string | null
+          posts_count?: number
+          price_per_post?: number
+          scheduled_at?: string | null
+          status?: Database["public"]["Enums"]["deal_status"]
+          total_price?: number
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deals_advertiser_id_fkey"
+            columns: ["advertiser_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deals_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deals_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reviews: {
+        Row: {
+          channel_id: string
+          comment: string | null
+          created_at: string | null
+          deal_id: string
+          id: string
+          rating: number
+          reviewer_id: string
+        }
+        Insert: {
+          channel_id: string
+          comment?: string | null
+          created_at?: string | null
+          deal_id: string
+          id?: string
+          rating: number
+          reviewer_id: string
+        }
+        Update: {
+          channel_id?: string
+          comment?: string | null
+          created_at?: string | null
+          deal_id?: string
+          id?: string
+          rating?: number
+          reviewer_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reviews_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reviews_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: true
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reviews_reviewer_id_fkey"
+            columns: ["reviewer_id"]
             isOneToOne: false
             referencedRelation: "users"
             referencedColumns: ["id"]
@@ -322,6 +450,13 @@ export type Database = {
     Enums: {
       app_role: "admin" | "moderator" | "user"
       channel_role: "owner" | "manager"
+      deal_status:
+        | "pending"
+        | "escrow"
+        | "in_progress"
+        | "completed"
+        | "cancelled"
+        | "disputed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -451,6 +586,14 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "moderator", "user"],
       channel_role: ["owner", "manager"],
+      deal_status: [
+        "pending",
+        "escrow",
+        "in_progress",
+        "completed",
+        "cancelled",
+        "disputed",
+      ],
     },
   },
 } as const

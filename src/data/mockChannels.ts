@@ -20,6 +20,7 @@ export interface Channel {
   price: number;
   tonPrice: number;
   rating: number;
+  reviewsCount?: number;
   verified: boolean;
   premium?: boolean;
   description?: string;

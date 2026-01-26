@@ -78,11 +78,30 @@ const Channel: React.FC = () => {
     );
   }
 
+  // Helper function for Russian pluralization
+  const pluralize = (n: number, one: string, few: string, many: string): string => {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    
+    if (mod100 >= 11 && mod100 <= 14) return many;
+    if (mod10 === 1) return one;
+    if (mod10 >= 2 && mod10 <= 4) return few;
+    return many;
+  };
+
+  const getRatingValue = () => {
+    const count = channel.reviewsCount || 0;
+    if (count > 0) {
+      return `${channel.rating} (${count} ${pluralize(count, 'отзыв', 'отзыва', 'отзывов')})`;
+    }
+    return `${channel.rating} (нет отзывов)`;
+  };
+
   const detailedStats = [
     {
       icon: Star,
       label: 'Рейтинг',
-      value: channel.rating.toString(),
+      value: getRatingValue(),
     },
     {
       icon: Tag,
