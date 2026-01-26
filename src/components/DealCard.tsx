@@ -154,7 +154,7 @@ export const DealCard = ({
           <img src={TonIcon} alt="TON" className="w-4 h-4" />
           <span className="font-semibold text-foreground">{totalPrice} TON</span>
           {usdEquivalent && (
-            <span className="text-muted-foreground">≈ ${usdEquivalent.toFixed(0)}</span>
+            <span className="text-muted-foreground">≈ ${usdEquivalent.toFixed(2)}</span>
           )}
         </div>
         <span className="text-muted-foreground">•</span>
