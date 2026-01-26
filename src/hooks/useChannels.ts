@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Channel } from '@/data/mockChannels';
 
@@ -19,9 +20,10 @@ interface DatabaseChannel {
   engagement: number | null;
   successful_ads: number | null;
   is_active: boolean | null;
+  stats_updated_at: string | null;
 }
 
-function mapDatabaseToChannel(dbChannel: DatabaseChannel): Channel {
+function mapDatabaseToChannel(dbChannel: DatabaseChannel): Channel & { statsUpdatedAt?: string } {
   const tonPrice = Number(dbChannel.price_1_24) || 0;
   const usdPrice = Math.round(tonPrice * 3.5); // Approximate USD conversion
   
@@ -41,7 +43,27 @@ function mapDatabaseToChannel(dbChannel: DatabaseChannel): Channel {
     description: dbChannel.description || undefined,
     engagement: Number(dbChannel.engagement) || 35,
     successfulAds: dbChannel.successful_ads || 0,
+    statsUpdatedAt: dbChannel.stats_updated_at || undefined,
   };
+}
+
+async function refreshChannelStats(channelId: string): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/refresh-channel-stats`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel_id: channelId }),
+      }
+    );
+    const data = await response.json();
+    console.log('[useChannel] Refresh stats response:', data);
+    return data.updated === true;
+  } catch (error) {
+    console.error('[useChannel] Failed to refresh channel stats:', error);
+    return false;
+  }
 }
 
 export function useChannels() {
@@ -67,7 +89,10 @@ export function useChannels() {
 }
 
 export function useChannel(id: string | undefined) {
-  return useQuery({
+  const queryClient = useQueryClient();
+  const refreshingRef = useRef(false);
+  
+  const channelQuery = useQuery({
     queryKey: ['channel', id],
     queryFn: async () => {
       if (!id) return null;
@@ -90,4 +115,28 @@ export function useChannel(id: string | undefined) {
     enabled: !!id,
     staleTime: 1000 * 60 * 5,
   });
+
+  // Effect to check and refresh stats if older than 24 hours
+  useEffect(() => {
+    if (!channelQuery.data || !id || refreshingRef.current) return;
+    
+    const statsUpdatedAt = new Date(channelQuery.data.statsUpdatedAt || 0);
+    const hoursAgo = (Date.now() - statsUpdatedAt.getTime()) / (1000 * 60 * 60);
+    
+    if (hoursAgo > 24) {
+      console.log(`[useChannel] Stats are ${hoursAgo.toFixed(1)}h old, refreshing...`);
+      refreshingRef.current = true;
+      
+      refreshChannelStats(id).then((updated) => {
+        refreshingRef.current = false;
+        if (updated) {
+          console.log('[useChannel] Stats updated, invalidating query');
+          queryClient.invalidateQueries({ queryKey: ['channel', id] });
+          queryClient.invalidateQueries({ queryKey: ['channels'] });
+        }
+      });
+    }
+  }, [channelQuery.data, id, queryClient]);
+
+  return channelQuery;
 }

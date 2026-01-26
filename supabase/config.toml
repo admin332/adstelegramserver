@@ -38,3 +38,6 @@ verify_jwt = false
 
 [functions.recheck-admin-status]
 verify_jwt = false
+
+[functions.refresh-channel-stats]
+verify_jwt = false
