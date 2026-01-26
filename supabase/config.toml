@@ -29,3 +29,12 @@ verify_jwt = false
 
 [functions.user-channels]
 verify_jwt = false
+
+[functions.channel-team]
+verify_jwt = false
+
+[functions.join-channel-as-admin]
+verify_jwt = false
+
+[functions.recheck-admin-status]
+verify_jwt = false

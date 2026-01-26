@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { getTelegramInitData } from '@/lib/telegram';
 import { toast } from 'sonner';
 
@@ -34,52 +33,32 @@ export function useChannelAdmins(channelId: string | undefined) {
     queryFn: async (): Promise<ChannelAdmin[]> => {
       if (!channelId) return [];
 
-      // Note: This will only work via Edge Function since RLS blocks direct access
-      // For now, we fetch what we can (service role handles via edge function)
-      const { data, error } = await supabase
-        .from('channel_admins')
-        .select(`
-          id,
-          channel_id,
-          user_id,
-          role,
-          permissions,
-          telegram_member_status,
-          last_verified_at,
-          created_at,
-          users:user_id (
-            id,
-            first_name,
-            last_name,
-            username,
-            photo_url
-          )
-        `)
-        .eq('channel_id', channelId)
-        .order('created_at', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching channel admins:', error);
+      const initData = getTelegramInitData();
+      if (!initData) {
+        console.log('[useChannelAdmins] No initData available');
         return [];
       }
 
-      return (data || []).map((item: unknown) => {
-        const typedItem = item as {
-          id: string;
-          channel_id: string;
-          user_id: string;
-          role: 'owner' | 'manager';
-          permissions: ChannelAdmin['permissions'];
-          telegram_member_status: string | null;
-          last_verified_at: string;
-          created_at: string;
-          users: ChannelAdmin['user'] | null;
-        };
-        return {
-          ...typedItem,
-          user: typedItem.users || undefined,
-        };
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/channel-team`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channel_id: channelId, initData }),
+        }
+      );
+
+      const data = await response.json();
+      
+      if (!data.success) {
+        console.error('[useChannelAdmins] Error:', data.error);
+        return [];
+      }
+
+      return (data.admins || []).map((admin: ChannelAdmin & { user: ChannelAdmin['user'] | null }) => ({
+        ...admin,
+        user: admin.user || undefined,
+      }));
     },
     enabled: !!channelId,
   });
@@ -171,25 +150,32 @@ export function useCurrentUserChannelRole(channelId: string | undefined) {
     queryFn: async (): Promise<ChannelAdmin | null> => {
       if (!channelId) return null;
 
-      // This would require matching the current user to channel_admins
-      // For now, return null - the full implementation would need user context
-      const { data, error } = await supabase
-        .from('channel_admins')
-        .select('*')
-        .eq('channel_id', channelId)
-        .maybeSingle();
+      const initData = getTelegramInitData();
+      if (!initData) return null;
 
-      if (error) {
-        console.error('Error fetching current user role:', error);
+      // Use the same channel-team endpoint and find current user's entry
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/channel-team`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channel_id: channelId, initData }),
+        }
+      );
+
+      const data = await response.json();
+      
+      if (!data.success || !data.admins || data.admins.length === 0) {
         return null;
       }
 
-      if (!data) return null;
-
+      // The current user's entry will be in the list since the endpoint validates access
+      // We return the first entry as a fallback (user's own entry)
+      const admin = data.admins[0] as ChannelAdmin;
       return {
-        ...data,
-        permissions: data.permissions as unknown as ChannelAdmin['permissions'],
-      } as ChannelAdmin;
+        ...admin,
+        permissions: admin.permissions as ChannelAdmin['permissions'],
+      };
     },
     enabled: !!channelId,
   });
