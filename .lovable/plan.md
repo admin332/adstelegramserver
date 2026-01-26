@@ -1,337 +1,306 @@
 
-
 ## Цель
-Реализовать продвинутую аналитику каналов с верифицированными данными из Telegram для выполнения требований конкурса: Average Views, Engagement Rate (ER), языковая статистика, процент Premium-пользователей.
-
-## Техническая реальность
-
-### Ограничения Bot API
-- `stats.getBroadcastStats` (полная статистика с языками, графиками) — это **MTProto API**, недоступный для ботов
-- Bot API не предоставляет прямого доступа к статистике канала
-- Bot API **не может** получить `views` постов напрямую через `getUpdates`
-
-### Решение: Веб-скрапинг t.me
-Telegram предоставляет публичные данные постов через `https://t.me/{username}/{message_id}?embed=1`:
-- Количество просмотров каждого поста
-- Дата публикации
-- Это легальный способ получения "Verified stats"
+Реализовать систему верифицированных отзывов для каналов: отзывы можно оставлять только после реальной завершённой сделки. В карточке канала отображать рейтинг с количеством отзывов: **"4.5 (12 отзывов)"**.
 
 ## Архитектура решения
 
 ```text
-┌────────────────────┐     ┌──────────────────────────┐
-│   Channel Page     │────►│  refresh-channel-stats   │
-│   (Frontend)       │     │    (Edge Function)       │
-└────────────────────┘     └────────────┬─────────────┘
-                                        │
-           ┌────────────────────────────┼────────────────────────────┐
-           ▼                            ▼                            ▼
-  ┌─────────────────┐         ┌──────────────────┐         ┌────────────────┐
-  │ Bot API         │         │ t.me Embed       │         │ Database       │
-  │ getChatMemberCount│       │ Posts Scraping   │         │ Update         │
-  │ getChat         │         │ (Last 10 posts)  │         │ channels table │
-  └─────────────────┘         └──────────────────┘         └────────────────┘
-           │                            │                            ▲
-           │                            │                            │
-           └────────────────────────────┴────────────────────────────┘
-                                   Stats:
-                              - subscribers_count
-                              - avg_views (calculated)
-                              - engagement (ER %)
-                              - recent_posts_views (JSONB)
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│    Advertiser   │────►│   Deal Flow     │────►│   Review Form   │
+│  (orders ad)    │     │  (24h escrow)   │     │  (after deal)   │
+└─────────────────┘     └─────────────────┘     └────────┬────────┘
+                                                         │
+                                                         ▼
+                                              ┌─────────────────────┐
+                                              │    reviews table    │
+                                              │ - deal_id (verified)│
+                                              │ - channel_id        │
+                                              │ - rating (1-5)      │
+                                              │ - comment           │
+                                              └────────┬────────────┘
+                                                       │
+                                                       ▼ TRIGGER
+                                              ┌─────────────────────┐
+                                              │   channels table    │
+                                              │ - rating (avg)      │
+                                              │ - reviews_count     │
+                                              └─────────────────────┘
 ```
 
 ## Этапы реализации
 
 ### Этап 1: Миграция базы данных
 
-Добавить новые колонки для хранения расширенной аналитики:
+#### 1.1 Создать таблицу `deals`
+
+```sql
+-- Enum для статуса сделки
+CREATE TYPE deal_status AS ENUM (
+  'pending',      -- Ожидание подтверждения
+  'escrow',       -- Деньги в эскроу
+  'in_progress',  -- Пост размещён
+  'completed',    -- Сделка завершена (24ч прошло)
+  'cancelled',    -- Отменена
+  'disputed'      -- Спор
+);
+
+CREATE TABLE public.deals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  advertiser_id UUID NOT NULL REFERENCES public.users(id),
+  channel_id UUID NOT NULL REFERENCES public.channels(id),
+  campaign_id UUID REFERENCES public.campaigns(id),
+  
+  -- Детали заказа
+  posts_count INTEGER NOT NULL DEFAULT 1,
+  duration_hours INTEGER NOT NULL DEFAULT 24,
+  price_per_post NUMERIC NOT NULL,
+  total_price NUMERIC NOT NULL,
+  
+  -- Временные метки
+  scheduled_at TIMESTAMPTZ,
+  posted_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  
+  -- Статус
+  status deal_status NOT NULL DEFAULT 'pending',
+  
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+```
+
+#### 1.2 Создать таблицу `reviews`
+
+```sql
+CREATE TABLE public.reviews (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id UUID NOT NULL UNIQUE REFERENCES public.deals(id) ON DELETE CASCADE,
+  channel_id UUID NOT NULL REFERENCES public.channels(id) ON DELETE CASCADE,
+  reviewer_id UUID NOT NULL REFERENCES public.users(id),
+  
+  rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  comment TEXT,
+  
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+```
+
+#### 1.3 Добавить колонку `reviews_count` в `channels`
 
 ```sql
 ALTER TABLE public.channels
-ADD COLUMN IF NOT EXISTS recent_posts_stats JSONB DEFAULT '[]',
-ADD COLUMN IF NOT EXISTS language_stats JSONB DEFAULT NULL,
-ADD COLUMN IF NOT EXISTS premium_percentage NUMERIC DEFAULT NULL,
-ADD COLUMN IF NOT EXISTS notifications_enabled NUMERIC DEFAULT NULL,
-ADD COLUMN IF NOT EXISTS growth_rate NUMERIC DEFAULT NULL,
-ADD COLUMN IF NOT EXISTS top_hours JSONB DEFAULT NULL;
+ADD COLUMN IF NOT EXISTS reviews_count INTEGER DEFAULT 0;
 ```
 
-Структура `recent_posts_stats`:
-```json
-[
-  { "message_id": 123, "views": 15000, "date": "2026-01-26" },
-  { "message_id": 122, "views": 14500, "date": "2026-01-25" },
-  ...
-]
-```
+#### 1.4 Создать триггер для автоматического расчёта рейтинга
 
-### Этап 2: Обновить Edge Function `refresh-channel-stats`
-
-**Файл**: `supabase/functions/refresh-channel-stats/index.ts`
-
-#### 2.1 Добавить функцию скрапинга постов
-
-```typescript
-async function fetchPostViews(
-  username: string, 
-  messageId: number
-): Promise<{ views: number; date: string } | null> {
-  try {
-    const url = `https://t.me/${username}/${messageId}?embed=1`;
-    const response = await fetch(url);
-    const html = await response.text();
-    
-    // Парсим views из HTML: <span class="tgme_widget_message_views">15.2K</span>
-    const viewsMatch = html.match(/tgme_widget_message_views[^>]*>([^<]+)</);
-    const dateMatch = html.match(/datetime="([^"]+)"/);
-    
-    if (!viewsMatch) return null;
-    
-    const viewsText = viewsMatch[1].trim();
-    const views = parseViewsText(viewsText); // "15.2K" → 15200
-    const date = dateMatch ? dateMatch[1].split('T')[0] : null;
-    
-    return { views, date };
-  } catch (error) {
-    console.error(`[refresh] Failed to fetch post ${messageId}:`, error);
-    return null;
-  }
-}
-
-function parseViewsText(text: string): number {
-  const num = parseFloat(text.replace(/[^0-9.]/g, ''));
-  if (text.includes('K')) return Math.round(num * 1000);
-  if (text.includes('M')) return Math.round(num * 1000000);
-  return Math.round(num);
-}
-```
-
-#### 2.2 Добавить сбор статистики последних 10 постов
-
-```typescript
-async function collectRecentPostsStats(
-  username: string,
-  startMessageId: number
-): Promise<{ views: number; messageId: number; date: string }[]> {
-  const stats: { views: number; messageId: number; date: string }[] = [];
+```sql
+CREATE OR REPLACE FUNCTION public.update_channel_rating()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- Обновляем рейтинг и количество отзывов канала
+  UPDATE public.channels
+  SET 
+    rating = (
+      SELECT COALESCE(ROUND(AVG(rating)::numeric, 1), 4.5)
+      FROM public.reviews
+      WHERE channel_id = COALESCE(NEW.channel_id, OLD.channel_id)
+    ),
+    reviews_count = (
+      SELECT COUNT(*)
+      FROM public.reviews
+      WHERE channel_id = COALESCE(NEW.channel_id, OLD.channel_id)
+    )
+  WHERE id = COALESCE(NEW.channel_id, OLD.channel_id);
   
-  // Пробуем найти последние 10 постов (с запасом на пропуски)
-  for (let i = 0; i < 20 && stats.length < 10; i++) {
-    const msgId = startMessageId - i;
-    if (msgId <= 0) break;
-    
-    const postData = await fetchPostViews(username, msgId);
-    if (postData && postData.views > 0) {
-      stats.push({
-        messageId: msgId,
-        views: postData.views,
-        date: postData.date || new Date().toISOString().split('T')[0],
-      });
-    }
-  }
-  
-  return stats;
-}
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+CREATE TRIGGER trigger_update_channel_rating
+AFTER INSERT OR UPDATE OR DELETE ON public.reviews
+FOR EACH ROW
+EXECUTE FUNCTION public.update_channel_rating();
 ```
 
-#### 2.3 Вычислить метрики
+#### 1.5 RLS Политики
 
-```typescript
-function calculateMetrics(
-  subscribersCount: number,
-  recentPosts: { views: number }[]
-): { avgViews: number; engagement: number } {
-  if (recentPosts.length === 0) {
-    return { avgViews: 0, engagement: 0 };
-  }
-  
-  const totalViews = recentPosts.reduce((sum, p) => sum + p.views, 0);
-  const avgViews = Math.round(totalViews / recentPosts.length);
-  
-  // ER = (Средние просмотры / Подписчики) × 100%
-  const engagement = subscribersCount > 0 
-    ? Math.round((avgViews / subscribersCount) * 100 * 10) / 10 
-    : 0;
-  
-  return { avgViews, engagement };
-}
+```sql
+-- Deals: advertiser и channel owner могут видеть свои сделки
+ALTER TABLE public.deals ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own deals"
+  ON public.deals FOR SELECT
+  USING (advertiser_id = auth.uid());
+
+CREATE POLICY "Service role can manage deals"
+  ON public.deals FOR ALL
+  USING (true)
+  WITH CHECK (true);
+
+-- Reviews: публичное чтение, запись только через edge function
+ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public can read reviews"
+  ON public.reviews FOR SELECT
+  USING (true);
+
+CREATE POLICY "Service role can manage reviews"
+  ON public.reviews FOR ALL
+  USING (true)
+  WITH CHECK (true);
 ```
 
-#### 2.4 Найти последний message_id канала
+### Этап 2: Обновить интерфейсы
 
-```typescript
-async function findLatestMessageId(username: string): Promise<number | null> {
-  // Стратегия: начинаем с большого числа и спускаемся
-  // или парсим главную страницу канала
-  try {
-    const response = await fetch(`https://t.me/s/${username}`);
-    const html = await response.text();
-    
-    // Ищем последний post ID в HTML
-    const matches = html.matchAll(/data-post="[^/]+\/(\d+)"/g);
-    const ids = [...matches].map(m => parseInt(m[1]));
-    
-    if (ids.length > 0) {
-      return Math.max(...ids);
-    }
-    return null;
-  } catch (error) {
-    console.error(`[refresh] Failed to find latest message:`, error);
-    return null;
-  }
-}
-```
-
-### Этап 3: Обновить UI — Новый компонент `ChannelAnalytics`
-
-**Файл**: `src/components/channel/ChannelAnalytics.tsx`
-
-Компонент в стиле Apple с карточками и прогресс-барами:
-
-```tsx
-interface ChannelAnalyticsProps {
-  subscribers: number;
-  avgViews: number;
-  engagement: number;
-  recentPosts?: { messageId: number; views: number; date: string }[];
-  languageStats?: { language: string; percentage: number }[];
-  premiumPercentage?: number;
-}
-```
-
-UI элементы:
-1. **Engagement Rate Card** — большая карточка с процентом и цветовым индикатором (зеленый > 20%, желтый 10-20%, красный < 10%)
-2. **Average Views Card** — с трендом роста/падения
-3. **Recent Posts Chart** — миниатюрный барчарт последних 10 постов
-4. **Language Distribution** — горизонтальные прогресс-бары
-5. **Premium Users** — круговой индикатор процента
-
-### Этап 4: Обновить страницу Channel
-
-**Файл**: `src/pages/Channel.tsx`
-
-Добавить секцию "Verified Analytics" с новым компонентом:
-
-```tsx
-{/* Verified Analytics Section */}
-<motion.div className="px-4 mt-6">
-  <div className="flex items-center gap-2 mb-3">
-    <BadgeCheck className="h-5 w-5 text-primary" />
-    <h2 className="text-lg font-semibold">Verified Analytics</h2>
-    <span className="text-xs text-muted-foreground">from Telegram</span>
-  </div>
-  <ChannelAnalytics
-    subscribers={channel.subscribers}
-    avgViews={channel.avgViews}
-    engagement={channel.engagement}
-    recentPosts={channel.recentPostsStats}
-  />
-</motion.div>
-```
-
-### Этап 5: Обновить интерфейсы
-
-**Файл**: `src/hooks/useChannels.ts`
-
-Расширить `DatabaseChannel` и маппинг:
-
-```typescript
-interface DatabaseChannel {
-  // ... existing
-  recent_posts_stats: { messageId: number; views: number; date: string }[] | null;
-  language_stats: { language: string; percentage: number }[] | null;
-  premium_percentage: number | null;
-}
-
-function mapDatabaseToChannel(dbChannel: DatabaseChannel): Channel {
-  return {
-    // ... existing
-    recentPostsStats: dbChannel.recent_posts_stats || [],
-    languageStats: dbChannel.language_stats || [],
-    premiumPercentage: dbChannel.premium_percentage,
-  };
-}
-```
-
-### Этап 6: Обновить `Channel` интерфейс
+#### 2.1 Обновить `Channel` интерфейс
 
 **Файл**: `src/data/mockChannels.ts`
 
 ```typescript
 export interface Channel {
-  // ... existing
-  recentPostsStats?: { messageId: number; views: number; date: string }[];
-  languageStats?: { language: string; percentage: number }[];
-  premiumPercentage?: number;
-  notificationsEnabled?: number;
-  statsUpdatedAt?: string;
+  // ... existing fields
+  rating: number;
+  reviewsCount?: number;  // NEW
 }
 ```
 
-## UI Design (Apple Style)
+#### 2.2 Обновить `DatabaseChannel` и маппинг
 
-### Цветовая схема
-- **Engagement хороший (>20%)**: `#34C759` (зеленый)
-- **Engagement средний (10-20%)**: `#FF9500` (оранжевый)
-- **Engagement низкий (<10%)**: `#FF3B30` (красный)
-- **Основной акцент**: `#007AFF` (синий)
+**Файл**: `src/hooks/useChannels.ts`
 
-### Компоненты
+```typescript
+interface DatabaseChannel {
+  // ... existing
+  reviews_count: number | null;
+}
 
-#### Engagement Rate Card
-```
-┌─────────────────────────────┐
-│  📊 Engagement Rate         │
-│                             │
-│      ████████████░░░░░░     │
-│          36.5%              │
-│                             │
-│  ✓ Отличный показатель      │
-└─────────────────────────────┘
+function mapDatabaseToChannel(dbChannel: DatabaseChannel): Channel {
+  return {
+    // ... existing
+    rating: Number(dbChannel.rating) || 4.5,
+    reviewsCount: dbChannel.reviews_count || 0,
+  };
+}
 ```
 
-#### Recent Posts Chart
-```
-┌─────────────────────────────┐
-│  👁 Просмотры постов        │
-│                             │
-│  ▓▓▓▓  ▓▓▓  ▓▓▓▓▓  ▓▓▓▓    │
-│  15K   12K   18K   16K      │
-│                             │
-│  Среднее: 15.2K             │
-└─────────────────────────────┘
-```
+### Этап 3: Обновить UI карточки канала
 
-#### Language Distribution
-```
-┌─────────────────────────────┐
-│  🌍 Языки аудитории         │
-│                             │
-│  Русский   ████████████ 78% │
-│  English   ████░░░░░░░░ 15% │
-│  Other     ██░░░░░░░░░░  7% │
-└─────────────────────────────┘
+#### 3.1 Обновить секцию "Статистика" на странице Channel
+
+**Файл**: `src/pages/Channel.tsx`
+
+Изменить отображение рейтинга с простого `4.5` на `4.5 (12 отзывов)`:
+
+```tsx
+const detailedStats = [
+  {
+    icon: Star,
+    label: 'Рейтинг',
+    value: channel.reviewsCount && channel.reviewsCount > 0
+      ? `${channel.rating} (${channel.reviewsCount} ${pluralize(channel.reviewsCount, 'отзыв', 'отзыва', 'отзывов')})`
+      : `${channel.rating} (нет отзывов)`,
+  },
+  // ... other stats
+];
 ```
 
-## Ограничения и Fallback
+#### 3.2 Вспомогательная функция для склонения слов
 
-1. **Если канал приватный**: веб-скрапинг не работает → показываем "Статистика недоступна для приватных каналов"
+```typescript
+function pluralize(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+```
 
-2. **Если мало постов**: если найдено < 3 постов → показываем предупреждение "Недостаточно данных для расчета ER"
+### Этап 4: Обновить ChannelCard (список каналов)
 
-3. **Языковая статистика**: через Bot API недоступна → пока оставляем как `null` или используем mockданные с пометкой "Примерные данные"
+**Файл**: `src/components/ChannelCard.tsx`
 
-4. **Premium процент**: недоступен через Bot API → показываем только если данные есть
+Добавить отображение рейтинга с количеством отзывов в карточке на главной странице (опционально):
 
-## Результат для конкурса
+```tsx
+{/* Rating badge */}
+<div className="flex items-center gap-1 text-xs text-white/80">
+  <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
+  <span>{rating}</span>
+  {reviewsCount > 0 && (
+    <span className="text-white/60">({reviewsCount})</span>
+  )}
+</div>
+```
 
-- ✅ **Subscribers** — из Telegram API (`getChatMemberCount`)
-- ✅ **Average Views** — вычислено из последних 10 постов (скрапинг t.me)
-- ✅ **Engagement Rate** — вычислено: `avgViews / subscribers × 100%`
-- ⚠️ **Language charts** — требует MTProto API (можно показать placeholder)
-- ⚠️ **Premium stats** — требует MTProto API (можно показать placeholder)
-- ✅ **Recent posts views** — визуализация барчартом
+### Этап 5: Подготовка для будущей интеграции
 
-Все данные верифицированы напрямую из Telegram, что соответствует требованию "Verified channel stats (from Telegram)".
+Создать хуки и типы для работы с отзывами (для будущего использования):
 
+#### 5.1 Создать hook `useChannelReviews`
+
+**Файл**: `src/hooks/useChannelReviews.ts`
+
+```typescript
+export function useChannelReviews(channelId: string) {
+  return useQuery({
+    queryKey: ['channel-reviews', channelId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('reviews')
+        .select(`
+          id,
+          rating,
+          comment,
+          created_at,
+          reviewer:reviewer_id(first_name, photo_url)
+        `)
+        .eq('channel_id', channelId)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!channelId,
+  });
+}
+```
+
+## Результат
+
+После реализации:
+- В секции "Статистика" рейтинг будет отображаться как **"4.5 (12 отзывов)"**
+- Отзывы могут быть добавлены только после завершённой сделки (deal_id обязателен)
+- Рейтинг автоматически пересчитывается триггером при добавлении/изменении отзыва
+- База данных готова к полному escrow-flow с таблицей `deals`
+
+## Визуальный результат
+
+До:
+```
+⭐ Рейтинг          4.5
+```
+
+После:
+```
+⭐ Рейтинг          4.5 (12 отзывов)
+```
+
+Или если отзывов нет:
+```
+⭐ Рейтинг          4.5 (нет отзывов)
+```
+
+## Безопасность
+
+- Отзывы привязаны к `deal_id` с `UNIQUE` constraint — один отзыв на сделку
+- `deal_id` ссылается на реальную сделку — нельзя "накрутить" отзывы
+- Триггер использует `SECURITY DEFINER` для обхода RLS при расчёте рейтинга
+- Публичное чтение отзывов, запись только через service role (edge function)
