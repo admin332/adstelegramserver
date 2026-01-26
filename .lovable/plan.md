@@ -1,109 +1,198 @@
 
 
 ## Цель
-Отправлять уведомление владельцу канала в Telegram, когда новый менеджер присоединяется к команде.
+Реализовать стратегию "Lazy Update" — автоматическое обновление статистики канала (подписчики, описание, аватар) при открытии карточки, если данные старше 24 часов.
 
-## Изменения
+## Архитектура решения
 
-### Обновить Edge Function `join-channel-as-admin`
-
-**Файл**: `supabase/functions/join-channel-as-admin/index.ts`
-
-После успешного добавления менеджера (строка 238), добавить логику отправки уведомления владельцу:
-
-#### Шаг 1: Найти владельца канала
-```typescript
-// Получить владельца канала (role = 'owner')
-const { data: ownerAdmin } = await supabase
-  .from("channel_admins")
-  .select("user_id")
-  .eq("channel_id", channel.id)
-  .eq("role", "owner")
-  .maybeSingle();
+```text
+┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
+│  Channel Page   │────►│ refresh-channel-stats│────►│  Telegram API   │
+│  (Frontend)     │     │  (Edge Function)     │     │ getChatMemberCount│
+└─────────────────┘     └──────────────────────┘     │ getChat          │
+         │                        │                   └─────────────────┘
+         │                        ▼
+         │              ┌──────────────────────┐
+         └──────────────│     channels DB      │
+                        │ stats_updated_at     │
+                        └──────────────────────┘
 ```
 
-#### Шаг 2: Получить telegram_id владельца
-```typescript
-if (ownerAdmin && ownerAdmin.user_id !== userData.id) {
-  // Получить telegram_id владельца
-  const { data: ownerUser } = await supabase
-    .from("users")
-    .select("telegram_id, first_name")
-    .eq("id", ownerAdmin.user_id)
-    .single();
+## Этапы реализации
+
+### 1. Миграция базы данных
+
+Добавить новую колонку `stats_updated_at` в таблицу `channels`:
+
+```sql
+-- Добавить колонку для отслеживания последнего обновления статистики
+ALTER TABLE public.channels 
+ADD COLUMN stats_updated_at TIMESTAMPTZ DEFAULT now();
+
+-- Установить текущее время для существующих записей
+UPDATE public.channels 
+SET stats_updated_at = updated_at 
+WHERE stats_updated_at IS NULL;
 ```
 
-#### Шаг 3: Получить данные нового менеджера
+### 2. Создать Edge Function `refresh-channel-stats`
+
+**Файл**: `supabase/functions/refresh-channel-stats/index.ts`
+
+Логика функции:
+1. Принимает `channel_id`
+2. Проверяет `stats_updated_at` — если меньше 24 часов, возвращает "no update needed"
+3. Получает `telegram_chat_id` из базы
+4. Запрашивает Telegram API:
+   - `getChatMemberCount` — количество подписчиков
+   - `getChat` — описание, аватар, название
+5. Обновляет канал в БД:
+   - `subscribers_count`
+   - `description`
+   - `title`
+   - `avatar_url`
+   - `stats_updated_at = now()`
+6. Возвращает обновлённые данные
+
 ```typescript
-  // Получить данные нового менеджера для уведомления
-  const { data: newManager } = await supabase
-    .from("users")
-    .select("first_name, last_name, username")
-    .eq("id", userData.id)
-    .single();
-```
-
-#### Шаг 4: Отправить уведомление через Telegram Bot API
-```typescript
-  if (ownerUser?.telegram_id && newManager) {
-    const managerName = [newManager.first_name, newManager.last_name]
-      .filter(Boolean)
-      .join(" ");
-    const managerUsername = newManager.username ? `@${newManager.username}` : "";
-    
-    const notificationText = `🆕 <b>Новый менеджер в команде!</b>
-
-Канал: <b>${channel.title}</b>
-
-Присоединился: <b>${managerName}</b>${managerUsername ? ` (${managerUsername})` : ""}
-
-Теперь этот пользователь может управлять рекламой на вашем канале.`;
-
-    try {
-      await fetch(
-        `https://api.telegram.org/bot${botToken}/sendMessage`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: ownerUser.telegram_id,
-            text: notificationText,
-            parse_mode: "HTML",
-          }),
-        }
-      );
-      console.log(`[join-channel-as-admin] Notification sent to owner ${ownerUser.telegram_id}`);
-    } catch (notifyError) {
-      // Не блокируем основной процесс если уведомление не отправилось
-      console.error("[join-channel-as-admin] Failed to notify owner:", notifyError);
-    }
-  }
+interface RefreshResponse {
+  success: boolean;
+  updated: boolean;
+  channel?: {
+    subscribers_count: number;
+    description: string | null;
+    title: string | null;
+    avatar_url: string | null;
+    stats_updated_at: string;
+  };
+  error?: string;
 }
 ```
 
-## Текст уведомления
+### 3. Обновить `useChannel` хук
 
+**Файл**: `src/hooks/useChannels.ts`
+
+Добавить логику для триггера обновления:
+
+```typescript
+export function useChannel(id: string | undefined) {
+  const queryClient = useQueryClient();
+  
+  // Основной запрос данных канала
+  const channelQuery = useQuery({
+    queryKey: ['channel', id],
+    queryFn: async () => {
+      // ... существующая логика
+    },
+    enabled: !!id,
+  });
+
+  // Эффект для проверки и обновления статистики
+  useEffect(() => {
+    if (!channelQuery.data || !id) return;
+    
+    const statsUpdatedAt = new Date(channelQuery.data.statsUpdatedAt || 0);
+    const hoursAgo = (Date.now() - statsUpdatedAt.getTime()) / (1000 * 60 * 60);
+    
+    if (hoursAgo > 24) {
+      // Вызвать refresh-channel-stats
+      refreshChannelStats(id).then((updated) => {
+        if (updated) {
+          queryClient.invalidateQueries({ queryKey: ['channel', id] });
+        }
+      });
+    }
+  }, [channelQuery.data, id]);
+
+  return channelQuery;
+}
 ```
-🆕 Новый менеджер в команде!
 
-Канал: ИМЯ_КАНАЛА
+### 4. Добавить интерфейс `DatabaseChannel`
 
-Присоединился: Имя Фамилия (@username)
+Расширить интерфейс для включения `stats_updated_at`:
 
-Теперь этот пользователь может управлять рекламой на вашем канале.
+```typescript
+interface DatabaseChannel {
+  // ... существующие поля
+  stats_updated_at: string | null;
+}
 ```
 
-## Важные моменты
+### 5. Регистрация функции
 
-1. **Не блокировать основной процесс** - если уведомление не отправилось (пользователь заблокировал бота), операция добавления менеджера всё равно завершится успешно
+**Файл**: `supabase/config.toml`
 
-2. **Не уведомлять самого себя** - проверка `ownerAdmin.user_id !== userData.id` исключает случай, когда владелец сам присоединяется к своему каналу
+```toml
+[functions.refresh-channel-stats]
+verify_jwt = false
+```
 
-3. **Graceful handling** - ошибки отправки уведомления логируются, но не прерывают основной flow
+## Детали Edge Function
+
+### Проверка свежести данных
+
+```typescript
+// Проверить, нужно ли обновление
+const statsUpdatedAt = new Date(channel.stats_updated_at || 0);
+const hoursAgo = (Date.now() - statsUpdatedAt.getTime()) / (1000 * 60 * 60);
+
+if (hoursAgo < 24) {
+  return new Response(
+    JSON.stringify({ success: true, updated: false }),
+    { headers: corsHeaders }
+  );
+}
+```
+
+### Запросы к Telegram API
+
+```typescript
+// Получить количество подписчиков
+const subscribersCount = await getChatMemberCount(botToken, telegramChatId);
+
+// Получить информацию о канале
+const chatInfo = await getChat(botToken, telegramChatId);
+
+// Получить URL аватара
+let avatarUrl = null;
+if (chatInfo?.photo?.big_file_id) {
+  avatarUrl = await getFileUrl(botToken, chatInfo.photo.big_file_id);
+}
+```
+
+### Обновление в БД
+
+```typescript
+await supabase
+  .from("channels")
+  .update({
+    subscribers_count: subscribersCount,
+    description: chatInfo?.description || null,
+    title: chatInfo?.title || null,
+    avatar_url: avatarUrl,
+    stats_updated_at: new Date().toISOString(),
+  })
+  .eq("id", channelId);
+```
+
+## UX-оптимизация
+
+- Обновление происходит **фоново** — пользователь сразу видит текущие данные
+- После обновления данные автоматически обновятся на странице через `invalidateQueries`
+- Без блокирующих запросов — страница загружается мгновенно
+
+## Безопасность
+
+- Функция публичная (без auth), но только читает данные из Telegram
+- Защита от злоупотреблений: проверка 24-часового интервала происходит на сервере
+- Rate limiting встроен — если данные свежие, Telegram API не вызывается
 
 ## Результат
 
-- Владелец канала получит личное сообщение от бота @adsingo_bot
-- В сообщении будет имя и username нового менеджера
-- Владелец сразу узнает, кто присоединился к его команде
+- Данные каналов автоматически актуализируются при просмотре
+- Нет нагрузки на Telegram API для свежих данных
+- Рекламодатели видят актуальное количество подписчиков
+- Владельцы каналов не должны вручную обновлять статистику
 
