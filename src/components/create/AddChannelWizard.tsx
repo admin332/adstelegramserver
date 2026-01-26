@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +20,8 @@ import {
   Loader2,
   Users,
   BadgeCheck,
-  AlertCircle
+  AlertCircle,
+  Radio
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -44,10 +45,31 @@ interface VerifiedChannel {
   subscribers_count: number;
 }
 
+interface ChannelPreview {
+  avatar_url: string | null;
+  title: string | null;
+}
+
 interface AddChannelWizardProps {
   onBack: () => void;
   onComplete: () => void;
 }
+
+// Extract username from URL or @username format
+const extractUsername = (input: string): string => {
+  const trimmed = input.trim();
+  
+  // Pattern for Telegram links: https://t.me/channel, t.me/channel, telegram.me/channel
+  const urlPattern = /(?:https?:\/\/)?(?:t\.me|telegram\.me)\/([a-zA-Z0-9_]+)/i;
+  const match = trimmed.match(urlPattern);
+  
+  if (match) {
+    return match[1];
+  }
+  
+  // Remove @ if present
+  return trimmed.replace(/^@/, '');
+};
 
 export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) => {
   const { user } = useAuth();
@@ -56,6 +78,10 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
   const [verifiedChannel, setVerifiedChannel] = useState<VerifiedChannel | null>(null);
+  
+  // Preview state
+  const [channelPreview, setChannelPreview] = useState<ChannelPreview | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   
   const [channelData, setChannelData] = useState<ChannelData>({
     username: "",
@@ -67,8 +93,54 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
 
   const progress = (step / 3) * 100;
 
+  // Debounce effect for channel preview
+  useEffect(() => {
+    const username = extractUsername(channelData.username);
+    if (!username || username.length < 3) {
+      setChannelPreview(null);
+      setIsLoadingPreview(false);
+      return;
+    }
+    
+    setIsLoadingPreview(true);
+    
+    const timeoutId = setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/preview-channel`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            },
+            body: JSON.stringify({ username }),
+          }
+        );
+        const data = await response.json();
+        
+        if (data.success) {
+          setChannelPreview({
+            avatar_url: data.avatar_url,
+            title: data.title,
+          });
+        } else {
+          setChannelPreview(null);
+        }
+      } catch {
+        setChannelPreview(null);
+      } finally {
+        setIsLoadingPreview(false);
+      }
+    }, 1500);
+    
+    return () => clearTimeout(timeoutId);
+  }, [channelData.username]);
+
   const handleVerifyChannel = async () => {
-    if (!channelData.username || !channelData.category) {
+    const cleanUsername = extractUsername(channelData.username);
+    
+    if (!cleanUsername || !channelData.category) {
       toast({
         title: "Заполните все поля",
         description: "Укажите username канала и категорию",
@@ -99,7 +171,7 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
             "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
           body: JSON.stringify({
-            username: channelData.username.replace("@", ""),
+            username: cleanUsername,
             telegram_user_id: user.telegram_id,
             category: channelData.category,
             price_1_24: channelData.price_1_24 ? parseFloat(channelData.price_1_24) : null,
@@ -208,17 +280,33 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
 
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="username">Username канала</Label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">@</span>
+              <Label htmlFor="username">Username или ссылка на канал</Label>
+              <div className="flex gap-3 items-center">
                 <Input
                   id="username"
-                  placeholder="your_channel"
+                  placeholder="@channel или https://t.me/channel"
                   value={channelData.username}
                   onChange={(e) => setChannelData({ ...channelData, username: e.target.value })}
-                  className="pl-8"
+                  className="flex-1"
                 />
+                {/* Channel preview avatar */}
+                <div className="w-12 h-12 rounded-xl bg-secondary flex items-center justify-center overflow-hidden flex-shrink-0">
+                  {isLoadingPreview ? (
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  ) : channelPreview?.avatar_url ? (
+                    <img 
+                      src={channelPreview.avatar_url} 
+                      alt="Channel" 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <Radio className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
               </div>
+              {channelPreview?.title && (
+                <p className="text-sm text-muted-foreground">{channelPreview.title}</p>
+              )}
             </div>
 
             <div className="space-y-2">
