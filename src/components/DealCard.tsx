@@ -1,4 +1,4 @@
-import { Clock, CheckCircle2, Wallet, Shield, XCircle, AlertTriangle, ExternalLink, TimerOff, MoreVertical } from "lucide-react";
+import { Clock, CheckCircle2, Wallet, Shield, XCircle, AlertTriangle, ExternalLink, TimerOff, MoreVertical, ImageIcon, FileVideo } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -86,20 +86,22 @@ const statusConfig: Record<DealStatus, {
   },
 };
 
-// Helper function to get campaign preview image
-const getCampaignPreviewImage = (campaign: DealCardProps['campaign']): string | null => {
-  if (!campaign) return null;
+// Helper function to check if URL is a video
+const isVideoUrl = (url: string) => {
+  const videoExtensions = ['.mp4', '.mov', '.avi', '.webm', '.mkv'];
+  return videoExtensions.some(ext => url.toLowerCase().includes(ext));
+};
+
+// Helper function to get campaign media info for preview
+const getCampaignMediaInfo = (campaign: DealCardProps['campaign']) => {
+  if (!campaign) return { firstMedia: null, mediaCount: 0, isVideo: false };
   
-  if (Array.isArray(campaign.media_urls) && campaign.media_urls.length > 0) {
-    const firstMedia = campaign.media_urls[0];
-    // Skip video files, return null to show fallback
-    if (firstMedia.includes('.mp4') || firstMedia.includes('.mov') || firstMedia.includes('.webm')) {
-      return null;
-    }
-    return firstMedia;
-  }
+  const mediaUrls = campaign.media_urls as string[] | undefined;
+  const firstMedia = mediaUrls?.[0] || campaign.image_url || null;
+  const mediaCount = mediaUrls?.length || (campaign.image_url ? 1 : 0);
+  const isVideo = firstMedia ? isVideoUrl(firstMedia) : false;
   
-  return campaign.image_url || null;
+  return { firstMedia, mediaCount, isVideo };
 };
 
 export const DealCard = ({
@@ -124,6 +126,9 @@ export const DealCard = ({
   
   const isChannelOwner = role === 'channel_owner';
   
+  // Get campaign media info for channel owner preview
+  const campaignMedia = getCampaignMediaInfo(campaign);
+  
   // For channel owner, show campaign info; for advertiser, show channel info
   const displayTitle = isChannelOwner 
     ? campaign?.name || "Кампания"
@@ -131,9 +136,7 @@ export const DealCard = ({
   const displaySubtitle = isChannelOwner 
     ? null  // Hide advertiser username for privacy
     : channel?.username ? `@${channel.username}` : null;
-  const displayAvatar = isChannelOwner 
-    ? getCampaignPreviewImage(campaign)
-    : channel?.avatar_url;
+  const displayAvatar = channel?.avatar_url;
   const displayInitial = displayTitle.charAt(0).toUpperCase();
 
   const timeAgo = formatDistanceToNow(new Date(createdAt), {
@@ -163,12 +166,39 @@ export const DealCard = ({
 
       {/* Top section: avatar and info */}
       <div className="flex items-start gap-3">
-        <Avatar className="w-12 h-12">
-          <AvatarImage src={displayAvatar || undefined} alt={displayTitle} />
-          <AvatarFallback className="bg-secondary text-foreground">
-            {displayInitial}
-          </AvatarFallback>
-        </Avatar>
+        {isChannelOwner ? (
+          // Campaign preview for channel owner (square style like MyCampaignsList)
+          <div className="w-12 h-12 rounded-xl bg-secondary flex items-center justify-center overflow-hidden flex-shrink-0 relative">
+            {campaignMedia.firstMedia ? (
+              campaignMedia.isVideo ? (
+                <div className="w-full h-full flex items-center justify-center bg-card">
+                  <FileVideo className="w-5 h-5 text-primary" />
+                </div>
+              ) : (
+                <img
+                  src={campaignMedia.firstMedia}
+                  alt={displayTitle}
+                  className="w-full h-full object-cover"
+                />
+              )
+            ) : (
+              <ImageIcon className="w-5 h-5 text-muted-foreground" />
+            )}
+            {campaignMedia.mediaCount > 1 && (
+              <div className="absolute bottom-0.5 right-0.5 min-w-4 h-4 rounded-full bg-primary flex items-center justify-center px-0.5">
+                <span className="text-[10px] font-medium text-primary-foreground">{campaignMedia.mediaCount}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          // Standard Avatar for channel (for advertiser)
+          <Avatar className="w-12 h-12">
+            <AvatarImage src={displayAvatar || undefined} alt={displayTitle} />
+            <AvatarFallback className="bg-secondary text-foreground">
+              {displayInitial}
+            </AvatarFallback>
+          </Avatar>
+        )}
         
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
