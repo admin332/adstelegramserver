@@ -1,160 +1,114 @@
 
 
-## Цель
-Добавить в раздел "Сделки" админ-панели отображение всех реальных сделок из базы данных и возможность админу менять статус каждой сделки.
+## Проблема
 
-## Текущее состояние
+Когда админ меняет статус сделки на "Оплачено" (escrow) через админ-панель, владельцу канала не отправляется уведомление с предпросмотром рекламы и кнопками одобрения/отклонения.
 
-### База данных
-- Таблица `deals` существует с 4 реальными сделками
-- Доступные статусы: `pending`, `escrow`, `in_progress`, `completed`, `cancelled`, `disputed`, `expired`
-- RLS: только владелец сделки может её видеть (`advertiser_id = auth.uid()`)
+### Почему так происходит
 
-### Админ-панель
-- В разделе "Сделки" сейчас заглушка: "Раздел сделок будет доступен после создания таблицы deals"
-- Таблица уже существует, нужно добавить UI и RLS-доступ для админов
+Текущий код в `AdminDealsTable.tsx` (строки 103-128) просто обновляет статус в базе данных:
+
+```typescript
+const { error } = await supabase
+  .from('deals')
+  .update({ status: newStatus })
+  .eq('id', dealId);
+```
+
+А логика отправки уведомлений (`sendPaymentNotification`) находится только в edge function `check-escrow-payments`, которая вызывается автоматически при обнаружении платежа.
 
 ## Решение
 
-### 1. Добавить RLS-политики для админов
+Создать новую edge function `notify-deal-payment`, которая будет отправлять уведомление владельцу канала. Вызывать её из админ-панели при смене статуса на `escrow`.
 
-```sql
--- Админы могут видеть все сделки
-CREATE POLICY "Admins can view all deals"
-ON public.deals FOR SELECT
-USING (public.has_role(auth.uid(), 'admin'));
+## Изменения
 
--- Админы могут обновлять статус сделок
-CREATE POLICY "Admins can update deals"
-ON public.deals FOR UPDATE
-USING (public.has_role(auth.uid(), 'admin'))
-WITH CHECK (public.has_role(auth.uid(), 'admin'));
-```
-
-### 2. Создать компонент `AdminDealsTable.tsx`
-
-Структура компонента:
-- Таблица со всеми сделками
-- Колонки: Канал, Рекламодатель, Сумма, Статус, Дата создания, Действия
-- Поиск по названию канала или имени рекламодателя
-- Возможность изменить статус через dropdown
+### 1. Создать новую edge function `notify-deal-payment`
 
 ```text
-src/components/admin/AdminDealsTable.tsx
-
-Основные элементы:
-├── Заголовок с количеством сделок и кнопкой обновления
-├── Строка поиска
-├── Таблица:
-│   ├── Канал (название + username)
-│   ├── Рекламодатель (имя + username)  
-│   ├── Сумма (TON + USD эквивалент)
-│   ├── Статус (цветной badge с иконкой)
-│   ├── Дата создания
-│   └── Действия (Select для смены статуса)
-└── Состояния: загрузка, пустой список, ошибка
+supabase/functions/notify-deal-payment/index.ts
 ```
 
-### 3. Интерфейс смены статуса
+Эта функция будет:
+- Принимать `dealId` в теле запроса
+- Загружать данные сделки с каналом, кампанией и владельцем
+- Отправлять предпросмотр кампании и уведомление с кнопками в Telegram
 
-Select dropdown с опциями:
-| Статус | Метка | Цвет |
-|--------|-------|------|
-| pending | Ожидает оплаты | yellow |
-| escrow | Оплачено | blue |
-| in_progress | Публикуется | primary |
-| completed | Завершено | green |
-| cancelled | Отменено | red |
-| disputed | Спор | orange |
-| expired | Истекло | gray |
+Логика отправки будет скопирована из `check-escrow-payments`:
+- `sendCampaignPreview()` — отправка медиа и текста рекламы
+- `sendPaymentNotification()` — уведомление с суммой и кнопками Одобрить/Отклонить
 
-При выборе нового статуса:
-1. Вызов `supabase.from('deals').update({ status: newStatus }).eq('id', dealId)`
-2. Toast-уведомление об успехе/ошибке
-3. Рефетч данных таблицы
+### 2. Обновить `AdminDealsTable.tsx`
 
-### 4. Подключить компонент в `Operator.tsx`
-
-```tsx
-case 'deals':
-  return <AdminDealsTable />;
-```
-
-## Файлы для изменения
-
-| Файл | Действие |
-|------|----------|
-| SQL миграция | Добавить RLS-политики для админов |
-| `src/components/admin/AdminDealsTable.tsx` | Создать новый компонент |
-| `src/pages/Operator.tsx` | Подключить компонент вместо заглушки |
-
-## Технические детали
-
-### Типы данных
-
-```typescript
-interface AdminDeal {
-  id: string;
-  status: DealStatus;
-  total_price: number;
-  posts_count: number;
-  duration_hours: number;
-  escrow_address: string | null;
-  created_at: string;
-  expires_at: string | null;
-  channel: {
-    title: string | null;
-    username: string;
-  } | null;
-  advertiser: {
-    first_name: string;
-    username: string | null;
-  } | null;
-  campaign: {
-    name: string;
-  } | null;
-}
-```
-
-### Запрос данных
-
-```typescript
-const { data, error } = await supabase
-  .from('deals')
-  .select(`
-    id, status, total_price, posts_count, duration_hours,
-    escrow_address, created_at, expires_at,
-    channel:channels(title, username),
-    advertiser:users!deals_advertiser_id_fkey(first_name, username),
-    campaign:campaigns(name)
-  `)
-  .order('created_at', { ascending: false });
-```
-
-### Обновление статуса
+При смене статуса на `escrow` дополнительно вызывать edge function:
 
 ```typescript
 const updateStatus = async (dealId: string, newStatus: DealStatus) => {
-  const { error } = await supabase
-    .from('deals')
-    .update({ status: newStatus })
-    .eq('id', dealId);
-    
-  if (error) {
-    toast({ title: "Ошибка", description: error.message, variant: "destructive" });
-  } else {
-    toast({ title: "Статус обновлён" });
-    refetch();
+  // ...обновление статуса...
+  
+  // Если новый статус "escrow" - отправить уведомление владельцу
+  if (newStatus === 'escrow') {
+    await supabase.functions.invoke('notify-deal-payment', {
+      body: { dealId }
+    });
   }
 };
 ```
 
-## UI дизайн
+### 3. Обновить `config.toml`
 
-Таблица будет следовать стилю существующего `AdminUsersTable`:
-- Тёмная тема с `bg-card` и `border-border`
-- Строка поиска с иконкой Search
-- Кнопка обновления с иконкой RefreshCw
-- Статусы как цветные badges
-- Select для смены статуса в последней колонке
+Добавить конфигурацию для новой функции:
+
+```toml
+[functions.notify-deal-payment]
+verify_jwt = false
+```
+
+## Структура edge function
+
+```typescript
+// notify-deal-payment/index.ts
+
+serve(async (req) => {
+  const { dealId } = await req.json();
+  
+  // 1. Загрузить сделку с нужными данными
+  const { data: deal } = await supabase
+    .from('deals')
+    .select(`
+      id, total_price, posts_count, duration_hours, scheduled_at,
+      campaign:campaigns(text, media_urls, button_text, button_url),
+      channel:channels(
+        id, title,
+        owner:users!channels_owner_id_fkey(telegram_id)
+      )
+    `)
+    .eq('id', dealId)
+    .single();
+  
+  // 2. Отправить предпросмотр кампании
+  await sendCampaignPreview(ownerTelegramId, deal.campaign);
+  
+  // 3. Отправить уведомление с кнопками
+  await sendPaymentNotification(deal);
+  
+  return { success: true };
+});
+```
+
+## Файлы для создания/изменения
+
+| Файл | Действие |
+|------|----------|
+| `supabase/functions/notify-deal-payment/index.ts` | Создать |
+| `supabase/config.toml` | Добавить конфигурацию функции |
+| `src/components/admin/AdminDealsTable.tsx` | Добавить вызов функции при смене на `escrow` |
+
+## Результат
+
+После изменения:
+- Админ меняет статус на "Оплачено" → владелец получает:
+  1. Предпросмотр рекламного поста (медиа + текст + кнопка)
+  2. Уведомление с деталями сделки и кнопками "Одобрить" / "Отклонить"
+- Поведение идентично автоматическому обнаружению платежа
 
