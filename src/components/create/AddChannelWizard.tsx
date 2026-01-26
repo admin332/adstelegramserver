@@ -23,10 +23,10 @@ import {
   AlertCircle,
   Radio
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { useTonPrice } from "@/hooks/useTonPrice";
+import { getTelegramInitData } from "@/lib/telegram";
 
 interface ChannelData {
   username: string;
@@ -149,10 +149,12 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
       return;
     }
 
-    if (!user?.telegram_id) {
+    // Get initData for secure authentication
+    const initData = getTelegramInitData();
+    if (!initData) {
       toast({
         title: "Ошибка авторизации",
-        description: "Пожалуйста, войдите через Telegram",
+        description: "Пожалуйста, откройте приложение через Telegram",
         variant: "destructive",
       });
       return;
@@ -172,7 +174,7 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
           },
           body: JSON.stringify({
             username: cleanUsername,
-            telegram_user_id: user.telegram_id,
+            initData, // Secure: send initData instead of telegram_user_id
             category: channelData.category,
             price_1_24: channelData.price_1_24 ? parseFloat(channelData.price_1_24) : null,
             price_2_48: channelData.price_2_48 ? parseFloat(channelData.price_2_48) : null,
@@ -465,8 +467,8 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
             ))}
           </div>
 
-          <Button onClick={onComplete} className="w-full" size="lg">
-            Перейти к моим каналам
+          <Button onClick={onComplete} className="w-full">
+            Готово
           </Button>
         </div>
       )}

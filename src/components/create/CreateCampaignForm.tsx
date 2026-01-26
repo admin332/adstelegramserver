@@ -15,8 +15,8 @@ import {
   Plus
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { getTelegramInitData } from "@/lib/telegram";
 
 interface CampaignData {
   name: string;
@@ -93,10 +93,12 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
       return;
     }
 
-    if (!user?.id) {
+    // Get initData for secure authentication
+    const initData = getTelegramInitData();
+    if (!initData) {
       toast({
         title: "Ошибка авторизации",
-        description: "Пожалуйста, войдите через Telegram",
+        description: "Пожалуйста, откройте приложение через Telegram",
         variant: "destructive",
       });
       return;
@@ -107,11 +109,11 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
     try {
       const mediaUrls: string[] = [];
 
-      // Загружаем все файлы через Edge Function (обходит RLS для Telegram пользователей)
+      // Загружаем все файлы через Edge Function с initData валидацией
       for (const file of mediaFiles) {
         const formData = new FormData();
         formData.append("file", file);
-        formData.append("user_id", user.id);
+        formData.append("initData", initData); // Secure: send initData instead of user_id
 
         const uploadResponse = await fetch(
           `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-campaign-media`,
@@ -142,7 +144,7 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
             "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
           body: JSON.stringify({
-            user_id: user.id,
+            initData, // Secure: send initData instead of user_id
             name: campaignData.name,
             text: campaignData.text,
             button_text: campaignData.button_text || null,
@@ -159,7 +161,7 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
       }
 
       // Отправить превью в Telegram
-      if (user.telegram_id) {
+      if (user?.telegram_id) {
         try {
           await fetch(
             `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-campaign-preview`,
@@ -185,7 +187,7 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
 
       toast({
         title: "Кампания создана!",
-        description: user.telegram_id 
+        description: user?.telegram_id 
           ? "Превью отправлено вам в Telegram" 
           : "Теперь вы можете выбрать каналы для размещения",
       });

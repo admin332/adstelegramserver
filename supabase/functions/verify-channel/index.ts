@@ -5,9 +5,92 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+interface TelegramUser {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+}
+
+interface ParsedInitData {
+  user?: TelegramUser;
+  auth_date: number;
+}
+
+// Validate Telegram initData using HMAC-SHA256
+async function validateTelegramData(initData: string, botToken: string): Promise<{ valid: boolean; data?: ParsedInitData }> {
+  try {
+    const urlParams = new URLSearchParams(initData);
+    const hash = urlParams.get("hash");
+    
+    if (!hash) {
+      return { valid: false };
+    }
+
+    urlParams.delete("hash");
+    const dataCheckString = Array.from(urlParams.entries())
+      .map(([key, value]) => `${key}=${value}`)
+      .sort()
+      .join("\n");
+
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode("WebAppData");
+    const tokenData = encoder.encode(botToken);
+    
+    const hmacKey = await crypto.subtle.importKey(
+      "raw",
+      keyData,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    
+    const secretKeyBuffer = await crypto.subtle.sign("HMAC", hmacKey, tokenData);
+    
+    const secretKey = await crypto.subtle.importKey(
+      "raw",
+      secretKeyBuffer,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    
+    const dataBuffer = encoder.encode(dataCheckString);
+    const hashBuffer = await crypto.subtle.sign("HMAC", secretKey, dataBuffer);
+    
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const calculatedHash = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+
+    if (calculatedHash !== hash) {
+      return { valid: false };
+    }
+
+    const userString = urlParams.get("user");
+    const authDate = parseInt(urlParams.get("auth_date") || "0", 10);
+    
+    const now = Math.floor(Date.now() / 1000);
+    if (now - authDate > 86400) {
+      return { valid: false };
+    }
+
+    let user: TelegramUser | undefined;
+    if (userString) {
+      user = JSON.parse(userString);
+    }
+
+    return {
+      valid: true,
+      data: { user, auth_date: authDate },
+    };
+  } catch (error) {
+    console.error("Validation error:", error);
+    return { valid: false };
+  }
+}
+
 interface VerifyChannelRequest {
   username: string;
-  telegram_user_id: number;
+  initData: string;
   category: string;
   price_1_24?: number;
   price_2_48?: number;
@@ -128,9 +211,29 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: VerifyChannelRequest = await req.json();
-    const { username, telegram_user_id, category, price_1_24, price_2_48, price_post } = body;
+    const { username, initData, category, price_1_24, price_2_48, price_post } = body;
 
-    if (!username || !telegram_user_id || !category) {
+    // 1. VALIDATE INITDATA (critical for security!)
+    if (!initData) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Не предоставлены данные авторизации" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const validation = await validateTelegramData(initData, botToken);
+    if (!validation.valid || !validation.data?.user) {
+      console.log("[verify-channel] Invalid Telegram data");
+      return new Response(
+        JSON.stringify({ success: false, error: "Неверные данные авторизации Telegram" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const telegramId = validation.data.user.id;
+    console.log(`[verify-channel] Validated user: ${telegramId}`);
+
+    if (!username || !category) {
       return new Response(
         JSON.stringify({ success: false, error: "Не все обязательные поля заполнены" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -186,8 +289,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Check if user is admin/creator
-    const userMember = await getChatMember(botToken, chat.id, telegram_user_id);
+    // 2. Check if VERIFIED user is admin/creator (using telegramId from initData, not from body!)
+    const userMember = await getChatMember(botToken, chat.id, telegramId);
     const userIsAdmin = userMember && 
       ["creator", "administrator"].includes(userMember.status);
 
@@ -212,11 +315,11 @@ Deno.serve(async (req) => {
       avatarUrl = await getFileUrl(botToken, chat.photo.big_file_id);
     }
 
-    // Find owner_id from users table
+    // 3. Find owner_id from users table by VERIFIED telegram_id
     const { data: userData, error: userError } = await supabase
       .from("users")
       .select("id")
-      .eq("telegram_id", telegram_user_id)
+      .eq("telegram_id", telegramId)
       .maybeSingle();
 
     if (userError || !userData) {
@@ -240,11 +343,11 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Insert channel into database
+    // 4. Insert channel with VERIFIED owner_id
     const { data: newChannel, error: insertError } = await supabase
       .from("channels")
       .insert({
-        owner_id: userData.id,
+        owner_id: userData.id, // Trusted user ID from DB
         telegram_chat_id: chat.id,
         username: chat.username || username.replace("@", ""),
         title: chat.title || null,
@@ -269,6 +372,8 @@ Deno.serve(async (req) => {
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    console.log(`[verify-channel] Channel ${newChannel.id} created for user ${userData.id}`);
 
     return new Response(
       JSON.stringify({
