@@ -85,11 +85,6 @@ const Channel: React.FC = () => {
       value: channel.rating.toString(),
     },
     {
-      icon: TrendingUp,
-      label: 'Вовлечённость',
-      value: `${channel.engagement || 0}%`,
-    },
-    {
       icon: Tag,
       label: 'Категория',
       value: getCategoryById(channel.category)?.name || channel.category,
