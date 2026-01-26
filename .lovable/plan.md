@@ -1,154 +1,107 @@
 
-
 ## Задача
 
-Для входящих сделок (роль `channel_owner`) заменить отображение данных рекламодателя на данные кампании:
-- **Аватарка** → превью первого медиафайла кампании
-- **Имя** → название кампании
-- **Никнейм** → убрать полностью
+Исправить отображение материала кампании в аватарке карточки сделки для владельцев каналов, сделав его аналогичным отображению в разделе "Мои кампании".
 
-Это обеспечивает конфиденциальность рекламодателей.
+## Проблема
 
-## Текущее состояние
-
-```typescript
-// DealCard.tsx — строки 113-123
-const displayTitle = isChannelOwner 
-  ? advertiser?.first_name || "Рекламодатель"  // ❌ показывает имя
-  : channel?.title || "Канал";
-const displaySubtitle = isChannelOwner 
-  ? advertiser?.username ? `@${advertiser.username}` : null  // ❌ показывает ник
-  : channel?.username;
-const displayAvatar = isChannelOwner 
-  ? advertiser?.photo_url  // ❌ показывает аватар Telegram
-  : channel?.avatar_url;
-```
+В `DealCard.tsx` используется компонент `Avatar` с простым fallback (только буква), тогда как в `MyCampaignsList.tsx` используется квадратный блок с:
+- Отображением изображения
+- Иконкой `FileVideo` для видео
+- Иконкой `ImageIcon` если нет медиа
+- Бейджем с количеством медиафайлов
 
 ## Решение
 
-### Часть 1: Edge Function — расширить данные кампании
+Заменить для `isChannelOwner` стандартный `Avatar` на квадратный блок превью аналогичный `MyCampaignsList`:
 
-Добавить `media_urls` и `image_url` в запрос campaigns + убрать сбор advertiser данных:
+### DealCard.tsx — изменения
 
 ```typescript
-// supabase/functions/user-deals/index.ts
-campaign:campaigns(id, name, media_urls, image_url)
+// Добавить импорты
+import { ImageIcon, FileVideo } from "lucide-react";
 
-// Убрать код сбора advertiser info (строки 137-156)
-// advertiser: undefined для всех channel_owner сделок
+// Добавить функцию проверки видео
+const isVideoUrl = (url: string) => {
+  const videoExtensions = ['.mp4', '.mov', '.avi', '.webm', '.mkv'];
+  return videoExtensions.some(ext => url.toLowerCase().includes(ext));
+};
+
+// Получить данные для превью кампании
+const getCampaignMediaInfo = (campaign: DealCardProps['campaign']) => {
+  if (!campaign) return { firstMedia: null, mediaCount: 0, isVideo: false };
+  
+  const mediaUrls = campaign.media_urls as string[] | undefined;
+  const firstMedia = mediaUrls?.[0] || campaign.image_url || null;
+  const mediaCount = mediaUrls?.length || (campaign.image_url ? 1 : 0);
+  const isVideo = firstMedia ? isVideoUrl(firstMedia) : false;
+  
+  return { firstMedia, mediaCount, isVideo };
+};
 ```
 
-### Часть 2: Обновить типы в useUserDeals.ts
+### Логика рендеринга аватара
 
-```typescript
-campaign: {
-  id: string;
-  name: string;
-  media_urls?: string[];  // добавить
-  image_url?: string;     // добавить
-} | null;
-// Убрать advertiser из интерфейса Deal
-```
+Для `isChannelOwner` вместо `<Avatar>` использовать квадратный блок:
 
-### Часть 3: DealCard — показывать кампанию вместо рекламодателя
-
-```typescript
-// Для channel_owner:
-const displayTitle = campaign?.name || "Кампания";  // название кампании
-const displaySubtitle = null;  // убрать ник полностью
-const displayAvatar = getMediaPreview(campaign);  // превью медиа
-
-// Функция получения превью
-function getMediaPreview(campaign) {
-  if (campaign?.media_urls?.length > 0) {
-    return campaign.media_urls[0];
-  }
-  return campaign?.image_url || null;
-}
+```tsx
+{isChannelOwner ? (
+  // Превью кампании как в MyCampaignsList
+  <div className="w-12 h-12 rounded-xl bg-secondary flex items-center justify-center overflow-hidden flex-shrink-0 relative">
+    {campaignMedia.firstMedia ? (
+      campaignMedia.isVideo ? (
+        <div className="w-full h-full flex items-center justify-center bg-card">
+          <FileVideo className="w-5 h-5 text-primary" />
+        </div>
+      ) : (
+        <img
+          src={campaignMedia.firstMedia}
+          alt={displayTitle}
+          className="w-full h-full object-cover"
+        />
+      )
+    ) : (
+      <ImageIcon className="w-5 h-5 text-muted-foreground" />
+    )}
+    {campaignMedia.mediaCount > 1 && (
+      <div className="absolute bottom-0.5 right-0.5 min-w-4 h-4 rounded-full bg-primary flex items-center justify-center px-0.5">
+        <span className="text-[10px] font-medium text-primary-foreground">{campaignMedia.mediaCount}</span>
+      </div>
+    )}
+  </div>
+) : (
+  // Стандартный Avatar для канала (для рекламодателя)
+  <Avatar className="w-12 h-12">
+    <AvatarImage src={displayAvatar || undefined} alt={displayTitle} />
+    <AvatarFallback className="bg-secondary text-foreground">
+      {displayInitial}
+    </AvatarFallback>
+  </Avatar>
+)}
 ```
 
 ## Файлы для изменения
 
 | Файл | Изменения |
 |------|-----------|
-| `supabase/functions/user-deals/index.ts` | Добавить `media_urls, image_url` в campaigns, убрать advertiser |
-| `src/hooks/useUserDeals.ts` | Обновить тип campaign, убрать advertiser |
-| `src/components/DealCard.tsx` | Показывать кампанию для channel_owner |
+| `src/components/DealCard.tsx` | Добавить `isVideoUrl`, `getCampaignMediaInfo`, условный рендеринг превью |
 
 ## Визуальный результат
 
 **Было (для channel_owner):**
 ```
-[Аватар TG] Иван Петров
-            @ivanpetrov
-            Кампания: Летняя акция
-            Канал: @mychannel
+[К] Летняя акция    ← круглый аватар с буквой
+    входящий
+    Канал: @mychannel
 ```
 
 **Станет:**
 ```
-[Превью медиа] Летняя акция
-               входящий
-               Канал: @mychannel
+[🖼️] Летняя акция   ← квадратное превью с изображением/видео-иконкой
+ [3]  входящий       ← бейдж количества если несколько медиа
+     Канал: @mychannel
 ```
 
-## Техническая реализация
+## Приватность
 
-### user-deals/index.ts
-
-```typescript
-// Строка 116: расширить campaign select
-campaign:campaigns(id, name, media_urls, image_url)
-
-// Удалить строки 137-156 (сбор advertiser данных)
-// В transformedDeals убрать advertiser: ...
-```
-
-### useUserDeals.ts
-
-```typescript
-campaign: {
-  id: string;
-  name: string;
-  media_urls?: string[];
-  image_url?: string;
-} | null;
-// Удалить advertiser из Deal interface
-```
-
-### DealCard.tsx
-
-```typescript
-// Убрать advertiser из props
-// Обновить логику displayTitle/displayAvatar:
-
-const getCampaignPreviewImage = (campaign: DealCardProps['campaign']) => {
-  if (!campaign) return null;
-  const mediaUrls = (campaign as any).media_urls;
-  if (Array.isArray(mediaUrls) && mediaUrls.length > 0) {
-    const firstMedia = mediaUrls[0];
-    // Проверяем что это изображение, не видео
-    if (!firstMedia.includes('.mp4') && !firstMedia.includes('.mov')) {
-      return firstMedia;
-    }
-  }
-  return (campaign as any).image_url || null;
-};
-
-const displayTitle = isChannelOwner 
-  ? campaign?.name || "Кампания"
-  : channel?.title || "Канал";
-  
-const displaySubtitle = isChannelOwner 
-  ? null  // убрать полностью
-  : channel?.username;
-  
-const displayAvatar = isChannelOwner 
-  ? getCampaignPreviewImage(campaign)
-  : channel?.avatar_url;
-```
-
-## Обработка видео
-
-Если первый медиафайл — видео (.mp4, .mov), показываем fallback-иконку кампании вместо превью.
-
+Изменение затрагивает только роль `channel_owner` — рекламодатели (`advertiser`) продолжают видеть аватарку канала. Материал кампании виден только владельцам канала и их команде (менеджерам), так как эти данные уже отфильтрованы по роли в edge function.
