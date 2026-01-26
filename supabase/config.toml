@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.upload-campaign-media]
 verify_jwt = false
+
+[functions.update-channel-status]
+verify_jwt = false
