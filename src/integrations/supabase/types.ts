@@ -38,6 +38,121 @@ export type Database = {
         }
         Relationships: []
       }
+      campaigns: {
+        Row: {
+          button_text: string | null
+          button_url: string | null
+          created_at: string | null
+          id: string
+          image_url: string | null
+          is_active: boolean | null
+          name: string
+          owner_id: string
+          text: string
+          updated_at: string | null
+        }
+        Insert: {
+          button_text?: string | null
+          button_url?: string | null
+          created_at?: string | null
+          id?: string
+          image_url?: string | null
+          is_active?: boolean | null
+          name: string
+          owner_id: string
+          text: string
+          updated_at?: string | null
+        }
+        Update: {
+          button_text?: string | null
+          button_url?: string | null
+          created_at?: string | null
+          id?: string
+          image_url?: string | null
+          is_active?: boolean | null
+          name?: string
+          owner_id?: string
+          text?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaigns_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      channels: {
+        Row: {
+          avatar_url: string | null
+          bot_is_admin: boolean | null
+          category: string
+          created_at: string | null
+          description: string | null
+          id: string
+          is_active: boolean | null
+          owner_id: string
+          price_1_24: number | null
+          price_2_48: number | null
+          price_post: number | null
+          subscribers_count: number | null
+          telegram_chat_id: number | null
+          title: string | null
+          updated_at: string | null
+          username: string
+          verified: boolean | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          bot_is_admin?: boolean | null
+          category: string
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          owner_id: string
+          price_1_24?: number | null
+          price_2_48?: number | null
+          price_post?: number | null
+          subscribers_count?: number | null
+          telegram_chat_id?: number | null
+          title?: string | null
+          updated_at?: string | null
+          username: string
+          verified?: boolean | null
+        }
+        Update: {
+          avatar_url?: string | null
+          bot_is_admin?: boolean | null
+          category?: string
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          owner_id?: string
+          price_1_24?: number | null
+          price_2_48?: number | null
+          price_post?: number | null
+          subscribers_count?: number | null
+          telegram_chat_id?: number | null
+          title?: string | null
+          updated_at?: string | null
+          username?: string
+          verified?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channels_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string | null
