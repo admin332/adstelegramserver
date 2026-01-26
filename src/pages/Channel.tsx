@@ -95,7 +95,7 @@ const Channel: React.FC = () => {
         className="px-4 mt-6"
       >
         <h2 className="text-lg font-semibold text-foreground mb-2">Описание</h2>
-        <div className="bg-secondary/50 rounded-2xl p-4">
+        <div className="bg-secondary/50 rounded-2xl p-4 border-2 border-dashed border-primary">
           <p className="text-muted-foreground">
             {channel.description || 'Описание отсутствует'}
           </p>
