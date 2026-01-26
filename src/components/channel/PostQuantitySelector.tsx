@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Minus, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import TonIcon from '@/assets/ton-icon.svg';
+import { useTonPrice } from '@/hooks/useTonPrice';
 
 interface PostQuantitySelectorProps {
   quantity: number;
@@ -20,6 +21,7 @@ const PostQuantitySelector: React.FC<PostQuantitySelectorProps> = ({
   maxQuantity = 10,
 }) => {
   const totalPrice = quantity * pricePerPost;
+  const { tonPrice } = useTonPrice();
 
   const handleDecrease = () => {
     if (quantity > minQuantity) {
@@ -104,6 +106,11 @@ const PostQuantitySelector: React.FC<PostQuantitySelectorProps> = ({
               <span className="text-foreground">{totalPrice}</span>
             </motion.div>
           </AnimatePresence>
+          {tonPrice && (
+            <span className="text-sm text-muted-foreground">
+              ≈ ${(totalPrice * tonPrice).toFixed(2)}
+            </span>
+          )}
         </div>
       </div>
     </div>
