@@ -94,7 +94,7 @@ const Channel: React.FC = () => {
     if (count > 0) {
       return `${channel.rating} (${count} ${pluralize(count, 'отзыв', 'отзыва', 'отзывов')})`;
     }
-    return `${channel.rating} (нет отзывов)`;
+    return '0 (нет отзывов)';
   };
 
   const detailedStats = [
