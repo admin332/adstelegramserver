@@ -184,7 +184,7 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
           </a>
 
           <div className="flex gap-3">
-            <Button variant="outline" onClick={onBack} className="flex-1 border-primary text-primary hover:bg-primary/10">
+            <Button variant="outline" onClick={onBack} className="flex-1 border-0 text-white hover:bg-white/10">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Назад
             </Button>
@@ -295,7 +295,7 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
           )}
 
           <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setStep(1)} className="flex-1 border-primary text-primary hover:bg-primary/10">
+            <Button variant="outline" onClick={() => setStep(1)} className="flex-1 border-0 text-white hover:bg-white/10">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Назад
             </Button>
