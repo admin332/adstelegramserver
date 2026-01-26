@@ -62,3 +62,6 @@ verify_jwt = false
 
 [functions.publish-scheduled-posts]
 verify_jwt = false
+
+[functions.auto-refund-expired-deals]
+verify_jwt = false
