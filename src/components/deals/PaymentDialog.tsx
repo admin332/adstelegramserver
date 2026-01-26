@@ -1,0 +1,190 @@
+import { useState } from "react";
+import { useTonConnectUI } from "@tonconnect/ui-react";
+import { ExternalLink, Copy, Check, Wallet, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { useTonPrice } from "@/hooks/useTonPrice";
+import TonIcon from "@/assets/ton-icon.svg";
+
+interface PaymentDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  dealId: string;
+  totalPrice: number;
+  escrowAddress: string | null;
+  channelName: string;
+  onPaymentSuccess?: () => void;
+}
+
+export function PaymentDialog({
+  open,
+  onOpenChange,
+  dealId,
+  totalPrice,
+  escrowAddress,
+  channelName,
+  onPaymentSuccess,
+}: PaymentDialogProps) {
+  const [tonConnectUI] = useTonConnectUI();
+  const [copied, setCopied] = useState(false);
+  const [isPaying, setIsPaying] = useState(false);
+  const { convertToUsd } = useTonPrice();
+
+  const usdEquivalent = convertToUsd(totalPrice);
+
+  const handleCopyAddress = async () => {
+    if (!escrowAddress) return;
+    
+    try {
+      await navigator.clipboard.writeText(escrowAddress);
+      setCopied(true);
+      toast.success("Адрес скопирован");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Не удалось скопировать");
+    }
+  };
+
+  const handlePayViaWallet = async () => {
+    if (!escrowAddress) {
+      toast.error("Адрес эскроу не найден");
+      return;
+    }
+
+    if (!tonConnectUI.connected) {
+      toast.error("Сначала подключите кошелёк в профиле");
+      return;
+    }
+
+    setIsPaying(true);
+    
+    try {
+      const amountNano = Math.floor(totalPrice * 1_000_000_000).toString();
+      
+      await tonConnectUI.sendTransaction({
+        validUntil: Math.floor(Date.now() / 1000) + 600,
+        messages: [
+          {
+            address: escrowAddress,
+            amount: amountNano,
+          },
+        ],
+      });
+      
+      toast.success("Транзакция отправлена!");
+      onPaymentSuccess?.();
+      onOpenChange(false);
+    } catch (error: any) {
+      if (error?.message?.includes("Interrupted")) {
+        toast.error("Оплата отменена");
+      } else {
+        toast.error("Ошибка оплаты: " + (error?.message || "Неизвестная ошибка"));
+      }
+    } finally {
+      setIsPaying(false);
+    }
+  };
+
+  const handleViewBlockchain = () => {
+    if (!escrowAddress) return;
+    window.open(`https://tonviewer.com/${escrowAddress}`, "_blank");
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Оплата сделки</DialogTitle>
+          <DialogDescription>
+            Реклама в канале {channelName}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Сумма к оплате */}
+          <div className="bg-secondary/50 rounded-xl p-4 text-center">
+            <p className="text-sm text-muted-foreground mb-1">К оплате</p>
+            <div className="flex items-center justify-center gap-2">
+              <img src={TonIcon} alt="TON" className="w-6 h-6" />
+              <span className="text-2xl font-bold text-foreground">
+                {totalPrice} TON
+              </span>
+            </div>
+            {usdEquivalent && (
+              <p className="text-sm text-muted-foreground mt-1">
+                ≈ ${usdEquivalent.toFixed(2)}
+              </p>
+            )}
+          </div>
+
+          {/* Эскроу адрес */}
+          {escrowAddress && (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">Эскроу-адрес:</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 bg-secondary/50 rounded-lg px-3 py-2 text-xs font-mono text-foreground break-all">
+                  {escrowAddress}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleCopyAddress}
+                  className="shrink-0"
+                >
+                  {copied ? (
+                    <Check className="w-4 h-4 text-green-500" />
+                  ) : (
+                    <Copy className="w-4 h-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Кнопки */}
+          <div className="flex flex-col gap-2">
+            <Button
+              onClick={handlePayViaWallet}
+              disabled={isPaying || !escrowAddress}
+              className="w-full"
+            >
+              {isPaying ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Оплата...
+                </>
+              ) : (
+                <>
+                  <Wallet className="w-4 h-4 mr-2" />
+                  Оплатить через кошелёк
+                </>
+              )}
+            </Button>
+
+            {escrowAddress && (
+              <Button
+                variant="outline"
+                onClick={handleViewBlockchain}
+                className="w-full"
+              >
+                <ExternalLink className="w-4 h-4 mr-2" />
+                Посмотреть в блокчейне
+              </Button>
+            )}
+          </div>
+
+          <p className="text-xs text-muted-foreground text-center">
+            После оплаты средства будут храниться на эскроу до завершения размещения
+          </p>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

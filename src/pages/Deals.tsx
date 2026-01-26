@@ -1,28 +1,41 @@
+import { useState } from "react";
 import { BottomNav } from "@/components/BottomNav";
 import { DealCard } from "@/components/DealCard";
 import { FilterChip } from "@/components/FilterChip";
-import { mockDeals } from "@/data/mockChannels";
-import { useState } from "react";
-import { Inbox, Clock, CheckCircle2, XCircle } from "lucide-react";
+import { PaymentDialog } from "@/components/deals/PaymentDialog";
+import { useUserDeals, type Deal } from "@/hooks/useUserDeals";
+import { Inbox, Clock, CheckCircle2, Wallet, Loader2 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
-type DealFilter = "all" | "active" | "completed" | "cancelled";
+type DealFilter = "all" | "pending" | "active" | "completed";
 
 const Deals = () => {
+  const { data: deals, isLoading, refetch } = useUserDeals();
   const [filter, setFilter] = useState<DealFilter>("all");
+  const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
 
   const filters = [
     { id: "all" as const, label: "Все", icon: Inbox },
+    { id: "pending" as const, label: "К оплате", icon: Wallet },
     { id: "active" as const, label: "Активные", icon: Clock },
     { id: "completed" as const, label: "Завершённые", icon: CheckCircle2 },
-    { id: "cancelled" as const, label: "Отменённые", icon: XCircle },
   ];
 
-  const filteredDeals = mockDeals.filter((deal) => {
+  const filteredDeals = (deals || []).filter((deal) => {
     if (filter === "all") return true;
-    if (filter === "active") return ["pending", "in_review", "approved", "escrow", "published"].includes(deal.status);
-    if (filter === "completed") return deal.status === "completed";
+    if (filter === "pending") return deal.status === "pending";
+    if (filter === "active") return ["escrow", "in_progress"].includes(deal.status);
+    if (filter === "completed") return ["completed", "cancelled", "disputed"].includes(deal.status);
     return true;
   });
+
+  const handlePayClick = (deal: Deal) => {
+    setSelectedDeal(deal);
+  };
+
+  const handlePaymentSuccess = () => {
+    refetch();
+  };
 
   return (
     <div className="min-h-screen bg-transparent safe-bottom">
@@ -49,8 +62,40 @@ const Deals = () => {
 
       {/* Main Content */}
       <main className="px-4 py-4 space-y-3">
-        {filteredDeals.length > 0 ? (
-          filteredDeals.map((deal) => <DealCard key={deal.id} {...deal} />)
+        {isLoading ? (
+          // Скелетоны загрузки
+          <>
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="bg-card rounded-2xl p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <Skeleton className="w-12 h-12 rounded-full" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-32" />
+                    <Skeleton className="h-3 w-24" />
+                  </div>
+                </div>
+                <Skeleton className="h-4 w-48" />
+                <Skeleton className="h-8 w-full" />
+              </div>
+            ))}
+          </>
+        ) : filteredDeals.length > 0 ? (
+          filteredDeals.map((deal) => (
+            <DealCard 
+              key={deal.id} 
+              id={deal.id}
+              status={deal.status}
+              totalPrice={deal.total_price}
+              postsCount={deal.posts_count}
+              durationHours={deal.duration_hours}
+              escrowAddress={deal.escrow_address}
+              scheduledAt={deal.scheduled_at}
+              createdAt={deal.created_at}
+              channel={deal.channel}
+              campaign={deal.campaign}
+              onPayClick={() => handlePayClick(deal)}
+            />
+          ))
         ) : (
           <div className="text-center py-12">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-secondary flex items-center justify-center">
@@ -58,11 +103,26 @@ const Deals = () => {
             </div>
             <p className="text-foreground font-medium">Нет сделок</p>
             <p className="text-sm text-muted-foreground mt-1">
-              Ваши сделки появятся здесь
+              {filter === "all" 
+                ? "Ваши сделки появятся здесь" 
+                : "Нет сделок с таким статусом"}
             </p>
           </div>
         )}
       </main>
+
+      {/* Payment Dialog */}
+      {selectedDeal && (
+        <PaymentDialog
+          open={!!selectedDeal}
+          onOpenChange={(open) => !open && setSelectedDeal(null)}
+          dealId={selectedDeal.id}
+          totalPrice={selectedDeal.total_price}
+          escrowAddress={selectedDeal.escrow_address}
+          channelName={selectedDeal.channel?.title || "Канал"}
+          onPaymentSuccess={handlePaymentSuccess}
+        />
+      )}
 
       <BottomNav />
     </div>
