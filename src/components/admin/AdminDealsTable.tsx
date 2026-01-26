@@ -110,10 +110,31 @@ export function AdminDealsTable() {
 
       if (error) throw error;
 
-      toast({
-        title: 'Статус обновлён',
-        description: `Сделка переведена в статус "${STATUS_CONFIG[newStatus].label}"`,
-      });
+      // If status changed to 'escrow', send notification to channel owner
+      if (newStatus === 'escrow') {
+        const { error: notifyError } = await supabase.functions.invoke('notify-deal-payment', {
+          body: { dealId }
+        });
+        
+        if (notifyError) {
+          console.error('Error sending notification:', notifyError);
+          toast({
+            title: 'Статус обновлён',
+            description: 'Но не удалось отправить уведомление владельцу канала',
+            variant: 'destructive',
+          });
+        } else {
+          toast({
+            title: 'Статус обновлён',
+            description: 'Владелец канала получил уведомление с рекламой',
+          });
+        }
+      } else {
+        toast({
+          title: 'Статус обновлён',
+          description: `Сделка переведена в статус "${STATUS_CONFIG[newStatus].label}"`,
+        });
+      }
 
       queryClient.invalidateQueries({ queryKey: ['admin-deals'] });
     } catch (err) {
