@@ -45,11 +45,11 @@ const PostQuantitySelector: React.FC<PostQuantitySelectorProps> = ({
       <div className="bg-secondary/50 rounded-2xl p-6">
         <div className="flex items-center justify-center gap-6">
           <Button
-            variant="outline"
+            variant="ghost"
             size="icon"
             onClick={handleDecrease}
             disabled={quantity <= minQuantity}
-            className="h-12 w-12 rounded-full"
+            className="h-12 w-12 rounded-full bg-secondary hover:bg-secondary/80"
           >
             <Minus className="h-5 w-5" />
           </Button>
@@ -72,11 +72,11 @@ const PostQuantitySelector: React.FC<PostQuantitySelectorProps> = ({
           </div>
 
           <Button
-            variant="outline"
+            variant="ghost"
             size="icon"
             onClick={handleIncrease}
             disabled={quantity >= maxQuantity}
-            className="h-12 w-12 rounded-full"
+            className="h-12 w-12 rounded-full bg-secondary hover:bg-secondary/80"
           >
             <Plus className="h-5 w-5" />
           </Button>
