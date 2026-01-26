@@ -247,6 +247,63 @@ Deno.serve(async (req) => {
 
     console.log(`[join-channel-as-admin] User ${userData.id} joined channel ${channel.id} as ${role}`);
 
+    // Send notification to channel owner (only for managers, not when owner joins)
+    if (role === "manager") {
+      const { data: ownerAdmin } = await supabase
+        .from("channel_admins")
+        .select("user_id")
+        .eq("channel_id", channel.id)
+        .eq("role", "owner")
+        .maybeSingle();
+
+      if (ownerAdmin && ownerAdmin.user_id !== userData.id) {
+        const { data: ownerUser } = await supabase
+          .from("users")
+          .select("telegram_id")
+          .eq("id", ownerAdmin.user_id)
+          .single();
+
+        const { data: newManager } = await supabase
+          .from("users")
+          .select("first_name, last_name, username")
+          .eq("id", userData.id)
+          .single();
+
+        if (ownerUser?.telegram_id && newManager) {
+          const managerName = [newManager.first_name, newManager.last_name]
+            .filter(Boolean)
+            .join(" ");
+          const managerUsername = newManager.username ? `@${newManager.username}` : "";
+
+          const notificationText = `🆕 <b>Новый менеджер в команде!</b>
+
+Канал: <b>${channel.title}</b>
+
+Присоединился: <b>${managerName}</b>${managerUsername ? ` (${managerUsername})` : ""}
+
+Теперь этот пользователь может управлять рекламой на вашем канале.`;
+
+          try {
+            await fetch(
+              `https://api.telegram.org/bot${botToken}/sendMessage`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: ownerUser.telegram_id,
+                  text: notificationText,
+                  parse_mode: "HTML",
+                }),
+              }
+            );
+            console.log(`[join-channel-as-admin] Notification sent to owner ${ownerUser.telegram_id}`);
+          } catch (notifyError) {
+            console.error("[join-channel-as-admin] Failed to notify owner:", notifyError);
+          }
+        }
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
