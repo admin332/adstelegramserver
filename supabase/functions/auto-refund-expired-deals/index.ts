@@ -2,8 +2,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createDecipheriv } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { mnemonicToPrivateKey } from "npm:@ton/crypto@3";
-import { WalletContractV4, TonClient, internal, SendMode } from "npm:@ton/ton@15";
+import { mnemonicToPrivateKey } from "@ton/crypto";
+import { WalletContractV4, TonClient, internal, SendMode } from "@ton/ton";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -85,9 +85,10 @@ async function sendRefund(
     
     console.log(`Refund sent to ${toAddress}, amount: ${refundAmount}`);
     return { success: true };
-  } catch (error) {
-    console.error("Refund error:", error);
-    return { success: false, error: error.message };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : "Unknown error";
+    console.error("Refund error:", err);
+    return { success: false, error: errorMessage };
   }
 }
 
@@ -107,9 +108,30 @@ async function sendTelegramNotification(
         parse_mode: "HTML",
       }),
     });
-  } catch (error) {
-    console.error(`Failed to send notification to ${telegramId}:`, error);
+  } catch (err) {
+    console.error(`Failed to send notification to ${telegramId}:`, err);
   }
+}
+
+interface DealAdvertiser {
+  telegram_id: number;
+  wallet_address: string | null;
+  first_name: string;
+}
+
+interface DealChannel {
+  title: string;
+  username: string;
+  owner_id: string;
+}
+
+interface ExpiredDeal {
+  id: string;
+  total_price: number;
+  escrow_mnemonic_encrypted: string | null;
+  scheduled_at: string;
+  channel: DealChannel | null;
+  advertiser: DealAdvertiser | null;
 }
 
 serve(async (req) => {
@@ -166,8 +188,12 @@ serve(async (req) => {
     
     for (const deal of expiredDeals) {
       try {
-        const advertiser = deal.advertiser as { telegram_id: number; wallet_address: string | null; first_name: string } | null;
-        const channel = deal.channel as { title: string; username: string; owner_id: string } | null;
+        // Handle the case where Supabase returns arrays for relations
+        const advertiserData = Array.isArray(deal.advertiser) ? deal.advertiser[0] : deal.advertiser;
+        const channelData = Array.isArray(deal.channel) ? deal.channel[0] : deal.channel;
+        
+        const advertiser = advertiserData as DealAdvertiser | null;
+        const channel = channelData as DealChannel | null;
         
         if (!advertiser?.wallet_address) {
           console.error(`Deal ${deal.id}: Advertiser wallet address not found, skipping`);
@@ -259,10 +285,11 @@ serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
     
-  } catch (error) {
-    console.error("Error in auto-refund-expired-deals:", error);
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : "Unknown error";
+    console.error("Error in auto-refund-expired-deals:", err);
     return new Response(
-      JSON.stringify({ success: false, error: error.message }),
+      JSON.stringify({ success: false, error: errorMessage }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

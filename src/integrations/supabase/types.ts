@@ -250,6 +250,7 @@ export type Database = {
         Row: {
           advertiser_id: string
           campaign_id: string | null
+          cancellation_reason: string | null
           channel_id: string
           completed_at: string | null
           created_at: string | null
@@ -271,6 +272,7 @@ export type Database = {
         Insert: {
           advertiser_id: string
           campaign_id?: string | null
+          cancellation_reason?: string | null
           channel_id: string
           completed_at?: string | null
           created_at?: string | null
@@ -292,6 +294,7 @@ export type Database = {
         Update: {
           advertiser_id?: string
           campaign_id?: string | null
+          cancellation_reason?: string | null
           channel_id?: string
           completed_at?: string | null
           created_at?: string | null
