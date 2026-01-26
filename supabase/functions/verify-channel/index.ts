@@ -332,14 +332,89 @@ Deno.serve(async (req) => {
     // Check if channel already exists
     const { data: existingChannel } = await supabase
       .from("channels")
-      .select("id")
+      .select("*")
       .eq("telegram_chat_id", chat.id)
       .maybeSingle();
 
     if (existingChannel) {
+      // Channel exists — check if user can be added as manager
+      
+      // 1. Check if user is already in channel_admins
+      const { data: existingAdmin } = await supabase
+        .from("channel_admins")
+        .select("id, role")
+        .eq("channel_id", existingChannel.id)
+        .eq("user_id", userData.id)
+        .maybeSingle();
+
+      if (existingAdmin) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            message: "Вы уже являетесь администратором этого канала",
+            role: existingAdmin.role,
+            isExistingAdmin: true,
+            channel: {
+              id: existingChannel.id,
+              title: existingChannel.title,
+              username: existingChannel.username,
+              description: existingChannel.description,
+              avatar_url: existingChannel.avatar_url,
+              subscribers_count: existingChannel.subscribers_count,
+            },
+            botCanPost: true,
+            userIsAdmin: true,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // 2. User is confirmed admin in Telegram (userIsAdmin check was done above)
+      // 3. Add as manager (or owner if they are the creator)
+      const isCreator = userMember?.status === "creator";
+      const role = isCreator ? "owner" : "manager";
+
+      const { error: adminInsertError } = await supabase
+        .from("channel_admins")
+        .insert({
+          channel_id: existingChannel.id,
+          user_id: userData.id,
+          role,
+          telegram_member_status: userMember?.status,
+          permissions: role === "owner"
+            ? { can_edit_posts: true, can_view_stats: true, can_view_finance: true, can_withdraw: true, can_manage_admins: true, can_approve_ads: true }
+            : { can_edit_posts: true, can_view_stats: true, can_view_finance: false, can_withdraw: false, can_manage_admins: false, can_approve_ads: true },
+          last_verified_at: new Date().toISOString(),
+        });
+
+      if (adminInsertError) {
+        console.error("Admin insert error for existing channel:", adminInsertError);
+        return new Response(
+          JSON.stringify({ success: false, error: "Ошибка добавления как администратора" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      console.log(`[verify-channel] User ${userData.id} added as ${role} to existing channel ${existingChannel.id}`);
+
       return new Response(
-        JSON.stringify({ success: false, error: "Этот канал уже зарегистрирован в системе" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          success: true,
+          message: `Вы добавлены как ${role === 'owner' ? 'владелец' : 'менеджер'} канала`,
+          role,
+          isNewAdmin: true,
+          channel: {
+            id: existingChannel.id,
+            title: existingChannel.title,
+            username: existingChannel.username,
+            description: existingChannel.description,
+            avatar_url: existingChannel.avatar_url,
+            subscribers_count: existingChannel.subscribers_count,
+          },
+          botCanPost: true,
+          userIsAdmin: true,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
