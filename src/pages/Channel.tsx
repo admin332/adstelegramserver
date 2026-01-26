@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Star, TrendingUp, Tag, ShoppingCart } from 'lucide-react';
@@ -7,12 +7,32 @@ import { Button } from '@/components/ui/button';
 import ChannelHero from '@/components/channel/ChannelHero';
 import ChannelStats from '@/components/channel/ChannelStats';
 import OrderDrawer from '@/components/channel/OrderDrawer';
-import TonIcon from '@/assets/ton-icon.svg';
+import { getTelegramWebApp, isTelegramMiniApp } from '@/lib/telegram';
 
 const Channel: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [isOrderDrawerOpen, setIsOrderDrawerOpen] = useState(false);
+
+  // Telegram BackButton integration
+  const handleBack = useCallback(() => {
+    navigate(-1);
+  }, [navigate]);
+
+  useEffect(() => {
+    if (isTelegramMiniApp()) {
+      const webapp = getTelegramWebApp();
+      if (webapp?.BackButton) {
+        webapp.BackButton.onClick(handleBack);
+        webapp.BackButton.show();
+        
+        return () => {
+          webapp.BackButton.offClick(handleBack);
+          webapp.BackButton.hide();
+        };
+      }
+    }
+  }, [handleBack]);
 
   const channel = mockChannels.find((c) => c.id === id);
 
@@ -116,9 +136,8 @@ const Channel: React.FC = () => {
           >
             <ShoppingCart className="h-5 w-5" />
             Заказать рекламу
-            <span className="flex items-center gap-1.5 ml-2 opacity-80">
-              <img src={TonIcon} alt="TON" className="w-4 h-4" />
-              {channel.tonPrice}
+            <span className="text-white/80 ml-2">
+              {channel.tonPrice} TON
             </span>
           </Button>
         </motion.div>

@@ -1,8 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, CheckCircle2, Crown } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
+import { CheckCircle2, Crown } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 
 interface ChannelHeroProps {
@@ -20,8 +18,6 @@ const ChannelHero: React.FC<ChannelHeroProps> = ({
   verified,
   premium,
 }) => {
-  const navigate = useNavigate();
-
   return (
     <div className="relative">
       {/* Background Image */}
@@ -33,16 +29,6 @@ const ChannelHero: React.FC<ChannelHeroProps> = ({
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-background" />
       </div>
-
-      {/* Back Button */}
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => navigate(-1)}
-        className="absolute top-4 left-4 bg-black/30 backdrop-blur-sm text-white hover:bg-black/50 rounded-full"
-      >
-        <ArrowLeft className="h-5 w-5" />
-      </Button>
 
       {/* Avatar & Info */}
       <div className="relative -mt-12 flex flex-col items-center px-4">
