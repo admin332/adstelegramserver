@@ -1,127 +1,250 @@
 
-## План: Улучшить превью кампаний в списке
+## План: Поддержка ссылок и превью аватарки при добавлении канала
 
 ### Что нужно сделать
 
-1. **Показывать статичную картинку вместо видео** — для видеофайлов отображать иконку вместо проигрывания
-2. **Добавить счётчик медиафайлов** — показывать количество материалов в кружке (если больше 1)
+1. **Поддержка URL и username** — парсить ввод `https://t.me/channelname` и извлекать username
+2. **Показывать аватарку канала** — через 1.5 секунды после ввода запрашивать превью канала
+3. **Создать Edge Function** — для получения информации о канале без полной верификации
 
-### Текущая ситуация
+### Архитектура решения
 
-| Что сейчас | Что должно быть |
-|------------|-----------------|
-| Показывается только `image_url` | Показывать первый файл из `media_urls` |
-| Видео не определяется | Определять тип по расширению файла |
-| Нет счётчика | Показывать счётчик в правом нижнем углу |
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Текущая логика                                   │
+├─────────────────────────────────────────────────────────────────────┤
+│  1. Пользователь вводит username                                    │
+│  2. Нажимает "Проверить канал"                                     │
+│  3. Полная верификация (бот + владелец)                            │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Новая логика                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│  1. Пользователь вводит username ИЛИ ссылку                        │
+│                              ↓                                       │
+│  2. Парсинг: t.me/channel → channel                                 │
+│                              ↓                                       │
+│  3. Debounce 1.5 сек → запрос preview-channel                      │
+│                              ↓                                       │
+│  4. Показываем аватарку справа от поля ввода                       │
+│                              ↓                                       │
+│  5. Нажатие "Проверить" → полная верификация                       │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-### Файлы для изменения
+### Файлы для создания/изменения
 
 | Файл | Действие | Описание |
 |------|----------|----------|
-| `src/hooks/useUserCampaigns.ts` | Изменить | Добавить `media_urls` в интерфейс и запрос |
-| `src/components/create/MyCampaignsList.tsx` | Изменить | Добавить логику определения типа файла и счётчик |
+| `supabase/functions/preview-channel/index.ts` | Создать | Лёгкий запрос информации о канале |
+| `src/components/create/AddChannelWizard.tsx` | Изменить | Добавить парсинг URL, debounce, превью аватарки |
+| `supabase/config.toml` | Изменить | Добавить новую функцию |
 
 ---
 
-### Техническая реализация
+### 1. Edge Function `preview-channel`
 
-**1. Обновить интерфейс UserCampaign**
-
-Добавить поле `media_urls`:
+Лёгкая версия verify-channel — только получает базовую информацию:
 
 ```typescript
-export interface UserCampaign {
-  id: string;
-  name: string;
-  text: string;
-  button_text: string | null;
-  button_url: string | null;
-  image_url: string | null;
-  media_urls: string[] | null;  // <-- Добавить
-  is_active: boolean | null;
-  created_at: string | null;
-}
+// Принимает: { username: string }
+// Возвращает: { success, title, username, avatar_url } или { success: false, error }
+
+// НЕ проверяет:
+// - Является ли пользователь админом
+// - Добавлен ли бот
+// - Не сохраняет в БД
+
+// Только вызывает getChat и getFileUrl для аватарки
 ```
 
-**2. Обновить логику отображения превью**
+**Преимущества отдельной функции:**
+- Быстрее (меньше проверок)
+- Не требует telegram_user_id
+- Можно вызывать часто (debounce на фронте)
+
+---
+
+### 2. Парсинг URL в username
 
 ```typescript
-// Вспомогательная функция для определения типа файла
-const isVideoUrl = (url: string) => {
-  const videoExtensions = ['.mp4', '.mov', '.avi', '.webm', '.mkv'];
-  return videoExtensions.some(ext => url.toLowerCase().includes(ext));
+const extractUsername = (input: string): string => {
+  // Удаляем пробелы
+  const trimmed = input.trim();
+  
+  // Паттерны Telegram ссылок
+  // https://t.me/channelname
+  // http://t.me/channelname
+  // t.me/channelname
+  // @channelname
+  // channelname
+  
+  const urlPattern = /(?:https?:\/\/)?(?:t\.me|telegram\.me)\/([a-zA-Z0-9_]+)/i;
+  const match = trimmed.match(urlPattern);
+  
+  if (match) {
+    return match[1]; // Извлечённый username
+  }
+  
+  // Убираем @ если есть
+  return trimmed.replace(/^@/, '');
 };
-
-// В компоненте:
-const mediaUrls = campaign.media_urls as string[] | null;
-const firstMedia = mediaUrls?.[0] || campaign.image_url;
-const mediaCount = mediaUrls?.length || (campaign.image_url ? 1 : 0);
-const isVideo = firstMedia ? isVideoUrl(firstMedia) : false;
 ```
 
-**3. Обновить JSX превью**
+---
+
+### 3. Debounce и превью аватарки
+
+```typescript
+// Состояние
+const [channelPreview, setChannelPreview] = useState<{
+  avatar_url: string | null;
+  title: string | null;
+} | null>(null);
+const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+
+// Debounce эффект
+useEffect(() => {
+  const username = extractUsername(channelData.username);
+  if (!username || username.length < 3) {
+    setChannelPreview(null);
+    return;
+  }
+  
+  setIsLoadingPreview(true);
+  
+  const timeoutId = setTimeout(async () => {
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/preview-channel`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ username }),
+        }
+      );
+      const data = await response.json();
+      
+      if (data.success) {
+        setChannelPreview({
+          avatar_url: data.avatar_url,
+          title: data.title,
+        });
+      } else {
+        setChannelPreview(null);
+      }
+    } catch {
+      setChannelPreview(null);
+    } finally {
+      setIsLoadingPreview(false);
+    }
+  }, 1500); // 1.5 секунды debounce
+  
+  return () => clearTimeout(timeoutId);
+}, [channelData.username]);
+```
+
+---
+
+### 4. Обновлённый UI поля ввода
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│  До изменений:                                                      │
+│  ┌───────────────────────────────────────────────────┐              │
+│  │ @  [your_channel                            ]     │              │
+│  └───────────────────────────────────────────────────┘              │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│  После изменений:                                                   │
+│  ┌───────────────────────────────────────────────────┐   ┌───────┐ │
+│  │ [https://t.me/channel или @channel           ]    │   │  🖼️  │ │
+│  └───────────────────────────────────────────────────┘   └───────┘ │
+│                                                           ↑        │
+│                                                    Аватарка канала │
+│                                                    (или Loader)    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**JSX структура:**
 
 ```tsx
-<div className="w-14 h-14 rounded-xl bg-secondary flex items-center justify-center overflow-hidden flex-shrink-0 relative">
-  {firstMedia ? (
-    isVideo ? (
-      // Для видео — показываем иконку
-      <div className="w-full h-full flex items-center justify-center bg-card">
-        <FileVideo className="w-6 h-6 text-primary" />
-      </div>
-    ) : (
-      // Для фото — показываем картинку
-      <img
-        src={firstMedia}
-        alt={campaign.name}
-        className="w-full h-full object-cover"
-      />
-    )
-  ) : (
-    <ImageIcon className="w-6 h-6 text-muted-foreground" />
-  )}
-  
-  {/* Счётчик медиафайлов (если больше 1) */}
-  {mediaCount > 1 && (
-    <div className="absolute bottom-0.5 right-0.5 min-w-5 h-5 rounded-full bg-primary flex items-center justify-center px-1">
-      <span className="text-xs font-medium text-white">{mediaCount}</span>
+<div className="space-y-2">
+  <Label htmlFor="username">Username или ссылка на канал</Label>
+  <div className="flex gap-3 items-center">
+    <Input
+      id="username"
+      placeholder="@channel или https://t.me/channel"
+      value={channelData.username}
+      onChange={(e) => setChannelData({ ...channelData, username: e.target.value })}
+      className="flex-1"
+    />
+    {/* Превью аватарки */}
+    <div className="w-12 h-12 rounded-xl bg-secondary flex items-center justify-center overflow-hidden flex-shrink-0">
+      {isLoadingPreview ? (
+        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+      ) : channelPreview?.avatar_url ? (
+        <img 
+          src={channelPreview.avatar_url} 
+          alt="Channel" 
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <Radio className="w-5 h-5 text-muted-foreground" />
+      )}
     </div>
+  </div>
+  {channelPreview?.title && (
+    <p className="text-sm text-muted-foreground">{channelPreview.title}</p>
   )}
 </div>
 ```
 
 ---
 
+### 5. Обновление verify-channel
+
+При верификации используем очищенный username:
+
+```typescript
+const handleVerifyChannel = async () => {
+  const cleanUsername = extractUsername(channelData.username);
+  
+  // ... rest of the code using cleanUsername
+};
+```
+
+---
+
 ### Визуальный результат
 
+**Пользователь вводит ссылку:**
 ```text
-До изменений:
-┌─────────────────────────────────────┐
-│  [📷]  Название кампании      🔘   │
-│        Текст рекламы...            │
-└─────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  https://t.me/durov                                    [🔄]  │
+└──────────────────────────────────────────────────────────────┘
+                                                          ↑
+                                                    Загрузка...
 
-После изменений (1 фото):
-┌─────────────────────────────────────┐
-│  [📷]  Название кампании      🔘   │
-│        Текст рекламы...            │
-└─────────────────────────────────────┘
-
-После изменений (3 материала):
-┌─────────────────────────────────────┐
-│  [📷]  Название кампании      🔘   │
-│   [3]  Текст рекламы...            │
-└─────────────────────────────────────┘
-     ↑
-   Счётчик в правом нижнем углу превью
-
-После изменений (видео):
-┌─────────────────────────────────────┐
-│  [🎬]  Название кампании      🔘   │
-│        Текст рекламы...            │
-└─────────────────────────────────────┘
-     ↑
-   Иконка видео вместо проигрывания
+┌──────────────────────────────────────────────────────────────┐
+│  https://t.me/durov                                    [📷]  │
+└──────────────────────────────────────────────────────────────┘
+│  Durov's Channel                                             │
+                                                          ↑
+                                                 Аватарка Дурова!
 ```
+
+---
+
+### Безопасность
+
+- `preview-channel` не требует авторизации (только читает публичную инфу)
+- Полная верификация остаётся защищённой
+- Rate limiting на уровне Supabase Edge Functions
