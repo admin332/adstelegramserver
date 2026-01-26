@@ -1,205 +1,25 @@
 
-
 ## Цель
-Добавить 20-минутный лимит на оплату сделки. После истечения срока:
-- Сделка помечается как `expired` (не удаляется полностью)
-- Эскроу-кошелёк сохраняется в базе на случай поздней оплаты
-- Cron job перестаёт сканировать адрес
-- Пользователь видит сделку как истёкшую
-
-## Архитектура решения
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                    Жизненный цикл сделки                        │
-├─────────────────────────────────────────────────────────────────┤
-│  created_at ───────────── 20 минут ─────────────► expires_at    │
-│       │                                                │        │
-│       ▼                                                ▼        │
-│   [pending] ──── оплата ────► [escrow]          [expired]       │
-│       │                                                         │
-│       └──────── 20 мин без оплаты ─────────────────────┘        │
-└─────────────────────────────────────────────────────────────────┘
-```
+Обновить старые сделки без `expires_at` на статус `expired` чтобы они отображались как истёкшие для пользователя.
 
 ## Изменения
 
-### 1. Миграция базы данных
-
-Добавить новый статус `expired` в enum `deal_status` и поле `expires_at`:
+### SQL запрос для обновления данных
 
 ```sql
--- Добавить новое значение в enum
-ALTER TYPE deal_status ADD VALUE 'expired';
-
--- Добавить поле expires_at для отслеживания истечения
-ALTER TABLE deals ADD COLUMN expires_at timestamptz;
+UPDATE deals 
+SET status = 'expired' 
+WHERE status = 'pending' 
+  AND (expires_at IS NULL OR expires_at < NOW());
 ```
 
-### 2. Обновить `create-deal` Edge Function
+### Затронутые сделки
 
-При создании сделки установить `expires_at` = `created_at + 20 минут`:
+| ID | Создана | expires_at | Новый статус |
+|----|---------|------------|--------------|
+| `583dffe2-bdd1-46ea-a1f9-558782c6c1d2` | 26.01.2026 21:28 | NULL | expired |
+| `1ec889cf-3155-49f8-9523-3665b82647c9` | 26.01.2026 21:41 | NULL | expired |
 
-```typescript
-// В create-deal/index.ts
-const expiresAt = new Date(Date.now() + 20 * 60 * 1000); // +20 минут
+## Результат
 
-const { data: deal } = await supabase
-  .from("deals")
-  .insert({
-    // ... existing fields
-    expires_at: expiresAt.toISOString(),
-  })
-```
-
-### 3. Обновить `check-escrow-payments` Edge Function
-
-Добавить логику для:
-1. Проверки истекших сделок и обновления их статуса на `expired`
-2. Фильтрации: сканировать только неистёкшие pending-сделки
-
-```typescript
-// 1. Сначала пометить истёкшие сделки
-const now = new Date().toISOString();
-await supabase
-  .from('deals')
-  .update({ status: 'expired' })
-  .eq('status', 'pending')
-  .lt('expires_at', now);  // expires_at < now
-
-// 2. Затем проверять только активные pending-сделки
-const { data: pendingDeals } = await supabase
-  .from('deals')
-  .select(...)
-  .eq('status', 'pending')
-  .gte('expires_at', now)  // expires_at >= now (ещё не истекли)
-  .not('escrow_address', 'is', null);
-```
-
-### 4. Обновить `useUserDeals.ts`
-
-Добавить поле `expires_at` в запрос:
-
-```typescript
-const { data, error } = await supabase
-  .from('deals')
-  .select(`
-    id,
-    status,
-    total_price,
-    posts_count,
-    duration_hours,
-    escrow_address,
-    scheduled_at,
-    created_at,
-    expires_at,  // <-- добавить
-    channel:channels(...),
-    campaign:campaigns(...)
-  `)
-```
-
-### 5. Обновить `DealCard.tsx`
-
-Добавить:
-- Статус `expired` с соответствующим стилем
-- Таймер обратного отсчёта для pending-сделок
-
-```typescript
-// Добавить в statusConfig
-expired: { 
-  label: "Истекло", 
-  color: "text-gray-500", 
-  bgColor: "bg-gray-500/10",
-  icon: Clock 
-}
-
-// Компонент таймера для pending-сделок
-const TimeRemaining = ({ expiresAt }: { expiresAt: string }) => {
-  const [timeLeft, setTimeLeft] = useState<string>("");
-  
-  useEffect(() => {
-    const update = () => {
-      const diff = new Date(expiresAt).getTime() - Date.now();
-      if (diff <= 0) {
-        setTimeLeft("Истекло");
-        return;
-      }
-      const mins = Math.floor(diff / 60000);
-      const secs = Math.floor((diff % 60000) / 1000);
-      setTimeLeft(`${mins}:${secs.toString().padStart(2, '0')}`);
-    };
-    
-    update();
-    const interval = setInterval(update, 1000);
-    return () => clearInterval(interval);
-  }, [expiresAt]);
-  
-  return <span className="text-yellow-500">{timeLeft}</span>;
-};
-```
-
-### 6. Обновить `PaymentDialog.tsx` и `PaymentStep.tsx`
-
-Добавить отображение оставшегося времени на оплату:
-
-```typescript
-// Показать таймер в диалоге оплаты
-<div className="text-center text-sm text-yellow-500">
-  <Clock className="w-4 h-4 inline mr-1" />
-  Осталось на оплату: {timeRemaining}
-</div>
-```
-
-## Файлы для создания/изменения
-
-| Файл | Действие |
-|------|----------|
-| Миграция: добавить `expired` статус и `expires_at` | SQL миграция |
-| `supabase/functions/create-deal/index.ts` | Добавить `expires_at` при создании |
-| `supabase/functions/check-escrow-payments/index.ts` | Добавить проверку истечения |
-| `src/hooks/useUserDeals.ts` | Добавить `expires_at` в запрос |
-| `src/components/DealCard.tsx` | Добавить таймер и статус `expired` |
-| `src/components/deals/PaymentDialog.tsx` | Добавить таймер |
-| `src/integrations/supabase/types.ts` | Автоматически обновится |
-
-## Логика работы
-
-### Сценарий 1: Успешная оплата в течение 20 минут
-1. Создаётся сделка с `status: pending`, `expires_at: now + 20min`
-2. Пользователь видит карточку с таймером "19:45"
-3. Пользователь оплачивает
-4. Cron job находит оплату, меняет статус на `escrow`
-5. Владельцу канала приходит уведомление
-
-### Сценарий 2: Время истекло без оплаты
-1. Создаётся сделка с `status: pending`, `expires_at: now + 20min`
-2. Пользователь не оплачивает
-3. Cron job проверяет `expires_at < now`
-4. Статус меняется на `expired`
-5. Cron job больше не сканирует этот адрес
-6. Пользователь видит карточку со статусом "Истекло"
-7. Эскроу-кошелёк остаётся в базе (на случай если кто-то всё же отправит средства)
-
-## Текст для UI
-
-| Элемент | Текст |
-|---------|-------|
-| Таймер в карточке | "Осталось: 15:42" |
-| Статус expired | "Истекло" |
-| Подсказка в PaymentDialog | "У вас есть 20 минут на оплату" |
-
-## Визуализация карточки с таймером
-
-```text
-┌──────────────────────────────────────────┐
-│ [Avatar] Название канала                 │
-│          @username                       │
-│                                          │
-│ 💎 50 TON  •  1 пост  •  24ч            │
-├──────────────────────────────────────────┤
-│ 🟡 Ожидает оплаты    ⏱ Осталось: 15:42  │ ← таймер
-│                                          │
-│ [ Оплатить ]  [ В блокчейне ]           │
-└──────────────────────────────────────────┘
-```
-
+После обновления пользователь увидит эти сделки со статусом "Истекло" в разделе "Мои сделки".
