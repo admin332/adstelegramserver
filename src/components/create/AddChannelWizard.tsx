@@ -168,10 +168,6 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
                 <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-medium">3</span>
                 <span>Добавьте <span className="text-primary font-medium">@adsingo_bot</span> как администратора</span>
               </li>
-              <li className="flex gap-3">
-                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-medium">4</span>
-                <span>Выдайте право «Публикация сообщений»</span>
-              </li>
             </ol>
           </div>
 
@@ -186,7 +182,7 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
           </a>
 
           <div className="flex gap-3">
-            <Button variant="outline" onClick={onBack} className="flex-1">
+            <Button variant="outline" onClick={onBack} className="flex-1 border-primary text-primary hover:bg-primary/10">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Назад
             </Button>
@@ -293,7 +289,7 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
           )}
 
           <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setStep(1)} className="flex-1">
+            <Button variant="outline" onClick={() => setStep(1)} className="flex-1 border-primary text-primary hover:bg-primary/10">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Назад
             </Button>
