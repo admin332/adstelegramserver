@@ -25,6 +25,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
+import { useTonPrice } from "@/hooks/useTonPrice";
 
 interface ChannelData {
   username: string;
@@ -50,6 +51,7 @@ interface AddChannelWizardProps {
 
 export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) => {
   const { user } = useAuth();
+  const { tonPrice } = useTonPrice();
   const [step, setStep] = useState(1);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
@@ -249,23 +251,37 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground">1/24</span>
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={channelData.price_1_24}
-                    onChange={(e) => setChannelData({ ...channelData, price_1_24: e.target.value })}
-                    className="bg-card border-0"
-                  />
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      placeholder="0"
+                      value={channelData.price_1_24}
+                      onChange={(e) => setChannelData({ ...channelData, price_1_24: e.target.value })}
+                      className="bg-card border-0"
+                    />
+                    {channelData.price_1_24 && tonPrice && (
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        ≈ ${(parseFloat(channelData.price_1_24) * tonPrice).toFixed(2)}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground">2+/24</span>
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={channelData.price_2_48}
-                    onChange={(e) => setChannelData({ ...channelData, price_2_48: e.target.value })}
-                    className="bg-card border-0"
-                  />
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      placeholder="0"
+                      value={channelData.price_2_48}
+                      onChange={(e) => setChannelData({ ...channelData, price_2_48: e.target.value })}
+                      className="bg-card border-0"
+                    />
+                    {channelData.price_2_48 && tonPrice && (
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        ≈ ${(parseFloat(channelData.price_2_48) * tonPrice).toFixed(2)}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

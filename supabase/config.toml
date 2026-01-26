@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.create-campaign]
 verify_jwt = false
+
+[functions.ton-price]
+verify_jwt = false
