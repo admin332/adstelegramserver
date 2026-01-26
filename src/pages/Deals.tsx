@@ -91,6 +91,7 @@ const Deals = () => {
               escrowAddress={deal.escrow_address}
               scheduledAt={deal.scheduled_at}
               createdAt={deal.created_at}
+              expiresAt={deal.expires_at}
               channel={deal.channel}
               campaign={deal.campaign}
               onPayClick={() => handlePayClick(deal)}
@@ -119,6 +120,7 @@ const Deals = () => {
           dealId={selectedDeal.id}
           totalPrice={selectedDeal.total_price}
           escrowAddress={selectedDeal.escrow_address}
+          expiresAt={selectedDeal.expires_at}
           channelName={selectedDeal.channel?.title || "Канал"}
           onPaymentSuccess={handlePaymentSuccess}
         />

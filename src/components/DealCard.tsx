@@ -1,8 +1,9 @@
-import { Clock, CheckCircle2, AlertCircle, Wallet, Shield, XCircle, AlertTriangle, ExternalLink } from "lucide-react";
+import { Clock, CheckCircle2, AlertCircle, Wallet, Shield, XCircle, AlertTriangle, ExternalLink, TimerOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useTonPrice } from "@/hooks/useTonPrice";
+import { ExpirationTimer } from "@/components/deals/ExpirationTimer";
 import TonIcon from "@/assets/ton-icon.svg";
 import { formatDistanceToNow } from "date-fns";
 import { ru } from "date-fns/locale";
@@ -19,6 +20,7 @@ interface DealCardProps {
   escrowAddress: string | null;
   scheduledAt: string | null;
   createdAt: string;
+  expiresAt: string | null;
   channel: {
     title: string | null;
     avatar_url: string | null;
@@ -70,6 +72,12 @@ const statusConfig: Record<DealStatus, {
     bgColor: "bg-orange-500/10",
     icon: AlertTriangle 
   },
+  expired: { 
+    label: "Истекло", 
+    color: "text-muted-foreground", 
+    bgColor: "bg-secondary",
+    icon: TimerOff 
+  },
 };
 
 export const DealCard = ({
@@ -81,6 +89,7 @@ export const DealCard = ({
   escrowAddress,
   scheduledAt,
   createdAt,
+  expiresAt,
   channel,
   campaign,
   onPayClick,
@@ -156,7 +165,12 @@ export const DealCard = ({
           <StatusIcon className={cn("w-4 h-4", config.color)} />
           <span className={cn("text-sm font-medium", config.color)}>{config.label}</span>
         </div>
-        <span className="text-sm text-muted-foreground">{timeAgo}</span>
+        <div className="flex items-center gap-2">
+          {status === "pending" && expiresAt && (
+            <ExpirationTimer expiresAt={expiresAt} />
+          )}
+          <span className="text-sm text-muted-foreground">{timeAgo}</span>
+        </div>
       </div>
 
       {/* Кнопки действий для pending статуса */}

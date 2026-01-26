@@ -257,6 +257,7 @@ export type Database = {
           escrow_address: string | null
           escrow_balance: number | null
           escrow_mnemonic_encrypted: string | null
+          expires_at: string | null
           id: string
           payment_verified_at: string | null
           posted_at: string | null
@@ -277,6 +278,7 @@ export type Database = {
           escrow_address?: string | null
           escrow_balance?: number | null
           escrow_mnemonic_encrypted?: string | null
+          expires_at?: string | null
           id?: string
           payment_verified_at?: string | null
           posted_at?: string | null
@@ -297,6 +299,7 @@ export type Database = {
           escrow_address?: string | null
           escrow_balance?: number | null
           escrow_mnemonic_encrypted?: string | null
+          expires_at?: string | null
           id?: string
           payment_verified_at?: string | null
           posted_at?: string | null
@@ -472,6 +475,7 @@ export type Database = {
         | "completed"
         | "cancelled"
         | "disputed"
+        | "expired"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -608,6 +612,7 @@ export const Constants = {
         "completed",
         "cancelled",
         "disputed",
+        "expired",
       ],
     },
   },

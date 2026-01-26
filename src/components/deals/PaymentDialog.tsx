@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useTonPrice } from "@/hooks/useTonPrice";
+import { ExpirationTimer } from "@/components/deals/ExpirationTimer";
 import TonIcon from "@/assets/ton-icon.svg";
 
 interface PaymentDialogProps {
@@ -19,6 +20,7 @@ interface PaymentDialogProps {
   dealId: string;
   totalPrice: number;
   escrowAddress: string | null;
+  expiresAt: string | null;
   channelName: string;
   onPaymentSuccess?: () => void;
 }
@@ -29,6 +31,7 @@ export function PaymentDialog({
   dealId,
   totalPrice,
   escrowAddress,
+  expiresAt,
   channelName,
   onPaymentSuccess,
 }: PaymentDialogProps) {
@@ -108,6 +111,18 @@ export function PaymentDialog({
         </DialogHeader>
 
         <div className="space-y-4">
+          {/* Таймер истечения */}
+          {expiresAt && (
+            <div className="flex items-center justify-center gap-2 text-yellow-500 bg-yellow-500/10 rounded-lg py-2">
+              <span className="text-sm">Осталось на оплату:</span>
+              <ExpirationTimer 
+                expiresAt={expiresAt} 
+                showIcon={false}
+                onExpire={() => onOpenChange(false)}
+              />
+            </div>
+          )}
+
           {/* Сумма к оплате */}
           <div className="bg-secondary/50 rounded-xl p-4 text-center">
             <p className="text-sm text-muted-foreground mb-1">К оплате</p>

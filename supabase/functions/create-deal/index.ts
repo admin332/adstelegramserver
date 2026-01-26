@@ -181,7 +181,9 @@ serve(async (req) => {
       );
     }
 
-    // Create deal
+    // Create deal with 20-minute expiration
+    const expiresAt = new Date(Date.now() + 20 * 60 * 1000); // +20 minutes
+
     const { data: deal, error: dealError } = await supabase
       .from("deals")
       .insert({
@@ -196,8 +198,9 @@ serve(async (req) => {
         escrow_address: escrowWallet.address,
         escrow_mnemonic_encrypted: encryptedMnemonic,
         escrow_balance: 0,
+        expires_at: expiresAt.toISOString(),
       })
-      .select("id, escrow_address")
+      .select("id, escrow_address, expires_at")
       .single();
 
     if (dealError) {
@@ -214,6 +217,7 @@ serve(async (req) => {
         deal: {
           id: deal.id,
           escrowAddress: deal.escrow_address,
+          expiresAt: deal.expires_at,
         }
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
