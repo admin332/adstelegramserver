@@ -25,14 +25,13 @@ interface DealCardProps {
     avatar_url: string | null;
     username: string;
   } | null;
-  campaign: { name: string } | null;
+  campaign: { 
+    name: string;
+    media_urls?: string[];
+    image_url?: string;
+  } | null;
   usdEquivalent: number | null;
   role: 'advertiser' | 'channel_owner';
-  advertiser?: {
-    first_name: string;
-    username?: string;
-    photo_url?: string;
-  };
   onPayClick?: () => void;
   onOwnerAction?: () => void;
 }
@@ -87,6 +86,22 @@ const statusConfig: Record<DealStatus, {
   },
 };
 
+// Helper function to get campaign preview image
+const getCampaignPreviewImage = (campaign: DealCardProps['campaign']): string | null => {
+  if (!campaign) return null;
+  
+  if (Array.isArray(campaign.media_urls) && campaign.media_urls.length > 0) {
+    const firstMedia = campaign.media_urls[0];
+    // Skip video files, return null to show fallback
+    if (firstMedia.includes('.mp4') || firstMedia.includes('.mov') || firstMedia.includes('.webm')) {
+      return null;
+    }
+    return firstMedia;
+  }
+  
+  return campaign.image_url || null;
+};
+
 export const DealCard = ({
   id,
   status,
@@ -101,7 +116,6 @@ export const DealCard = ({
   campaign,
   usdEquivalent,
   role,
-  advertiser,
   onPayClick,
   onOwnerAction,
 }: DealCardProps) => {
@@ -110,15 +124,15 @@ export const DealCard = ({
   
   const isChannelOwner = role === 'channel_owner';
   
-  // For channel owner, show advertiser info; for advertiser, show channel info
+  // For channel owner, show campaign info; for advertiser, show channel info
   const displayTitle = isChannelOwner 
-    ? advertiser?.first_name || "Рекламодатель"
+    ? campaign?.name || "Кампания"
     : channel?.title || "Канал";
   const displaySubtitle = isChannelOwner 
-    ? advertiser?.username ? `@${advertiser.username}` : null
+    ? null  // Hide advertiser username for privacy
     : channel?.username ? `@${channel.username}` : null;
   const displayAvatar = isChannelOwner 
-    ? advertiser?.photo_url 
+    ? getCampaignPreviewImage(campaign)
     : channel?.avatar_url;
   const displayInitial = displayTitle.charAt(0).toUpperCase();
 

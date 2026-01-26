@@ -166,7 +166,6 @@ const Deals = () => {
               campaign={deal.campaign}
               usdEquivalent={convertToUsd(deal.total_price)}
               role={deal.role}
-              advertiser={deal.advertiser}
               onPayClick={() => handlePayClick(deal)}
               onOwnerAction={() => handleOwnerAction(deal)}
             />

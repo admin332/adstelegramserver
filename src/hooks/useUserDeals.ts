@@ -27,13 +27,9 @@ export interface Deal {
   campaign: {
     id: string;
     name: string;
+    media_urls?: string[];
+    image_url?: string;
   } | null;
-  advertiser?: {
-    id: string;
-    first_name: string;
-    username?: string;
-    photo_url?: string;
-  };
 }
 
 export function useUserDeals() {
