@@ -1,157 +1,113 @@
 
 
-## План: Управление каналами и кампаниями на странице /create
+## План: Исправление удаления кампаний и переименование страницы
 
-### Текущее поведение
+### Проблема 1: Заголовок страницы
 
-Сейчас после создания канала или кампании пользователь перенаправляется на другие страницы (`/channels` или `/deals`). Нужно вместо этого показывать список созданных элементов прямо на странице `/create`.
+Текущий заголовок "Мои кампании" нужно изменить на "Кампании".
 
-### Новая архитектура
+**Файл:** `src/components/create/MyCampaignsList.tsx` (строка 56)
 
-```text
-/create
-├── Шаг 1: Выбор роли (рекламодатель / владелец канала)
-│
-├── Рекламодатель выбран:
-│   ├── Есть кампании? → Показать "Мои кампании" + кнопка "Добавить новую"
-│   └── Нет кампаний? → Показать форму создания кампании
-│
-└── Владелец канала выбран:
-    ├── Есть каналы? → Показать "Мои каналы" + кнопка "Добавить новый"
-    └── Нет каналов? → Показать мастер добавления канала
+```tsx
+// Было:
+<h2 className="text-lg font-semibold text-foreground">Мои кампании</h2>
+
+// Станет:
+<h2 className="text-lg font-semibold text-foreground">Кампании</h2>
 ```
 
-### Новые компоненты
+---
 
-#### 1. MyChannelsList.tsx
+### Проблема 2: Удаление кампании не работает
 
-Показывает список каналов пользователя:
-- Карточка канала с аватаром, названием, подписчиками
-- Переключатель активности (is_active)
-- Кнопка "Добавить канал"
+**Причина:**  
+Приложение использует Telegram-аутентификацию. При этом:
+- Создание кампании работает через edge function с service role (обходит RLS)
+- Удаление пытается работать напрямую через клиент
+- RLS политика проверяет `owner_id = auth.uid()`, но `auth.uid()` = `null` (пользователь не залогинен в Supabase Auth)
+- Результат: удаление тихо игнорируется, toast показывается, но строка остаётся в базе
 
-#### 2. MyCampaignsList.tsx
+**Решение:** Создать edge function для удаления кампаний
 
-Показывает список кампаний пользователя:
-- Карточка кампании с превью, названием, текстом
-- Кнопки: Редактировать, Удалить
-- Переключатель активности
-- Кнопка "Создать кампанию"
+---
 
-### Новые хуки
+### Новая edge function: `delete-campaign`
 
-#### 3. useUserChannels.ts
+```text
+supabase/functions/delete-campaign/index.ts
+```
 
+Логика:
+1. Принимает `campaign_id` и `user_id`
+2. Проверяет, что кампания принадлежит пользователю (`owner_id = user_id`)
+3. Удаляет кампанию через service role key
+4. Возвращает успех или ошибку
+
+---
+
+### Изменения в хуке `useDeleteCampaign`
+
+**Файл:** `src/hooks/useUserCampaigns.ts`
+
+Вместо прямого вызова:
 ```typescript
-// Получение каналов текущего пользователя
-const { data, isLoading, refetch } = useUserChannels();
-
-// Переключение активности
-const toggleActive = useToggleChannelActive();
+await supabase.from("campaigns").delete().eq("id", campaignId);
 ```
 
-#### 4. useUserCampaigns.ts
-
+Будет вызов edge function:
 ```typescript
-// Получение кампаний текущего пользователя
-const { data, isLoading, refetch } = useUserCampaigns();
-
-// Удаление кампании
-const deleteCampaign = useDeleteCampaign();
-
-// Переключение активности
-const toggleActive = useToggleCampaignActive();
+await supabase.functions.invoke("delete-campaign", {
+  body: { campaign_id: campaignId, user_id: user.id }
+});
 ```
 
-### Изменения в базе данных
+---
 
-Необходимо добавить RLS политики для доступа к своим каналам и кампаниям:
-
-```sql
--- Владельцы могут видеть свои каналы
-CREATE POLICY "Owners can view own channels"
-ON public.channels FOR SELECT
-USING (owner_id = auth.uid() OR (is_active = true AND verified = true));
-
--- Владельцы могут обновлять свои каналы  
-CREATE POLICY "Owners can update own channels"
-ON public.channels FOR UPDATE
-USING (owner_id = auth.uid());
-
--- Владельцы могут видеть свои кампании
-CREATE POLICY "Owners can view own campaigns"
-ON public.campaigns FOR SELECT
-USING (owner_id = auth.uid() OR is_active = true);
-
--- Владельцы могут обновлять свои кампании
-CREATE POLICY "Owners can update own campaigns"
-ON public.campaigns FOR UPDATE
-USING (owner_id = auth.uid());
-
--- Владельцы могут удалять свои кампании
-CREATE POLICY "Owners can delete own campaigns"
-ON public.campaigns FOR DELETE
-USING (owner_id = auth.uid());
-```
-
-### Изменения в Create.tsx
-
-| Состояние | Логика |
-|-----------|--------|
-| `step: "role"` | Выбор роли (как сейчас) |
-| `step: "list"` | Показать MyChannelsList или MyCampaignsList |
-| `step: "form"` | Показать AddChannelWizard или CreateCampaignForm |
-
-При первом входе:
-- Проверяем есть ли у пользователя каналы/кампании
-- Если есть — показываем список
-- Если нет — показываем форму создания
-
-### UI карточки канала в списке
-
-```text
-┌─────────────────────────────────────────────┐
-│ [Avatar] Название канала          [Switch] │
-│          @username                          │
-│          12.5K подписчиков                  │
-│          ✓ Верифицирован                    │
-└─────────────────────────────────────────────┘
-```
-
-### UI карточки кампании в списке
-
-```text
-┌─────────────────────────────────────────────┐
-│ [Preview] Название кампании       [Switch] │
-│           Текст рекламы...                  │
-│           ┌────────────────────┐            │
-│           │ [Edit]    [Delete] │            │
-│           └────────────────────┘            │
-└─────────────────────────────────────────────┘
-```
-
-### Файлы для создания/изменения
+### Файлы для изменения
 
 | Файл | Действие |
 |------|----------|
-| `src/hooks/useUserChannels.ts` | Создать — хук для каналов пользователя |
-| `src/hooks/useUserCampaigns.ts` | Создать — хук для кампаний пользователя |
-| `src/components/create/MyChannelsList.tsx` | Создать — список каналов |
-| `src/components/create/MyCampaignsList.tsx` | Создать — список кампаний |
-| `src/pages/Create.tsx` | Изменить — добавить шаг "list" и логику переключения |
+| `src/components/create/MyCampaignsList.tsx` | Изменить заголовок на "Кампании" |
+| `src/hooks/useUserCampaigns.ts` | Переделать `useDeleteCampaign` на вызов edge function |
+| `supabase/functions/delete-campaign/index.ts` | Создать — edge function для безопасного удаления |
 
-### Логика отображения
+---
 
-1. Пользователь выбирает роль
-2. Загружаем данные (каналы или кампании)
-3. Если данные есть → показываем список с кнопкой "Добавить"
-4. Если данных нет → сразу показываем форму создания
-5. После успешного создания → возвращаемся к списку
+### Архитектура решения
+
+```text
+┌─────────────────────┐
+│   Клиент (React)    │
+│                     │
+│  useDeleteCampaign  │
+└──────────┬──────────┘
+           │ invoke("delete-campaign")
+           ▼
+┌─────────────────────┐
+│   Edge Function     │
+│  delete-campaign    │
+│                     │
+│  1. Проверка user   │
+│  2. Проверка owner  │
+│  3. DELETE запрос   │
+│    (service role)   │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│     Supabase DB     │
+│                     │
+│  campaigns table    │
+│  (RLS bypassed)     │
+└─────────────────────┘
+```
+
+---
 
 ### Результат
 
-- Владелец канала видит все свои каналы с возможностью включить/выключить
-- Рекламодатель видит все свои кампании с возможностью редактировать/удалить
-- Удобная навигация между списком и формой создания
-- Данные загружаются из базы по `owner_id`
+- Заголовок станет "Кампании" вместо "Мои кампании"
+- Удаление кампании будет работать корректно
+- Кампания исчезнет из списка после удаления
+- Безопасность сохраняется: только владелец может удалить свою кампанию
 
