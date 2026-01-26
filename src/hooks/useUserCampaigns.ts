@@ -10,6 +10,7 @@ export interface UserCampaign {
   button_text: string | null;
   button_url: string | null;
   image_url: string | null;
+  media_urls: string[] | null;
   is_active: boolean | null;
   created_at: string | null;
 }

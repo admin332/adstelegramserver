@@ -12,7 +12,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Plus, Trash2, ImageIcon, ArrowLeft } from "lucide-react";
+import { Plus, Trash2, ImageIcon, ArrowLeft, FileVideo } from "lucide-react";
 import {
   useUserCampaigns,
   useToggleCampaignActive,
@@ -24,6 +24,11 @@ interface MyCampaignsListProps {
   onAddCampaign: () => void;
   onBack: () => void;
 }
+
+const isVideoUrl = (url: string) => {
+  const videoExtensions = ['.mp4', '.mov', '.avi', '.webm', '.mkv'];
+  return videoExtensions.some(ext => url.toLowerCase().includes(ext));
+};
 
 export const MyCampaignsList = ({ onAddCampaign, onBack }: MyCampaignsListProps) => {
   const { data: campaigns, isLoading } = useUserCampaigns();
@@ -65,17 +70,37 @@ export const MyCampaignsList = ({ onAddCampaign, onBack }: MyCampaignsListProps)
               className="bg-card rounded-2xl p-4 space-y-3"
             >
               <div className="flex items-start gap-3">
-                <div className="w-14 h-14 rounded-xl bg-secondary flex items-center justify-center overflow-hidden flex-shrink-0">
-                  {campaign.image_url ? (
-                    <img
-                      src={campaign.image_url}
-                      alt={campaign.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <ImageIcon className="w-6 h-6 text-muted-foreground" />
-                  )}
-                </div>
+                {(() => {
+                  const mediaUrls = campaign.media_urls as string[] | null;
+                  const firstMedia = mediaUrls?.[0] || campaign.image_url;
+                  const mediaCount = mediaUrls?.length || (campaign.image_url ? 1 : 0);
+                  const isVideo = firstMedia ? isVideoUrl(firstMedia) : false;
+
+                  return (
+                    <div className="w-14 h-14 rounded-xl bg-secondary flex items-center justify-center overflow-hidden flex-shrink-0 relative">
+                      {firstMedia ? (
+                        isVideo ? (
+                          <div className="w-full h-full flex items-center justify-center bg-card">
+                            <FileVideo className="w-6 h-6 text-primary" />
+                          </div>
+                        ) : (
+                          <img
+                            src={firstMedia}
+                            alt={campaign.name}
+                            className="w-full h-full object-cover"
+                          />
+                        )
+                      ) : (
+                        <ImageIcon className="w-6 h-6 text-muted-foreground" />
+                      )}
+                      {mediaCount > 1 && (
+                        <div className="absolute bottom-0.5 right-0.5 min-w-5 h-5 rounded-full bg-primary flex items-center justify-center px-1">
+                          <span className="text-xs font-medium text-primary-foreground">{mediaCount}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
