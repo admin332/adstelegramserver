@@ -77,13 +77,16 @@ export function useDeleteCampaign() {
 
   return useMutation({
     mutationFn: async (campaignId: string) => {
-      const { error } = await supabase
-        .from("campaigns")
-        .delete()
-        .eq("id", campaignId)
-        .eq("owner_id", user?.id);
+      if (!user?.id) {
+        throw new Error("Пользователь не авторизован");
+      }
+
+      const { data, error } = await supabase.functions.invoke("delete-campaign", {
+        body: { campaign_id: campaignId, user_id: user.id },
+      });
 
       if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || "Ошибка удаления");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user-campaigns"] });

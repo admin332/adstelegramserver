@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.ton-price]
 verify_jwt = false
+
+[functions.delete-campaign]
+verify_jwt = false
