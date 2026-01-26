@@ -71,8 +71,7 @@ serve(async (req) => {
       );
     }
 
-    const previewHeader = "📝 <b>Превью вашей рекламы:</b>\n\n";
-    const fullText = previewHeader + text;
+    const fullText = text;
     const replyMarkup = buildReplyMarkup(button_text, button_url);
 
     // Case 1: No media - send text message
