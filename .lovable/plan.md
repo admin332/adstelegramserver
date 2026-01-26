@@ -1,59 +1,357 @@
 
 
 ## Цель
-Изменить кнопку "Заказать рекламу" на странице канала:
-1. Убрать иконку корзины (ShoppingCart)
-2. Переместить цену "1 TON" в начало кнопки
+Реализовать полную интеграцию с TON кошельками:
+1. **Подключение кошелька пользователя** через TON Connect в профиле
+2. **Генерация эскроу-кошельков** для каждой сделки
+3. **Оформление заказа** с проверкой подключённого кошелька
 
-## Текущий код (строки 197-206)
+## Архитектура решения
 
-```tsx
-<Button
-  onClick={() => setIsOrderDrawerOpen(true)}
-  className="w-full h-14 text-base font-semibold rounded-2xl gap-3"
->
-  <ShoppingCart className="h-5 w-5" />
-  Заказать рекламу
-  <span className="text-white/80 ml-2">
-    {channel.tonPrice} TON
-  </span>
-</Button>
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│                         FRONTEND                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐  │
+│  │   TonConnect    │    │   Profile       │    │  OrderDrawer    │  │
+│  │   Provider      │───►│   Wallet Card   │    │  + Payment Step │  │
+│  │   (App.tsx)     │    │                 │    │                 │  │
+│  └─────────────────┘    └────────┬────────┘    └────────┬────────┘  │
+│                                  │                      │           │
+│                                  ▼                      ▼           │
+│                         ┌─────────────────────────────────┐         │
+│                         │      useTonWallet Hook          │         │
+│                         │  - address                      │         │
+│                         │  - isConnected                  │         │
+│                         │  - connect/disconnect           │         │
+│                         └────────────────┬────────────────┘         │
+│                                          │                          │
+└──────────────────────────────────────────┼──────────────────────────┘
+                                           │
+                                           ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         BACKEND (Edge Functions)                     │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐  │
+│  │ save-wallet     │    │ create-deal     │    │ generate-escrow │  │
+│  │                 │    │                 │───►│                 │  │
+│  │ Saves address   │    │ Creates deal    │    │ mnemonicNew()   │  │
+│  │ to users table  │    │ with escrow     │    │ WalletContractV4│  │
+│  └─────────────────┘    └─────────────────┘    └─────────────────┘  │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+                                           │
+                                           ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         DATABASE                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  users                              deals                            │
+│  ┌─────────────────────┐           ┌─────────────────────────────┐  │
+│  │ id                  │           │ id                          │  │
+│  │ telegram_id         │           │ advertiser_id               │  │
+│  │ wallet_address [NEW]│           │ channel_id                  │  │
+│  │ ...                 │           │ escrow_address [NEW]        │  │
+│  └─────────────────────┘           │ escrow_mnemonic [NEW]       │  │
+│                                    │ escrow_status [NEW]         │  │
+│                                    │ ...                         │  │
+│                                    └─────────────────────────────┘  │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-## Изменения
+## Этапы реализации
 
-**Файл**: `src/pages/Channel.tsx`
+### Этап 1: Установка зависимостей
 
-1. Удалить строку с `<ShoppingCart className="h-5 w-5" />`
-2. Переместить `{channel.tonPrice} TON` перед текстом "Заказать рекламу"
+Добавить TON Connect библиотеки:
+```json
+{
+  "@tonconnect/ui-react": "^2.0.6"
+}
+```
 
-## Новый код
+### Этап 2: Миграция базы данных
+
+#### 2.1 Добавить `wallet_address` в таблицу `users`
+
+```sql
+ALTER TABLE public.users
+ADD COLUMN IF NOT EXISTS wallet_address TEXT;
+```
+
+#### 2.2 Добавить поля эскроу в таблицу `deals`
+
+```sql
+-- Эскроу поля для сделок
+ALTER TABLE public.deals
+ADD COLUMN IF NOT EXISTS escrow_address TEXT,
+ADD COLUMN IF NOT EXISTS escrow_mnemonic_encrypted TEXT,
+ADD COLUMN IF NOT EXISTS escrow_balance NUMERIC DEFAULT 0,
+ADD COLUMN IF NOT EXISTS payment_verified_at TIMESTAMPTZ;
+```
+
+### Этап 3: Создать манифест TON Connect
+
+**Файл**: `public/tonconnect-manifest.json`
+
+```json
+{
+  "url": "https://adstelegramserver.lovable.app",
+  "name": "Adsingo",
+  "iconUrl": "https://adstelegramserver.lovable.app/favicon.ico",
+  "termsOfUseUrl": "https://adstelegramserver.lovable.app/terms",
+  "privacyPolicyUrl": "https://adstelegramserver.lovable.app/privacy"
+}
+```
+
+### Этап 4: Настроить TonConnectUIProvider
+
+**Файл**: `src/main.tsx`
 
 ```tsx
-<Button
-  onClick={() => setIsOrderDrawerOpen(true)}
-  className="w-full h-14 text-base font-semibold rounded-2xl gap-3"
->
-  <span className="text-white/80">
-    {channel.tonPrice} TON
-  </span>
-  Заказать рекламу
-</Button>
+import { TonConnectUIProvider } from '@tonconnect/ui-react';
+
+const manifestUrl = `${window.location.origin}/tonconnect-manifest.json`;
+
+createRoot(document.getElementById("root")!).render(
+  <TonConnectUIProvider manifestUrl={manifestUrl}>
+    <App />
+  </TonConnectUIProvider>
+);
 ```
+
+### Этап 5: Создать хук `useTonWallet`
+
+**Файл**: `src/hooks/useTonWallet.ts`
+
+Хук инкапсулирует работу с TON Connect:
+- `address` - текущий адрес кошелька
+- `isConnected` - статус подключения
+- `connect()` - открыть модалку подключения
+- `disconnect()` - отключить кошелёк
+- `saveToDatabase()` - сохранить адрес в БД
+
+```tsx
+import { useTonAddress, useTonConnectModal, useTonConnectUI } from '@tonconnect/ui-react';
+import { useCallback } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+
+export function useTonWallet() {
+  const address = useTonAddress();
+  const { open } = useTonConnectModal();
+  const [tonConnectUI] = useTonConnectUI();
+  const { user } = useAuth();
+
+  const saveToDatabase = useCallback(async (walletAddress: string) => {
+    if (!user?.id) return;
+    
+    const { error } = await supabase.functions.invoke('save-wallet', {
+      body: { 
+        walletAddress,
+        initData: window.Telegram?.WebApp?.initData 
+      }
+    });
+    
+    if (error) console.error('Error saving wallet:', error);
+  }, [user?.id]);
+
+  return {
+    address,
+    isConnected: !!address,
+    connect: open,
+    disconnect: () => tonConnectUI.disconnect(),
+    saveToDatabase,
+  };
+}
+```
+
+### Этап 6: Обновить Profile.tsx
+
+Добавить секцию "Кошелёк" с кнопкой TON Connect:
+
+```tsx
+import { TonConnectButton } from '@tonconnect/ui-react';
+import { useTonWallet } from '@/hooks/useTonWallet';
+
+// Внутри компонента:
+const { address, isConnected, saveToDatabase } = useTonWallet();
+
+// При изменении адреса - сохраняем в БД
+useEffect(() => {
+  if (address) {
+    saveToDatabase(address);
+  }
+}, [address, saveToDatabase]);
+
+// В UI - секция кошелька:
+<div className="bg-card rounded-2xl p-5">
+  <h3 className="text-lg font-semibold mb-4">TON Кошелёк</h3>
+  
+  {isConnected ? (
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-sm text-muted-foreground">Подключён</p>
+        <p className="font-mono text-sm">{address?.slice(0, 8)}...{address?.slice(-6)}</p>
+      </div>
+      <TonConnectButton />
+    </div>
+  ) : (
+    <TonConnectButton className="w-full" />
+  )}
+</div>
+```
+
+### Этап 7: Обновить OrderDrawer
+
+Добавить **4-й шаг** - оплата:
+
+```tsx
+// Шаг 4: Подтверждение и оплата
+{currentStep === 4 && (
+  <PaymentStep
+    totalPrice={quantity * pricePerPost}
+    escrowAddress={escrowAddress}
+    onPaymentComplete={handlePaymentComplete}
+  />
+)}
+```
+
+Компонент `PaymentStep`:
+- Показывает итоговую сумму
+- Показывает эскроу-адрес для оплаты
+- QR-код для сканирования
+- Кнопка "Оплатить через кошелёк"
+- Ссылка на эксплорер для проверки
+
+### Этап 8: Edge Function для сохранения кошелька
+
+**Файл**: `supabase/functions/save-wallet/index.ts`
+
+```typescript
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// Валидация Telegram initData + сохранение wallet_address
+serve(async (req) => {
+  // 1. Валидация initData
+  // 2. Получение user_id по telegram_id
+  // 3. UPDATE users SET wallet_address = ? WHERE id = ?
+});
+```
+
+### Этап 9: Edge Function для создания сделки
+
+**Файл**: `supabase/functions/create-deal/index.ts`
+
+```typescript
+import { mnemonicNew, mnemonicToWalletKey } from "npm:@ton/crypto";
+import { WalletContractV4 } from "npm:@ton/ton";
+
+async function generateEscrowWallet() {
+  const mnemonic = await mnemonicNew();
+  const keyPair = await mnemonicToWalletKey(mnemonic);
+  const wallet = WalletContractV4.create({ 
+    publicKey: keyPair.publicKey, 
+    workchain: 0 
+  });
+  
+  return {
+    address: wallet.address.toString(),
+    mnemonic: mnemonic.join(" "),
+  };
+}
+
+serve(async (req) => {
+  // 1. Валидация initData
+  // 2. Проверка подключённого кошелька
+  // 3. Генерация эскроу-кошелька
+  // 4. Шифрование мнемоники (AES-256)
+  // 5. Создание записи в deals
+  // 6. Возврат escrow_address клиенту
+});
+```
+
+### Этап 10: Секрет для шифрования
+
+Добавить секрет `ENCRYPTION_KEY` в Supabase для шифрования мнемоник:
+- 256-битный ключ для AES-256-GCM
+- Используется только на бэкенде
+- Мнемоника расшифровывается только при выводе средств
+
+## Безопасность
+
+1. **Мнемоники хранятся зашифрованными** - AES-256-GCM
+2. **Ключ шифрования в секретах** - недоступен клиенту
+3. **Валидация Telegram initData** - невозможно подделать пользователя
+4. **RLS на deals** - пользователи видят только свои сделки
+5. **escrow_mnemonic_encrypted скрыт от RLS** - SELECT только для service role
+
+## Технические детали
+
+### Зависимости для Edge Functions
+- `npm:@ton/crypto` - генерация мнемоник и ключей
+- `npm:@ton/ton` - создание кошельков
+
+### RLS для новых полей
+```sql
+-- Пользователи могут видеть свой wallet_address
+-- escrow_mnemonic_encrypted НИКОГДА не возвращается клиенту
+-- escrow_address доступен для отображения
+```
+
+## Результат
+
+После реализации:
+1. **Профиль**: кнопка "Подключить кошелёк" сохраняет адрес в БД
+2. **OrderDrawer**: 4 шага вместо 3, последний - оплата
+3. **Сделка**: генерируется уникальный эскроу-адрес
+4. **Пользователь видит**: "Отправьте 5 TON на адрес EQ...abc"
+5. **Бэкенд**: хранит зашифрованную мнемонику для вывода после завершения
 
 ## Визуальный результат
 
+### Профиль - Секция кошелька
+
 До:
 ```
-[🛒 Заказать рекламу         1 TON]
+Кошелёк      $1,250.00  >
 ```
 
 После:
 ```
-[1 TON  Заказать рекламу]
+┌─────────────────────────────┐
+│  TON Кошелёк                │
+│                             │
+│  Подключён                  │
+│  UQC7...x4Kw                │
+│                             │
+│  [Отключить]                │
+└─────────────────────────────┘
 ```
 
-## Дополнительно
+### OrderDrawer - Новый шаг оплаты
 
-Также нужно удалить неиспользуемый импорт `ShoppingCart` из lucide-react (строка 4), чтобы избежать предупреждений линтера.
+```
+Шаг 4 из 4: Оплата
 
+К оплате: 5 TON (~$17.50)
+
+Отправьте средства на адрес эскроу:
+┌─────────────────────────────┐
+│  EQC7xN...8kM4              │
+│  [📋 Копировать]            │
+└─────────────────────────────┘
+
+[QR-код для сканирования]
+
+После оплаты средства будут
+заморожены до выполнения заказа.
+
+[🔗 Проверить в эксплорере]
+
+[Оплатить через кошелёк]
+```
