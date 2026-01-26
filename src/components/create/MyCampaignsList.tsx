@@ -53,7 +53,7 @@ export const MyCampaignsList = ({ onAddCampaign, onBack }: MyCampaignsListProps)
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-foreground">Мои кампании</h2>
+        <h2 className="text-lg font-semibold text-foreground">Кампании</h2>
         <span className="text-sm text-muted-foreground">{campaigns?.length || 0} кампаний</span>
       </div>
 
