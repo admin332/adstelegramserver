@@ -1,66 +1,79 @@
 
 
 ## Цель
-Исправить отображение неверного курса TON в карточках сделок на странице "Мои сделки".
+Реализовать глобальное кеширование курса TON на клиенте с использованием React Query, чтобы все компоненты использовали единый кешированный курс.
 
-## Проблема
+## Текущая проблема
 
-Каждый компонент `DealCard` вызывает свой собственный хук `useTonPrice()`, что приводит к:
+Сейчас каждый компонент, вызывающий `useTonPrice()`, создаёт:
+- Отдельный `useState` для хранения курса
+- Отдельный `useEffect` с запросом к edge function
+- Отдельный `setInterval` для обновления каждые 5 минут
 
-1. **Множественным параллельным запросам** — 6 карточек = 6 запросов к edge function
-2. **Race condition** — запросы завершаются в разное время, разные карточки получают разные значения
-3. **Несогласованному состоянию** — одна карточка может получить `null`, другая — актуальный курс
-
-`PaymentDialog` работает корректно, потому что монтируется позже (при клике) и его хук успевает получить данные.
+**Места использования:**
+| Компонент | Файл |
+|-----------|------|
+| `Deals` (страница) | `src/pages/Deals.tsx` |
+| `PaymentDialog` | `src/components/deals/PaymentDialog.tsx` |
+| `PaymentStep` | `src/components/channel/PaymentStep.tsx` |
+| `PostQuantitySelector` | `src/components/channel/PostQuantitySelector.tsx` |
+| `AddChannelWizard` | `src/components/create/AddChannelWizard.tsx` |
 
 ## Решение
 
-Поднять загрузку курса TON на уровень страницы `Deals.tsx` и передавать его через пропсы в каждую карточку.
+Переписать `useTonPrice` с использованием React Query (`@tanstack/react-query`), который уже установлен в проекте.
+
+### Преимущества React Query:
+- Автоматическое глобальное кеширование по ключу запроса
+- Один запрос на все компоненты
+- Автоматический refetch с настраиваемым интервалом
+- Дедупликация запросов
+- Встроенная обработка loading/error состояний
 
 ## Изменения
 
-### 1. `src/components/DealCard.tsx`
+### 1. `src/hooks/useTonPrice.ts`
 
-Заменить внутренний вызов `useTonPrice()` на получение `usdEquivalent` через пропсы:
+Переписать хук с использованием `useQuery`:
 
-```text
-Было:
-  const { convertToUsd } = useTonPrice();
-  const usdEquivalent = convertToUsd(totalPrice);
+```typescript
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 
-Будет:
-  // usdEquivalent приходит как проп
-  interface DealCardProps {
-    ...
-    usdEquivalent: number | null;  // новый проп
+async function fetchTonPrice(): Promise<number> {
+  const { data, error } = await supabase.functions.invoke('ton-price');
+  if (error || !data?.price) {
+    throw new Error('Не удалось получить курс TON');
   }
+  return data.price;
+}
+
+export function useTonPrice() {
+  const { data: tonPrice, isLoading: loading } = useQuery({
+    queryKey: ['ton-price'],
+    queryFn: fetchTonPrice,
+    staleTime: 5 * 60 * 1000,      // Данные свежие 5 минут
+    gcTime: 10 * 60 * 1000,        // Кеш хранится 10 минут
+    refetchInterval: 5 * 60 * 1000, // Автообновление каждые 5 минут
+    retry: 2,
+  });
+
+  const convertToUsd = (tonAmount: number): number | null => {
+    if (!tonPrice) return null;
+    return tonAmount * tonPrice;
+  };
+
+  return { tonPrice: tonPrice ?? null, loading, convertToUsd };
+}
 ```
 
-### 2. `src/pages/Deals.tsx`
+### Результат
 
-Загрузить курс один раз на уровне страницы и передать в каждую карточку:
+После изменения:
+- Все 5 компонентов будут использовать один кешированный курс
+- Только 1 запрос к edge function вместо 5
+- Курс синхронизирован между всеми элементами интерфейса
+- Автоматическое обновление каждые 5 минут
 
-```tsx
-const { convertToUsd } = useTonPrice();
-
-// В рендере:
-<DealCard 
-  ...
-  usdEquivalent={convertToUsd(deal.total_price)}
-/>
-```
-
-## Преимущества
-
-- Один запрос вместо N (по количеству карточек)
-- Все карточки показывают одинаковый курс
-- Меньше нагрузки на edge function
-- Согласованное отображение данных
-
-## Файлы для изменения
-
-| Файл | Действие |
-|------|----------|
-| `src/components/DealCard.tsx` | Добавить проп `usdEquivalent`, убрать вызов `useTonPrice()` |
-| `src/pages/Deals.tsx` | Добавить `useTonPrice()`, передавать `usdEquivalent` в карточки |
+Компоненты не требуют изменений — API хука остаётся прежним.
 
