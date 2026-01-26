@@ -17,6 +17,7 @@ export interface Deal {
   scheduled_at: string | null;
   created_at: string;
   expires_at: string | null;
+  posted_at: string | null;
   role: 'advertiser' | 'channel_owner';
   channel: {
     id: string;

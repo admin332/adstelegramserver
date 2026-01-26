@@ -162,6 +162,7 @@ const Deals = () => {
               scheduledAt={deal.scheduled_at}
               createdAt={deal.created_at}
               expiresAt={deal.expires_at}
+              postedAt={deal.posted_at}
               channel={deal.channel}
               campaign={deal.campaign}
               usdEquivalent={convertToUsd(deal.total_price)}
