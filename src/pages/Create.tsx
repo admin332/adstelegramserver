@@ -1,6 +1,7 @@
 import { BottomNav } from "@/components/BottomNav";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Megaphone, Radio, ArrowRight, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AddChannelWizard } from "@/components/create/AddChannelWizard";
@@ -16,11 +17,35 @@ type Step = "role" | "list" | "form";
 
 const Create = () => {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [selectedRole, setSelectedRole] = useState<UserRole>(null);
   const [currentStep, setCurrentStep] = useState<Step>("role");
+  const [initialized, setInitialized] = useState(false);
   
   const { data: channels, isLoading: channelsLoading, refetch: refetchChannels } = useUserChannels();
   const { data: campaigns, isLoading: campaignsLoading, refetch: refetchCampaigns } = useUserCampaigns();
+
+  // Обработка URL параметров для автоматического перехода к форме
+  useEffect(() => {
+    if (initialized) return;
+    
+    const role = searchParams.get('role');
+    const action = searchParams.get('action');
+    
+    if (role === 'advertiser') {
+      setSelectedRole('advertiser');
+      if (action === 'new-campaign') {
+        setCurrentStep('form');
+      }
+    } else if (role === 'channel_owner') {
+      setSelectedRole('channel_owner');
+      if (action === 'new-channel') {
+        setCurrentStep('form');
+      }
+    }
+    
+    setInitialized(true);
+  }, [searchParams, initialized]);
 
   const roles = [
     {

@@ -20,6 +20,7 @@ import { useUserCampaigns } from '@/hooks/useUserCampaigns';
 interface OrderDrawerProps {
   isOpen: boolean;
   onClose: () => void;
+  channelId: string;
   channelName: string;
   pricePerPost: number;
 }
@@ -27,6 +28,7 @@ interface OrderDrawerProps {
 const OrderDrawer: React.FC<OrderDrawerProps> = ({
   isOpen,
   onClose,
+  channelId,
   channelName,
   pricePerPost,
 }) => {
@@ -92,7 +94,7 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
 
   const handleCreateNewCampaign = () => {
     onClose();
-    navigate('/create?role=advertiser&action=new-campaign');
+    navigate(`/create?role=advertiser&action=new-campaign&returnTo=/channel/${channelId}`);
   };
 
   const handleDateChange = (date: Date) => {

@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,6 +32,8 @@ interface CreateCampaignFormProps {
 
 export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormProps) => {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -139,7 +142,13 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
         description: "Теперь вы можете выбрать каналы для размещения",
       });
       
-      onComplete();
+      // Если есть returnTo параметр — вернуться на страницу канала
+      const returnTo = searchParams.get('returnTo');
+      if (returnTo) {
+        navigate(returnTo);
+      } else {
+        onComplete();
+      }
     } catch (error) {
       console.error("Create campaign error:", error);
       toast({
