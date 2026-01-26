@@ -1,56 +1,61 @@
 
 
-## План: Отображение названий категорий вместо ID
+## План: Исправление отображения изображений в карточке канала
 
 ### Проблема
 
-Сейчас в карточке канала и на странице канала отображается ID категории (например, `crypto`) вместо человекочитаемого названия (`Криптовалюты`).
+Изображение канала на правой стороне карточки обрезается из-за использования `object-cover`. При этом важные части изображения (например, лицо человека) могут быть отрезаны.
 
-### Места для исправления
+### Текущий код (строки 100-104)
 
-| Файл | Строка | Текущее значение | Нужно |
-|------|--------|------------------|-------|
-| `ChannelCard.tsx` | 115 | `{category}` | `{getCategoryById(category)?.name \|\| category}` |
-| `Channel.tsx` | 93 | `channel.category` | `getCategoryById(channel.category)?.name \|\| channel.category` |
-
-### Изменения
-
-#### 1. ChannelCard.tsx
-
-Импортировать функцию и использовать для отображения:
-
-```typescript
-import { getCategoryById } from '@/data/channelCategories';
-
-// В строке 115 изменить:
-{getCategoryById(category)?.name || category}
+```tsx
+<img
+  src={avatar}
+  alt={name}
+  className="w-full h-full object-cover"
+/>
 ```
 
-#### 2. Channel.tsx
+### Варианты решения
 
-Импортировать функцию и использовать в статистике:
+| Вариант | Описание | Результат |
+|---------|----------|-----------|
+| `object-contain` | Изображение полностью помещается, но могут быть пустые области | Не обрезает, но может выглядеть мелко |
+| `object-cover object-right` | Изображение обрезается слева, а не по центру | Правая часть всегда видна полностью |
+| `object-cover object-top` | Изображение обрезается снизу | Верхняя часть (часто лица) видна |
+| `object-cover object-center` | Текущее поведение | Обрезает равномерно |
 
-```typescript
-import { getCategoryById } from '@/data/channelCategories';
+### Рекомендуемое решение
 
-// В detailedStats изменить:
-{
-  icon: Tag,
-  label: 'Категория',
-  value: getCategoryById(channel.category)?.name || channel.category,
-}
+Использовать `object-contain` с позиционированием справа, чтобы изображение полностью помещалось в блок:
+
+```tsx
+<img
+  src={avatar}
+  alt={name}
+  className="w-full h-full object-contain object-right"
+/>
 ```
 
-### Изменяемые файлы
+Или, если нужно сохранить заполнение, но показать важную часть (правую сторону):
+
+```tsx
+<img
+  src={avatar}
+  alt={name}
+  className="w-full h-full object-cover object-right"
+/>
+```
+
+### Изменяемый файл
 
 | Файл | Изменение |
 |------|-----------|
-| `src/components/ChannelCard.tsx` | Добавить импорт + использовать `getCategoryById` |
-| `src/pages/Channel.tsx` | Добавить импорт + использовать `getCategoryById` |
+| `src/components/ChannelCard.tsx` | Изменить `object-cover` на `object-contain object-right` (строка 103) |
 
 ### Результат
 
-- Карточка канала показывает "Криптовалюты" вместо "crypto"
-- Страница канала показывает "Криптовалюты" в статистике
-- Если категория не найдена — fallback на оригинальное значение
+- Изображение канала полностью помещается в отведённый блок
+- Не теряются важные детали изображения
+- Сохраняется эстетичный вид карточки
 
