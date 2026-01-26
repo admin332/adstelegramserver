@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Star, TrendingUp, Tag, ShoppingCart } from 'lucide-react';
+import { Star, TrendingUp, Tag, ShoppingCart, BadgeCheck } from 'lucide-react';
 import { mockChannels } from '@/data/mockChannels';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChannelHero from '@/components/channel/ChannelHero';
 import ChannelStats from '@/components/channel/ChannelStats';
-
+import ChannelAnalytics from '@/components/channel/ChannelAnalytics';
 import OrderDrawer from '@/components/channel/OrderDrawer';
 import { getTelegramWebApp, isTelegramMiniApp } from '@/lib/telegram';
 import { useChannel } from '@/hooks/useChannels';
@@ -150,6 +150,28 @@ const Channel: React.FC = () => {
             </div>
           ))}
         </div>
+      </motion.div>
+
+      {/* Verified Analytics Section */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.65 }}
+        className="px-4 mt-6"
+      >
+        <div className="flex items-center gap-2 mb-3">
+          <BadgeCheck className="h-5 w-5 text-primary" />
+          <h2 className="text-lg font-semibold text-foreground">Verified Analytics</h2>
+          <span className="text-xs text-muted-foreground">from Telegram</span>
+        </div>
+        <ChannelAnalytics
+          subscribers={channel.subscribers}
+          avgViews={channel.avgViews}
+          engagement={channel.engagement || 0}
+          recentPosts={channel.recentPostsStats}
+          languageStats={channel.languageStats}
+          premiumPercentage={channel.premiumPercentage}
+        />
       </motion.div>
 
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-background via-background to-transparent">

@@ -1,3 +1,14 @@
+export interface PostStat {
+  messageId: number;
+  views: number;
+  date: string;
+}
+
+export interface LanguageStat {
+  language: string;
+  percentage: number;
+}
+
 export interface Channel {
   id: string;
   name: string;
@@ -15,6 +26,10 @@ export interface Channel {
   language?: string;
   engagement?: number;
   successfulAds?: number;
+  recentPostsStats?: PostStat[];
+  languageStats?: LanguageStat[];
+  premiumPercentage?: number;
+  statsUpdatedAt?: string;
 }
 
 export const mockChannels: Channel[] = [
