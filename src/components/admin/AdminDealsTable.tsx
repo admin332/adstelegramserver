@@ -32,11 +32,13 @@ import {
   CheckCircle,
   XCircle,
   AlertTriangle,
-  Timer
+  Timer,
+  Calendar
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { useTonPrice } from '@/hooks/useTonPrice';
+import { ScheduleEditDialog } from './ScheduleEditDialog';
 import type { Database } from '@/integrations/supabase/types';
 
 type DealStatus = Database['public']['Enums']['deal_status'];
@@ -50,6 +52,7 @@ interface AdminDeal {
   escrow_address: string | null;
   created_at: string;
   expires_at: string | null;
+  scheduled_at: string | null;
   channel: {
     title: string | null;
     username: string;
@@ -78,6 +81,8 @@ const ALL_STATUSES: DealStatus[] = ['pending', 'escrow', 'in_progress', 'complet
 export function AdminDealsTable() {
   const [searchQuery, setSearchQuery] = useState('');
   const [updatingDealId, setUpdatingDealId] = useState<string | null>(null);
+  const [editingDeal, setEditingDeal] = useState<AdminDeal | null>(null);
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
   const queryClient = useQueryClient();
   const { tonPrice } = useTonPrice();
 
@@ -88,7 +93,7 @@ export function AdminDealsTable() {
         .from('deals')
         .select(`
           id, status, total_price, posts_count, duration_hours,
-          escrow_address, created_at, expires_at,
+          escrow_address, created_at, expires_at, scheduled_at,
           channel:channels(title, username),
           advertiser:users!deals_advertiser_id_fkey(first_name, username),
           campaign:campaigns(name)
@@ -148,6 +153,33 @@ export function AdminDealsTable() {
     }
   };
 
+  const updateSchedule = async (dealId: string, newDate: Date) => {
+    setIsSavingSchedule(true);
+    try {
+      const { error } = await supabase
+        .from('deals')
+        .update({ scheduled_at: newDate.toISOString() })
+        .eq('id', dealId);
+
+      if (error) throw error;
+
+      toast({
+        title: 'Дата обновлена',
+        description: `Публикация запланирована на ${format(newDate, "d MMMM yyyy 'в' HH:mm", { locale: ru })}`,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ['admin-deals'] });
+    } catch (err) {
+      toast({
+        title: 'Ошибка',
+        description: err instanceof Error ? err.message : 'Не удалось обновить дату',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingSchedule(false);
+    }
+  };
+
   const filteredDeals = deals?.filter((deal) => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
@@ -163,6 +195,11 @@ export function AdminDealsTable() {
   const formatUsd = (ton: number) => {
     if (!tonPrice) return '';
     return `≈ $${(ton * tonPrice).toFixed(2)}`;
+  };
+
+  const formatScheduledAt = (scheduledAt: string | null) => {
+    if (!scheduledAt) return '—';
+    return format(new Date(scheduledAt), "d MMM yyyy HH:mm", { locale: ru });
   };
 
   if (error) {
@@ -233,7 +270,8 @@ export function AdminDealsTable() {
                   <TableHead className="text-muted-foreground">Рекламодатель</TableHead>
                   <TableHead className="text-muted-foreground">Сумма</TableHead>
                   <TableHead className="text-muted-foreground">Статус</TableHead>
-                  <TableHead className="text-muted-foreground">Дата</TableHead>
+                  <TableHead className="text-muted-foreground">Публикация</TableHead>
+                  <TableHead className="text-muted-foreground">Создано</TableHead>
                   <TableHead className="text-muted-foreground text-right">Действия</TableHead>
                 </TableRow>
               </TableHeader>
@@ -283,6 +321,21 @@ export function AdminDealsTable() {
                         </Badge>
                       </TableCell>
                       <TableCell>
+                        <div className="flex items-center gap-1">
+                          <span className="text-sm text-muted-foreground">
+                            {formatScheduledAt(deal.scheduled_at)}
+                          </span>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            onClick={() => setEditingDeal(deal)}
+                          >
+                            <Calendar className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                      <TableCell>
                         <p className="text-sm text-muted-foreground">
                           {format(new Date(deal.created_at), 'dd MMM yyyy', { locale: ru })}
                         </p>
@@ -327,6 +380,17 @@ export function AdminDealsTable() {
           </div>
         )}
       </CardContent>
+
+      {editingDeal && (
+        <ScheduleEditDialog
+          open={!!editingDeal}
+          onOpenChange={(open) => !open && setEditingDeal(null)}
+          currentScheduledAt={editingDeal.scheduled_at}
+          dealId={editingDeal.id}
+          onSave={updateSchedule}
+          isSaving={isSavingSchedule}
+        />
+      )}
     </Card>
   );
 }
