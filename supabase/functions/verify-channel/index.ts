@@ -375,6 +375,30 @@ Deno.serve(async (req) => {
 
     console.log(`[verify-channel] Channel ${newChannel.id} created for user ${userData.id}`);
 
+    // 5. Create channel_admin record for the owner
+    const memberStatus = userMember?.status; // 'creator' or 'administrator'
+    const isCreator = memberStatus === "creator";
+
+    const { error: adminInsertError } = await supabase
+      .from("channel_admins")
+      .insert({
+        channel_id: newChannel.id,
+        user_id: userData.id,
+        role: isCreator ? "owner" : "manager",
+        telegram_member_status: memberStatus,
+        permissions: isCreator
+          ? { can_edit_posts: true, can_view_stats: true, can_view_finance: true, can_withdraw: true, can_manage_admins: true, can_approve_ads: true }
+          : { can_edit_posts: true, can_view_stats: true, can_view_finance: false, can_withdraw: false, can_manage_admins: false, can_approve_ads: true },
+        last_verified_at: new Date().toISOString(),
+      });
+
+    if (adminInsertError) {
+      console.error("Channel admin insert error:", adminInsertError);
+      // Non-critical - channel was created, just log the error
+    } else {
+      console.log(`[verify-channel] Channel admin record created: role=${isCreator ? 'owner' : 'manager'}`);
+    }
+
     return new Response(
       JSON.stringify({
         success: true,

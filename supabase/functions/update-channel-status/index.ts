@@ -160,28 +160,31 @@ serve(async (req) => {
 
     console.log("[update-channel-status] Found user:", user.id);
 
-    // 3. Check channel ownership
-    const { data: channel, error: channelError } = await supabaseAdmin
-      .from("channels")
-      .select("owner_id")
-      .eq("id", channel_id)
-      .single();
+    // 3. Check channel admin access (using channel_admins table)
+    const { data: adminRecord, error: adminError } = await supabaseAdmin
+      .from("channel_admins")
+      .select("id, role, permissions")
+      .eq("channel_id", channel_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
 
-    if (channelError || !channel) {
-      console.log("[update-channel-status] Channel not found:", channel_id);
+    if (adminError) {
+      console.error("[update-channel-status] Admin check error:", adminError);
       return new Response(
-        JSON.stringify({ success: false, error: "Channel not found" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ success: false, error: "Error checking permissions" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    if (channel.owner_id !== user.id) {
-      console.log("[update-channel-status] Access denied. Owner:", channel.owner_id, "User:", user.id);
+    if (!adminRecord) {
+      console.log("[update-channel-status] Access denied. User:", user.id, "has no admin record for channel:", channel_id);
       return new Response(
-        JSON.stringify({ success: false, error: "Access denied" }),
+        JSON.stringify({ success: false, error: "Нет доступа к каналу" }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    console.log("[update-channel-status] Admin access verified. Role:", adminRecord.role);
 
     // 4. Update status (SERVICE_ROLE bypasses RLS)
     const { error: updateError } = await supabaseAdmin

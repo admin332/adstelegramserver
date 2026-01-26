@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChannelHero from '@/components/channel/ChannelHero';
 import ChannelStats from '@/components/channel/ChannelStats';
+import ChannelTeam from '@/components/channel/ChannelTeam';
 import OrderDrawer from '@/components/channel/OrderDrawer';
 import { getTelegramWebApp, isTelegramMiniApp } from '@/lib/telegram';
 import { useChannel } from '@/hooks/useChannels';
@@ -151,7 +152,8 @@ const Channel: React.FC = () => {
         </div>
       </motion.div>
 
-      {/* Order Button - Fixed at Bottom */}
+      {/* Channel Team */}
+      {id && <ChannelTeam channelId={id} />}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-background via-background to-transparent">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
