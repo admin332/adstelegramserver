@@ -14,6 +14,7 @@ export interface Channel {
   description?: string;
   language?: string;
   engagement?: number;
+  successfulAds?: number;
 }
 
 export const mockChannels: Channel[] = [
@@ -30,6 +31,9 @@ export const mockChannels: Channel[] = [
     rating: 4.8,
     verified: true,
     premium: true,
+    description: "Канал о криптовалютах и блокчейне. Ежедневные новости, аналитика рынка и обзоры перспективных проектов.",
+    successfulAds: 156,
+    engagement: 36,
   },
   {
     id: "2",
@@ -43,6 +47,9 @@ export const mockChannels: Channel[] = [
     tonPrice: 30,
     rating: 4.6,
     verified: true,
+    description: "Всё о видеоиграх: обзоры, новости, стримы и гайды. Лучший контент для геймеров!",
+    successfulAds: 89,
+    engagement: 36,
   },
   {
     id: "3",
@@ -57,6 +64,9 @@ export const mockChannels: Channel[] = [
     rating: 4.9,
     verified: true,
     premium: true,
+    description: "Технологические новости каждый день. Гаджеты, софт, стартапы и инновации.",
+    successfulAds: 234,
+    engagement: 37,
   },
   {
     id: "4",
@@ -70,6 +80,9 @@ export const mockChannels: Channel[] = [
     tonPrice: 25,
     rating: 4.5,
     verified: false,
+    description: "Здоровый образ жизни, тренировки и питание. Мотивация и полезные советы каждый день.",
+    successfulAds: 45,
+    engagement: 37,
   },
   {
     id: "5",
@@ -83,6 +96,9 @@ export const mockChannels: Channel[] = [
     tonPrice: 60,
     rating: 4.7,
     verified: true,
+    description: "Стартапы, инвестиции и бизнес-идеи. Истории успеха и практические советы для предпринимателей.",
+    successfulAds: 178,
+    engagement: 33,
   },
   {
     id: "6",
@@ -96,6 +112,9 @@ export const mockChannels: Channel[] = [
     tonPrice: 35,
     rating: 4.4,
     verified: true,
+    description: "Рецепты, обзоры ресторанов и кулинарные лайфхаки. Вкусный контент каждый день!",
+    successfulAds: 67,
+    engagement: 43,
   },
   {
     id: "7",
@@ -110,6 +129,9 @@ export const mockChannels: Channel[] = [
     rating: 4.8,
     verified: true,
     premium: true,
+    description: "Путешествия по всему миру. Лайфхаки, маршруты и красивые фотографии из разных уголков планеты.",
+    successfulAds: 198,
+    engagement: 37,
   },
   {
     id: "8",
@@ -123,6 +145,9 @@ export const mockChannels: Channel[] = [
     tonPrice: 40,
     rating: 4.6,
     verified: false,
+    description: "Музыкальные новинки, подборки треков и обзоры артистов. Для истинных меломанов.",
+    successfulAds: 89,
+    engagement: 43,
   },
 ];
 

@@ -9,6 +9,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { isTelegramMiniApp } from "@/lib/telegram";
 import Index from "./pages/Index";
 import Channels from "./pages/Channels";
+import Channel from "./pages/Channel";
 import Create from "./pages/Create";
 import Deals from "./pages/Deals";
 import Profile from "./pages/Profile";
@@ -41,6 +42,7 @@ const App = () => {
               <Routes>
                 <Route path="/" element={<Index />} />
                 <Route path="/channels" element={<Channels />} />
+                <Route path="/channel/:id" element={<Channel />} />
                 <Route path="/create" element={<Create />} />
                 <Route path="/deals" element={<Deals />} />
                 <Route path="/profile" element={<Profile />} />

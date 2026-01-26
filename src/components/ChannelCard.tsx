@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, Users, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -47,9 +48,16 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   isLiked = false,
   onLikeToggle,
 }) => {
+  const navigate = useNavigate();
+
   const handleLikeClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onLikeToggle?.(id);
+  };
+
+  const handleBuyClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigate(`/channel/${id}`);
   };
 
   const cardVariants = {
@@ -190,7 +198,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
             <Button
               size="sm"
               className="h-9 px-4 text-xs font-semibold rounded-full"
-              onClick={(e) => e.stopPropagation()}
+              onClick={handleBuyClick}
             >
               Купить
             </Button>
