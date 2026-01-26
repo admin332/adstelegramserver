@@ -1,40 +1,47 @@
 
-## План: Исправление заголовков
 
-### Проблема
+## План: Изменение стиля кнопок "Назад"
 
-Был изменён не тот заголовок:
-- **Изменено (ошибочно)**: заголовок `<h2>` внутри компонента `MyCampaignsList.tsx` 
-- **Нужно было изменить**: верхний заголовок страницы `<h1>` в `Create.tsx`
+### Задача
 
-### Исправления
+Убрать синюю обводку и сделать текст белым для всех кнопок "Назад".
 
-| Файл | Строка | Было | Станет |
-|------|--------|------|--------|
-| `src/pages/Create.tsx` | 99 | `"Мои кампании"` | `"Кампании"` |
-| `src/components/create/MyCampaignsList.tsx` | 56 | `"Кампании"` | `"Мои кампании"` |
+### Что изменится
 
-### Детали изменений
+| Было | Станет |
+|------|--------|
+| `border-primary text-primary hover:bg-primary/10` | `border-0 text-white hover:bg-white/10` |
 
-**1. Create.tsx (строка 99)**
+### Файлы для изменения
+
+| Файл | Количество кнопок |
+|------|-------------------|
+| `src/components/create/MyCampaignsList.tsx` | 1 |
+| `src/components/create/MyChannelsList.tsx` | 1 |
+| `src/components/create/AddChannelWizard.tsx` | 2 |
+| `src/components/create/CreateCampaignForm.tsx` | 3 |
+
+**Всего:** 7 кнопок
+
+### Пример изменения
+
 ```tsx
 // Было:
-return currentStep === "list" ? "Мои кампании" : "Кампания";
+<Button 
+  variant="outline" 
+  className="... border-primary text-primary hover:bg-primary/10"
+>
 
 // Станет:
-return currentStep === "list" ? "Кампании" : "Кампания";
-```
-
-**2. MyCampaignsList.tsx (строка 56)**
-```tsx
-// Было (после моего ошибочного изменения):
-<h2 className="text-lg font-semibold text-foreground">Кампании</h2>
-
-// Станет (возврат к оригиналу):
-<h2 className="text-lg font-semibold text-foreground">Мои кампании</h2>
+<Button 
+  variant="outline" 
+  className="... border-0 text-white hover:bg-white/10"
+>
 ```
 
 ### Результат
 
-- Верхний заголовок страницы в стиле Pacifico: **"Кампании"**
-- Заголовок секции внутри списка: **"Мои кампании"**
+- Кнопки "Назад" станут без обводки
+- Текст и иконка станут белыми
+- При наведении будет лёгкая белая подсветка
+
