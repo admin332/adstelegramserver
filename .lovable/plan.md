@@ -1,329 +1,258 @@
 
 
-## План: Исправление уязвимостей безопасности во всех Edge Functions
+## План: Система ролей администраторов каналов (channel_admins)
 
-### Обнаруженные уязвимости
-
-Проверка выявила **4 критических уязвимости** — все связаны с тем, что `user_id` или `telegram_user_id` принимаются с фронтенда без проверки подлинности.
-
-| Функция | Уровень риска | Проблема |
-|---------|---------------|----------|
-| `create-campaign` | КРИТИЧЕСКИЙ | Доверяет `user_id` из body — можно создать кампанию от имени другого пользователя |
-| `upload-campaign-media` | КРИТИЧЕСКИЙ | Доверяет `user_id` из formData — можно загрузить файлы в папку другого пользователя |
-| `delete-campaign` | КРИТИЧЕСКИЙ | Доверяет `user_id` из body — можно удалить чужую кампанию |
-| `verify-channel` | КРИТИЧЕСКИЙ | Доверяет `telegram_user_id` из body — можно добавить канал от имени другого пользователя |
-| `update-channel-status` | БЕЗОПАСНО | Уже использует initData валидацию |
-| `send-campaign-preview` | НИЗКИЙ | Отправляет сообщение по telegram_id, но это не критично (спам-риск) |
-| `telegram-auth` | БЕЗОПАСНО | Правильно валидирует initData |
+### Цель
+Реализовать разделение прав доступа к каналам: **владелец** (получает деньги) и **менеджер** (редактирует посты). С перепроверкой прав через Telegram API при критических операциях.
 
 ---
 
-### Архитектура уязвимости
+### Архитектура системы
 
 ```text
-ТЕКУЩАЯ НЕБЕЗОПАСНАЯ СХЕМА (4 функции):
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Фронтенд отправляет: { user_id: "abc123", ... }                   │
+│                    Связь с Telegram API                            │
+├─────────────────────────────────────────────────────────────────────┤
+│  Первый админ добавляет канал → OWNER                               │
 │                              ↓                                       │
-│  Edge Function доверяет этому user_id                               │
+│  Другой админ канала заходит в Adsingo                              │
 │                              ↓                                       │
-│  Злоумышленник может подменить user_id в DevTools                   │
+│  getChatMember → administrator? → MANAGER                           │
 │                              ↓                                       │
-│  Создаёт/удаляет контент от имени жертвы                            │
-└─────────────────────────────────────────────────────────────────────┘
-
-БЕЗОПАСНАЯ СХЕМА (как в update-channel-status):
-┌─────────────────────────────────────────────────────────────────────┐
-│  Фронтенд отправляет: { initData: "подписанные_данные", ... }       │
+│  Критическая операция (финансы/постинг)                             │
 │                              ↓                                       │
-│  Edge Function валидирует HMAC-SHA256 подпись                       │
+│  RE-CHECK: getChatMember → всё ещё админ?                           │
 │                              ↓                                       │
-│  Извлекает telegram_id → находит user.id в БД                       │
-│                              ↓                                       │
-│  Использует ПРОВЕРЕННЫЙ user.id для операций                        │
+│  Да → разрешить | Нет → удалить из channel_admins + заблокировать   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### Файлы для изменения
+### 1. Миграция базы данных
+
+**Создать ENUM для ролей:**
+```sql
+CREATE TYPE public.channel_role AS ENUM ('owner', 'manager');
+```
+
+**Создать таблицу channel_admins:**
+```sql
+CREATE TABLE public.channel_admins (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  channel_id UUID REFERENCES public.channels(id) ON DELETE CASCADE NOT NULL,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+  role channel_role NOT NULL DEFAULT 'manager',
+  permissions JSONB DEFAULT '{"can_edit_posts": true, "can_view_stats": true, "can_view_finance": false, "can_withdraw": false}'::jsonb,
+  telegram_member_status TEXT, -- creator/administrator
+  last_verified_at TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (channel_id, user_id)
+);
+```
+
+**RLS политики:**
+```sql
+ALTER TABLE public.channel_admins ENABLE ROW LEVEL SECURITY;
+
+-- Чтение: только участники канала
+CREATE POLICY "Channel admins can view own channel admins"
+ON public.channel_admins FOR SELECT
+USING (user_id = auth.uid() OR channel_id IN (
+  SELECT channel_id FROM channel_admins WHERE user_id = auth.uid()
+));
+
+-- Service role для Edge Functions
+CREATE POLICY "Service role can manage channel admins"
+ON public.channel_admins FOR ALL
+USING (true) WITH CHECK (true);
+```
+
+---
+
+### 2. Права по ролям
+
+| Право | Owner | Manager |
+|-------|-------|---------|
+| `can_edit_posts` | true | true |
+| `can_view_stats` | true | true |
+| `can_approve_ads` | true | true |
+| `can_view_finance` | true | **false** |
+| `can_withdraw` | true | **false** |
+| `can_manage_admins` | true | **false** |
+
+---
+
+### 3. Изменение verify-channel (первичная привязка)
+
+При добавлении канала — автоматически создавать запись в `channel_admins`:
+
+```typescript
+// После успешного INSERT в channels
+const memberStatus = userMember?.status; // 'creator' или 'administrator'
+
+await supabase.from("channel_admins").insert({
+  channel_id: newChannel.id,
+  user_id: userData.id,
+  role: memberStatus === 'creator' ? 'owner' : 'manager',
+  telegram_member_status: memberStatus,
+  permissions: memberStatus === 'creator' 
+    ? { can_edit_posts: true, can_view_stats: true, can_view_finance: true, can_withdraw: true, can_manage_admins: true }
+    : { can_edit_posts: true, can_view_stats: true, can_view_finance: false, can_withdraw: false, can_manage_admins: false },
+  last_verified_at: new Date().toISOString(),
+});
+```
+
+---
+
+### 4. Новая Edge Function: join-channel-as-admin
+
+Когда **другой пользователь** пытается получить доступ к каналу:
+
+```typescript
+// POST /functions/v1/join-channel-as-admin
+// Body: { channel_id, initData }
+
+// 1. Валидация initData → telegramId
+// 2. Найти channel.telegram_chat_id
+// 3. getChatMember(telegram_chat_id, telegramId)
+// 4. Если administrator → добавить в channel_admins с role='manager'
+// 5. Если creator → role='owner' (но owner обычно уже есть)
+// 6. Если не админ в TG → отказать
+```
+
+---
+
+### 5. Функция перепроверки (recheck-admin-status)
+
+**Вызывается перед критическими операциями:**
+
+```typescript
+async function recheckAdminStatus(
+  supabase: SupabaseClient,
+  botToken: string,
+  channelId: string,
+  userId: string
+): Promise<{ valid: boolean; error?: string }> {
+  
+  // 1. Получить channel и channel_admin
+  const { data: admin } = await supabase
+    .from("channel_admins")
+    .select("*, channels(telegram_chat_id)")
+    .eq("channel_id", channelId)
+    .eq("user_id", userId)
+    .single();
+
+  if (!admin) {
+    return { valid: false, error: "Нет доступа к каналу" };
+  }
+
+  // 2. Получить telegram_id пользователя
+  const { data: user } = await supabase
+    .from("users")
+    .select("telegram_id")
+    .eq("id", userId)
+    .single();
+
+  // 3. Проверить в Telegram API
+  const tgMember = await getChatMember(
+    botToken, 
+    admin.channels.telegram_chat_id, 
+    user.telegram_id
+  );
+
+  const stillAdmin = tgMember && 
+    ['creator', 'administrator'].includes(tgMember.status);
+
+  if (!stillAdmin) {
+    // 4. Удалить из channel_admins
+    await supabase
+      .from("channel_admins")
+      .delete()
+      .eq("id", admin.id);
+
+    return { valid: false, error: "Ваши права администратора в Telegram были отозваны" };
+  }
+
+  // 5. Обновить last_verified_at
+  await supabase
+    .from("channel_admins")
+    .update({ 
+      last_verified_at: new Date().toISOString(),
+      telegram_member_status: tgMember.status 
+    })
+    .eq("id", admin.id);
+
+  return { valid: true };
+}
+```
+
+---
+
+### 6. Обновление update-channel-status
+
+Теперь проверяем через `channel_admins`:
+
+```typescript
+// Вместо:
+if (channel.owner_id !== user.id) { ... }
+
+// Новая логика:
+const { data: adminRecord } = await supabase
+  .from("channel_admins")
+  .select("role, permissions")
+  .eq("channel_id", channel_id)
+  .eq("user_id", user.id)
+  .single();
+
+if (!adminRecord) {
+  return { error: "Нет доступа к каналу" };
+}
+
+// Для переключения статуса достаточно любой роли
+// Но для финансов — проверяем permissions.can_withdraw
+```
+
+---
+
+### 7. UI: Отображение команды канала
+
+В `/channel/:id` для владельца показать список администраторов:
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│  Команда канала                                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│  👤 @ivanov          Owner           Полный доступ                  │
+│  👤 @petrov          Manager         Редактирование постов          │
+│  👤 @sidorov         Manager         Редактирование постов          │
+│                                                                     │
+│  [+ Пригласить администратора]                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 8. Файлы для создания/изменения
 
 | Файл | Действие | Описание |
 |------|----------|----------|
-| `supabase/functions/create-campaign/index.ts` | Изменить | Добавить initData валидацию |
-| `supabase/functions/upload-campaign-media/index.ts` | Изменить | Добавить initData валидацию |
-| `supabase/functions/delete-campaign/index.ts` | Изменить | Добавить initData валидацию |
-| `supabase/functions/verify-channel/index.ts` | Изменить | Добавить initData валидацию |
-| `src/components/create/CreateCampaignForm.tsx` | Изменить | Отправлять initData вместо user_id |
-| `src/hooks/useUserCampaigns.ts` | Изменить | Отправлять initData в delete-campaign |
-| `src/components/create/AddChannelWizard.tsx` | Изменить | Отправлять initData в verify-channel |
+| **Миграция** | Создать | channel_admins таблица + ENUM |
+| `supabase/functions/verify-channel/index.ts` | Изменить | Создавать запись в channel_admins |
+| `supabase/functions/join-channel-as-admin/index.ts` | Создать | Присоединение менеджера к каналу |
+| `supabase/functions/update-channel-status/index.ts` | Изменить | Проверять через channel_admins |
+| `src/hooks/useChannelAdmins.ts` | Создать | Хук для списка администраторов |
+| `src/components/channel/ChannelTeam.tsx` | Создать | UI списка администраторов |
 
 ---
 
-### Детальная реализация
+### Результат для жюри
 
-**1. Общая функция валидации (копируется в каждую Edge Function)**
-
-```typescript
-async function validateTelegramData(initData: string, botToken: string) {
-  try {
-    const urlParams = new URLSearchParams(initData);
-    const hash = urlParams.get("hash");
-    if (!hash) return { valid: false };
-
-    urlParams.delete("hash");
-    const dataCheckString = Array.from(urlParams.entries())
-      .map(([key, value]) => `${key}=${value}`)
-      .sort()
-      .join("\n");
-
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode("WebAppData");
-    const tokenData = encoder.encode(botToken);
-    
-    const hmacKey = await crypto.subtle.importKey(
-      "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
-    );
-    const secretKeyBuffer = await crypto.subtle.sign("HMAC", hmacKey, tokenData);
-    
-    const secretKey = await crypto.subtle.importKey(
-      "raw", secretKeyBuffer, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
-    );
-    const hashBuffer = await crypto.subtle.sign("HMAC", secretKey, encoder.encode(dataCheckString));
-    
-    const calculatedHash = Array.from(new Uint8Array(hashBuffer))
-      .map(b => b.toString(16).padStart(2, "0")).join("");
-
-    if (calculatedHash !== hash) return { valid: false };
-
-    const userString = urlParams.get("user");
-    const authDate = parseInt(urlParams.get("auth_date") || "0", 10);
-    const now = Math.floor(Date.now() / 1000);
-    if (now - authDate > 86400) return { valid: false };
-
-    return {
-      valid: true,
-      data: { user: userString ? JSON.parse(userString) : undefined, auth_date: authDate }
-    };
-  } catch {
-    return { valid: false };
-  }
-}
-```
-
----
-
-**2. Исправление `create-campaign`**
-
-```typescript
-// БЫЛО:
-const { user_id, name, text, ... } = await req.json();
-// Проверка: существует ли user_id в БД (но не что он принадлежит отправителю!)
-
-// СТАНЕТ:
-const { initData, name, text, ... } = await req.json();
-
-// 1. Валидация initData
-const validation = await validateTelegramData(initData, botToken);
-if (!validation.valid || !validation.data?.user) {
-  return Response({ error: "Unauthorized" }, { status: 401 });
-}
-
-// 2. Находим user.id по ПРОВЕРЕННОМУ telegram_id
-const telegramId = validation.data.user.id;
-const { data: user } = await supabase
-  .from("users")
-  .select("id")
-  .eq("telegram_id", telegramId)
-  .single();
-
-// 3. Создаём кампанию с ПРОВЕРЕННЫМ owner_id
-await supabase.from("campaigns").insert({
-  owner_id: user.id, // Теперь этому можно доверять!
-  name, text, ...
-});
-```
-
----
-
-**3. Исправление `upload-campaign-media`**
-
-```typescript
-// БЫЛО:
-const formData = await req.formData();
-const userId = formData.get("user_id"); // Можно подменить!
-const fileName = `${userId}/${timestamp}.jpg`;
-
-// СТАНЕТ:
-const formData = await req.formData();
-const initData = formData.get("initData") as string;
-const file = formData.get("file") as File;
-
-// 1. Валидация initData
-const validation = await validateTelegramData(initData, botToken);
-if (!validation.valid) {
-  return Response({ error: "Unauthorized" }, { status: 401 });
-}
-
-// 2. Находим user.id
-const { data: user } = await supabase
-  .from("users")
-  .select("id")
-  .eq("telegram_id", validation.data.user.id)
-  .single();
-
-// 3. Загружаем в папку ПРОВЕРЕННОГО пользователя
-const fileName = `${user.id}/${timestamp}.jpg`;
-```
-
----
-
-**4. Исправление `delete-campaign`**
-
-```typescript
-// БЫЛО:
-const { campaign_id, user_id } = await req.json();
-if (campaign.owner_id !== user_id) { ... } // user_id можно подменить!
-
-// СТАНЕТ:
-const { campaign_id, initData } = await req.json();
-
-// 1. Валидация initData
-const validation = await validateTelegramData(initData, botToken);
-
-// 2. Находим user.id по telegram_id
-const { data: user } = await supabase
-  .from("users")
-  .select("id")
-  .eq("telegram_id", validation.data.user.id)
-  .single();
-
-// 3. Проверяем владение ПРОВЕРЕННЫМ user.id
-if (campaign.owner_id !== user.id) {
-  return Response({ error: "Access denied" }, { status: 403 });
-}
-```
-
----
-
-**5. Исправление `verify-channel`**
-
-```typescript
-// БЫЛО:
-const { username, telegram_user_id, category, ... } = await req.json();
-// telegram_user_id можно подменить!
-const userMember = await getChatMember(botToken, chat.id, telegram_user_id);
-
-// СТАНЕТ:
-const { username, initData, category, ... } = await req.json();
-
-// 1. Валидация initData
-const validation = await validateTelegramData(initData, botToken);
-const telegramId = validation.data.user.id; // Доверенный ID
-
-// 2. Проверяем что пользователь — админ канала
-const userMember = await getChatMember(botToken, chat.id, telegramId);
-
-// 3. Находим owner_id
-const { data: user } = await supabase
-  .from("users")
-  .select("id")
-  .eq("telegram_id", telegramId)
-  .single();
-
-// 4. Создаём канал с ПРОВЕРЕННЫМ owner_id
-await supabase.from("channels").insert({
-  owner_id: user.id,
-  ...
-});
-```
-
----
-
-**6. Обновление фронтенда**
-
-**`CreateCampaignForm.tsx`:**
-```typescript
-import { getTelegramInitData } from "@/lib/telegram";
-
-// При загрузке медиа:
-const formData = new FormData();
-formData.append("file", file);
-formData.append("initData", getTelegramInitData() || ""); // Вместо user_id
-
-// При создании кампании:
-body: JSON.stringify({
-  initData: getTelegramInitData(), // Вместо user_id
-  name: campaignData.name,
-  text: campaignData.text,
-  ...
-})
-```
-
-**`useUserCampaigns.ts` (delete-campaign):**
-```typescript
-import { getTelegramInitData } from "@/lib/telegram";
-
-const response = await fetch(".../delete-campaign", {
-  body: JSON.stringify({
-    campaign_id: campaignId,
-    initData: getTelegramInitData(), // Вместо user_id
-  }),
-});
-```
-
-**`AddChannelWizard.tsx` (verify-channel):**
-```typescript
-import { getTelegramInitData } from "@/lib/telegram";
-
-body: JSON.stringify({
-  username: cleanUsername,
-  initData: getTelegramInitData(), // Вместо telegram_user_id
-  category: channelData.category,
-  ...
-})
-```
-
----
-
-### Сравнение безопасности до/после
-
-| Функция | До | После |
-|---------|-----|-------|
-| `create-campaign` | `user_id` из body | `telegram_id` из initData |
-| `upload-campaign-media` | `user_id` из formData | `telegram_id` из initData |
-| `delete-campaign` | `user_id` из body | `telegram_id` из initData |
-| `verify-channel` | `telegram_user_id` из body | `telegram_id` из initData |
-
----
-
-### Цепочка доверия после исправления
-
-```text
-┌─────────────────────────────────────────────────────────────────────┐
-│  1. Telegram подписывает initData ключом бота                       │
-│                              ↓                                       │
-│  2. Фронтенд передаёт initData в Edge Function                      │
-│                              ↓                                       │
-│  3. Edge Function проверяет HMAC-SHA256 подпись                     │
-│                              ↓                                       │
-│  4. Извлекает telegram_id из ПРОВЕРЕННЫХ данных                     │
-│                              ↓                                       │
-│  5. Находит user.id в БД по telegram_id                             │
-│                              ↓                                       │
-│  6. Выполняет операцию только от имени ЭТОГО пользователя           │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-### Результат
-
-После исправлений:
-- Невозможно создать кампанию от чужого имени
-- Невозможно загрузить файлы в чужую папку
-- Невозможно удалить чужую кампанию
-- Невозможно добавить канал от чужого имени
-- Все операции проходят криптографическую валидацию
-- Соответствует лучшим практикам безопасности для конкурса
+После реализации:
+- База данных понимает разницу между **владельцем** и **менеджером**
+- Права синхронизированы с реальными правами в Telegram
+- **Перепроверка** при критических операциях (финансы, постинг)
+- Автоматическое удаление доступа при отзыве прав в Telegram
+- Разделение прав: менеджер НЕ может выводить деньги
 
