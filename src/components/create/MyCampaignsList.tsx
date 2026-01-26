@@ -148,7 +148,7 @@ export const MyCampaignsList = ({ onAddCampaign, onBack }: MyCampaignsListProps)
       <Button
         variant="outline"
         onClick={onBack}
-        className="w-full border-primary text-primary hover:bg-primary/10"
+        className="w-full border-0 text-white hover:bg-white/10"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Назад
