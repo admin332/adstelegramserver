@@ -9,10 +9,12 @@ import { mockChannels } from "@/data/mockChannels";
 import { useFavorites } from "@/hooks/useFavorites";
 import { TrendingUp, Users, Heart, DollarSign, ArrowUpDown } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 type SortOption = "subscribers" | "price" | "engagement" | "rating";
 
 const Index = () => {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
@@ -144,7 +146,12 @@ const Index = () => {
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-foreground">Популярные каналы</h2>
-            <button className="text-sm text-primary font-medium">Все</button>
+            <button 
+              className="text-sm text-primary font-medium"
+              onClick={() => navigate('/channels')}
+            >
+              Все
+            </button>
           </div>
           <div className="space-y-3">
             {filteredChannels.length > 0 ? (
