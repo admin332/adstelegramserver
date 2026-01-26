@@ -61,17 +61,9 @@ const Create = () => {
             <p className="text-muted-foreground mt-1">Выберите свою роль на платформе</p>
           </>
         ) : (
-          <div className="flex items-center justify-center gap-2">
-            <button 
-              onClick={handleBack}
-              className="absolute left-4 p-2 rounded-full hover:bg-secondary transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5 text-muted-foreground" />
-            </button>
-            <h1 className="font-handwriting text-3xl md:text-4xl text-white">
-              {selectedRole === "channel_owner" ? "Добавить канал" : "Новая кампания"}
-            </h1>
-          </div>
+          <h1 className="font-handwriting text-3xl md:text-4xl text-white">
+            {selectedRole === "channel_owner" ? "Добавить" : "Новая кампания"}
+          </h1>
         )}
       </header>
 
