@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createHmac, createCipheriv, randomBytes } from "node:crypto";
 import { Buffer } from "node:buffer";
+import { mnemonicNew, mnemonicToPrivateKey } from "@ton/crypto";
+import { WalletContractV4 } from "@ton/ton";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -48,24 +50,30 @@ function encryptMnemonic(mnemonic: string, key: string): string {
   return `${iv.toString("hex")}:${authTag.toString("hex")}:${encrypted}`;
 }
 
-// Генерация временного адреса эскроу
-// В production это должен быть реальный TON кошелёк, но для MVP
-// генерируем уникальный идентификатор, который будет использоваться
-// для отслеживания платежей через внешний сервис
-function generateEscrowAddress(): { address: string; secretKey: string } {
-  // Генерируем 32 байта для секретного ключа
-  const secretBytes = randomBytes(32);
-  const secretKey = secretBytes.toString("hex");
+// Генерация настоящего TON кошелька для эскроу
+async function generateEscrowWallet(): Promise<{ address: string; mnemonic: string }> {
+  // Генерируем мнемоническую фразу (24 слова)
+  const mnemonic = await mnemonicNew();
   
-  // Генерируем псевдо-адрес в формате TON (для MVP)
-  // В production здесь будет реальная генерация через @ton/ton
-  const addressBytes = randomBytes(32);
-  const addressBase64 = addressBytes.toString("base64url");
+  // Получаем keypair из мнемоники
+  const keyPair = await mnemonicToPrivateKey(mnemonic);
   
-  // Формат: UQ + 46 символов base64url (стандартный формат TON адреса)
-  const address = `UQ${addressBase64.substring(0, 46)}`;
+  // Создаём контракт кошелька V4
+  const wallet = WalletContractV4.create({
+    publicKey: keyPair.publicKey,
+    workchain: 0,
+  });
   
-  return { address, secretKey };
+  // Получаем адрес в формате EQ (Bounceable) — понимают все кошельки
+  const address = wallet.address.toString({
+    bounceable: true,
+    testOnly: false,
+  });
+  
+  return {
+    address,
+    mnemonic: mnemonic.join(" "),
+  };
 }
 
 serve(async (req) => {
@@ -150,13 +158,13 @@ serve(async (req) => {
       );
     }
 
-    // Generate escrow wallet
+    // Generate real TON escrow wallet
     console.log("Generating escrow wallet...");
-    const escrowWallet = generateEscrowAddress();
+    const escrowWallet = await generateEscrowWallet();
     console.log("Escrow address:", escrowWallet.address);
 
-    // Encrypt secret key (in production this would be mnemonic)
-    const encryptedSecret = encryptMnemonic(escrowWallet.secretKey, encryptionKey);
+    // Encrypt mnemonic for secure storage
+    const encryptedMnemonic = encryptMnemonic(escrowWallet.mnemonic, encryptionKey);
 
     // Get channel price info
     const { data: channel, error: channelError } = await supabase
@@ -186,7 +194,7 @@ serve(async (req) => {
         scheduled_at: scheduledAt || null,
         status: "pending",
         escrow_address: escrowWallet.address,
-        escrow_mnemonic_encrypted: encryptedSecret,
+        escrow_mnemonic_encrypted: encryptedMnemonic,
         escrow_balance: 0,
       })
       .select("id, escrow_address")
