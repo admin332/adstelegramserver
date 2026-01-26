@@ -88,6 +88,57 @@ export type Database = {
           },
         ]
       }
+      channel_admins: {
+        Row: {
+          channel_id: string
+          created_at: string | null
+          id: string
+          last_verified_at: string | null
+          permissions: Json | null
+          role: Database["public"]["Enums"]["channel_role"]
+          telegram_member_status: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          channel_id: string
+          created_at?: string | null
+          id?: string
+          last_verified_at?: string | null
+          permissions?: Json | null
+          role?: Database["public"]["Enums"]["channel_role"]
+          telegram_member_status?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          channel_id?: string
+          created_at?: string | null
+          id?: string
+          last_verified_at?: string | null
+          permissions?: Json | null
+          role?: Database["public"]["Enums"]["channel_role"]
+          telegram_member_status?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_admins_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "channel_admins_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       channels: {
         Row: {
           avatar_url: string | null
@@ -249,6 +300,7 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"
+      channel_role: "owner" | "manager"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -377,6 +429,7 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "moderator", "user"],
+      channel_role: ["owner", "manager"],
     },
   },
 } as const
