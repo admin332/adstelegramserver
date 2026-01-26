@@ -1,79 +1,37 @@
 
 
-## Цель
-Реализовать глобальное кеширование курса TON на клиенте с использованием React Query, чтобы все компоненты использовали единый кешированный курс.
+## Проблема
+В карточках сделок (`DealCard`) используется `toFixed(0)` для округления USD-эквивалента, что даёт неточный результат.
 
-## Текущая проблема
+При сделке на **1 TON** и курсе **1.52$**:
+- `DealCard` показывает: `≈ $2` (округление 1.52 → 2)
+- `PaymentDialog` показывает: `≈ $1.52` (два знака после запятой)
 
-Сейчас каждый компонент, вызывающий `useTonPrice()`, создаёт:
-- Отдельный `useState` для хранения курса
-- Отдельный `useEffect` с запросом к edge function
-- Отдельный `setInterval` для обновления каждые 5 минут
+## Причина
+В файле `src/components/DealCard.tsx` на строке 157:
+```tsx
+<span className="text-muted-foreground">≈ ${usdEquivalent.toFixed(0)}</span>
+```
 
-**Места использования:**
-| Компонент | Файл |
-|-----------|------|
-| `Deals` (страница) | `src/pages/Deals.tsx` |
-| `PaymentDialog` | `src/components/deals/PaymentDialog.tsx` |
-| `PaymentStep` | `src/components/channel/PaymentStep.tsx` |
-| `PostQuantitySelector` | `src/components/channel/PostQuantitySelector.tsx` |
-| `AddChannelWizard` | `src/components/create/AddChannelWizard.tsx` |
+Метод `toFixed(0)` округляет 1.52 до 2, потому что стандартное округление JavaScript округляет 0.5 и выше вверх.
 
 ## Решение
-
-Переписать `useTonPrice` с использованием React Query (`@tanstack/react-query`), который уже установлен в проекте.
-
-### Преимущества React Query:
-- Автоматическое глобальное кеширование по ключу запроса
-- Один запрос на все компоненты
-- Автоматический refetch с настраиваемым интервалом
-- Дедупликация запросов
-- Встроенная обработка loading/error состояний
+Использовать `toFixed(2)` как в `PaymentDialog`, чтобы отображать курс с двумя знаками после запятой.
 
 ## Изменения
 
-### 1. `src/hooks/useTonPrice.ts`
+**`src/components/DealCard.tsx`** — строка 157:
 
-Переписать хук с использованием `useQuery`:
+```text
+Было:
+<span className="text-muted-foreground">≈ ${usdEquivalent.toFixed(0)}</span>
 
-```typescript
-import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
-
-async function fetchTonPrice(): Promise<number> {
-  const { data, error } = await supabase.functions.invoke('ton-price');
-  if (error || !data?.price) {
-    throw new Error('Не удалось получить курс TON');
-  }
-  return data.price;
-}
-
-export function useTonPrice() {
-  const { data: tonPrice, isLoading: loading } = useQuery({
-    queryKey: ['ton-price'],
-    queryFn: fetchTonPrice,
-    staleTime: 5 * 60 * 1000,      // Данные свежие 5 минут
-    gcTime: 10 * 60 * 1000,        // Кеш хранится 10 минут
-    refetchInterval: 5 * 60 * 1000, // Автообновление каждые 5 минут
-    retry: 2,
-  });
-
-  const convertToUsd = (tonAmount: number): number | null => {
-    if (!tonPrice) return null;
-    return tonAmount * tonPrice;
-  };
-
-  return { tonPrice: tonPrice ?? null, loading, convertToUsd };
-}
+Будет:
+<span className="text-muted-foreground">≈ ${usdEquivalent.toFixed(2)}</span>
 ```
 
-### Результат
-
+## Результат
 После изменения:
-- Все 5 компонентов будут использовать один кешированный курс
-- Только 1 запрос к edge function вместо 5
-- Курс синхронизирован между всеми элементами интерфейса
-- Автоматическое обновление каждые 5 минут
-
-Компоненты не требуют изменений — API хука остаётся прежним.
+- 1 TON @ $1.52 → отобразится как `≈ $1.52` вместо `≈ $2`
+- Консистентное отображение цен во всех компонентах приложения
 
