@@ -5,6 +5,7 @@ import { Heart, Users, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import TonIcon from '@/assets/ton-icon.svg';
+import { getCategoryById } from '@/data/channelCategories';
 
 interface ChannelCardProps {
   id: string;
@@ -112,7 +113,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           <span>{formatNumber(avgViews)}</span>
         </div>
         <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full">
-          {category}
+          {getCategoryById(category)?.name || category}
         </div>
       </div>
 

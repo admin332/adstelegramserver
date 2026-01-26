@@ -10,6 +10,7 @@ import ChannelStats from '@/components/channel/ChannelStats';
 import OrderDrawer from '@/components/channel/OrderDrawer';
 import { getTelegramWebApp, isTelegramMiniApp } from '@/lib/telegram';
 import { useChannel } from '@/hooks/useChannels';
+import { getCategoryById } from '@/data/channelCategories';
 
 const Channel: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -90,7 +91,7 @@ const Channel: React.FC = () => {
     {
       icon: Tag,
       label: 'Категория',
-      value: channel.category,
+      value: getCategoryById(channel.category)?.name || channel.category,
     },
   ];
 
