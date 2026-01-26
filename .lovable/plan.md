@@ -1,63 +1,111 @@
 
+## План: Фильтрация доступных часов для сегодняшней даты
 
-## План: Исправление UI в DateTimeSelector
+### Проблема
 
-### Проблема 1: Белая обводка у выпадающего списка времени
+При выборе сегодняшней даты:
+- Можно выбрать время, которое уже прошло (например, 16:00 когда сейчас 16:20)
+- Можно выбрать следующий час, до которого осталось меньше часа (например, 17:00 когда сейчас 16:20)
 
-**Файл:** `src/components/ui/select.tsx`
+### Решение
 
-В `SelectContent` (строка 69) есть класс `border`, который создаёт белую обводку.
+Фильтровать список доступных часов в зависимости от выбранной даты:
+- Если выбрана **сегодняшняя дата** - показывать только часы, до которых осталось **больше 1 часа**
+- Если выбрана **будущая дата** - показывать все 24 часа
 
-**Решение:** Добавить `border-0` в DateTimeSelector при использовании SelectContent:
-```tsx
-<SelectContent className="z-[60] border-0">
-```
+### Логика фильтрации
 
----
+Если сейчас 16:20:
+- Текущий час = 16
+- Минимально допустимый час = 16 + 2 = 18 (18:00)
+- Почему +2? Потому что 17:00 уже меньше чем через час
 
-### Проблема 2: Неправильное выделение дат в календаре
-
-**Причина:**
-1. `day_today` подсвечивает сегодняшнюю дату (26 января) с `bg-accent`
-2. `day_selected` не имеет `rounded-md` для закруглённых углов
-3. Класс `cell` содержит `[&:has([aria-selected])]:bg-accent` который создаёт дополнительную квадратную подсветку вокруг выбранной даты
-
-**Файл:** `src/components/ui/calendar.tsx`
-
-**Решение:**
-1. Добавить `rounded-md` к `day_selected` для закругления
-2. Убрать `[&:has([aria-selected])]:bg-accent` из `cell` чтобы не было двойной подсветки
-3. Оставить `day_today` только с кольцом или убрать чтобы не путать с выбранной датой
-
----
-
-### Изменения
+### Изменения в файлах
 
 #### 1. `src/components/channel/DateTimeSelector.tsx`
 
-Добавить `border-0` к SelectContent:
+**Добавить функцию проверки "сегодня":**
+```typescript
+import { format, addDays, isToday } from 'date-fns';
+```
 
+**Добавить вычисление минимального доступного часа:**
+```typescript
+const getMinAvailableHour = () => {
+  const now = new Date();
+  // Минимум через 2 часа от текущего (чтобы был зазор больше часа)
+  return now.getHours() + 2;
+};
+
+const getAvailableHours = () => {
+  if (isToday(selectedDate)) {
+    const minHour = getMinAvailableHour();
+    // Если minHour >= 24, значит на сегодня слотов нет
+    return hours.filter(hour => hour >= minHour);
+  }
+  return hours;
+};
+
+const availableHours = getAvailableHours();
+```
+
+**Обновить рендеринг SelectContent:**
 ```tsx
 <SelectContent className="z-[60] border-0">
+  {availableHours.length > 0 ? (
+    availableHours.map((hour) => (
+      <SelectItem key={hour} value={hour.toString()}>
+        {formatHour(hour)}
+      </SelectItem>
+    ))
+  ) : (
+    <div className="p-2 text-sm text-muted-foreground text-center">
+      На сегодня нет доступных слотов
+    </div>
+  )}
+</SelectContent>
 ```
 
-#### 2. `src/components/ui/calendar.tsx`
+#### 2. `src/components/channel/OrderDrawer.tsx`
 
-Исправить классы:
-
-```tsx
-cell: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
-
-day_selected:
-  "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground rounded-md",
-
-day_today: "ring-1 ring-accent text-accent-foreground",
+**Обновить инициализацию selectedHour:**
+```typescript
+const [selectedHour, setSelectedHour] = useState(() => {
+  const now = new Date();
+  // Минимум через 2 часа
+  const minHour = now.getHours() + 2;
+  return minHour > 23 ? 0 : minHour;
+});
 ```
 
-**Что изменится:**
-- Убрали `[&:has([aria-selected])]:bg-accent` и `[&:has([aria-selected].day-outside)]:bg-accent/50` из `cell` - убирает квадратную подсветку вокруг
-- Добавили `rounded-md` к `day_selected` - теперь выбранная дата с закруглёнными углами
-- Изменили `day_today` на ring вместо bg-accent - сегодняшняя дата показывается кольцом, а не заливкой
+**Добавить логику обновления selectedHour при смене даты:**
+
+Передать колбек `onDateChange` который также сбрасывает час если он стал недоступен:
+
+```typescript
+const handleDateChange = (date: Date) => {
+  setSelectedDate(date);
+  
+  // Если выбрана сегодняшняя дата и текущий час недоступен
+  if (isToday(date)) {
+    const minHour = new Date().getHours() + 2;
+    if (selectedHour < minHour) {
+      setSelectedHour(minHour > 23 ? 0 : minHour);
+    }
+  }
+};
+```
+
+---
+
+### Пример работы
+
+| Текущее время | Доступные часы (сегодня) |
+|---------------|--------------------------|
+| 14:00         | 16:00, 17:00, ... 23:00  |
+| 16:20         | 18:00, 19:00, ... 23:00  |
+| 22:30         | нет доступных слотов     |
+| любое (завтра)| 00:00 - 23:00            |
 
 ---
 
@@ -65,6 +113,5 @@ day_today: "ring-1 ring-accent text-accent-foreground",
 
 | Файл | Изменение |
 |------|-----------|
-| `src/components/channel/DateTimeSelector.tsx` | Добавить `border-0` к SelectContent |
-| `src/components/ui/calendar.tsx` | Исправить стили cell, day_selected, day_today |
-
+| `src/components/channel/DateTimeSelector.tsx` | Добавить фильтрацию часов для сегодняшней даты, импортировать `isToday` |
+| `src/components/channel/OrderDrawer.tsx` | Обновить начальное значение часа (+2 вместо +1), добавить логику сброса при смене даты |
