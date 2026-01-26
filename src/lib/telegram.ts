@@ -99,10 +99,17 @@ export function initTelegramApp(): void {
     webapp.ready();
     
     // Пробуем запросить настоящий Fullscreen (Bot API 7.0+)
-    if (typeof webapp.requestFullscreen === 'function') {
-      webapp.requestFullscreen();
-    } else {
-      // Fallback для старых версий Telegram - используем expand
+    // Оборачиваем в try-catch т.к. не все версии поддерживают этот метод
+    try {
+      if (typeof webapp.requestFullscreen === 'function') {
+        webapp.requestFullscreen();
+      } else {
+        // Fallback для старых версий Telegram - используем expand
+        webapp.expand();
+      }
+    } catch (e) {
+      // Fallback если requestFullscreen выбросил ошибку
+      console.log('Fullscreen not supported, using expand');
       webapp.expand();
     }
     

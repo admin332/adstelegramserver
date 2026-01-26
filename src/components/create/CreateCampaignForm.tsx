@@ -107,22 +107,29 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
     try {
       const mediaUrls: string[] = [];
 
-      // Загружаем все файлы
+      // Загружаем все файлы через Edge Function (обходит RLS для Telegram пользователей)
       for (const file of mediaFiles) {
-        const fileExt = file.name.split(".").pop();
-        const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
-        
-        const { error: uploadError } = await supabase.storage
-          .from("campaign-images")
-          .upload(fileName, file);
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("user_id", user.id);
 
-        if (!uploadError) {
-          const { data: { publicUrl } } = supabase.storage
-            .from("campaign-images")
-            .getPublicUrl(fileName);
-          mediaUrls.push(publicUrl);
+        const uploadResponse = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-campaign-media`,
+          {
+            method: "POST",
+            headers: {
+              "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            },
+            body: formData,
+          }
+        );
+
+        const uploadResult = await uploadResponse.json();
+        
+        if (uploadResult.success && uploadResult.url) {
+          mediaUrls.push(uploadResult.url);
         } else {
-          console.error("Upload error:", uploadError);
+          console.error("Upload error:", uploadResult.error);
         }
       }
 
