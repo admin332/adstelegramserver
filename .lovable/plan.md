@@ -2,113 +2,94 @@
 
 ## Проблема
 
-Когда админ меняет статус сделки на "Оплачено" (escrow) через админ-панель, владельцу канала не отправляется уведомление с предпросмотром рекламы и кнопками одобрения/отклонения.
+Уведомление показывает неправильное время публикации: `00:00` вместо `02:00`.
 
-### Почему так происходит
+### Причина
 
-Текущий код в `AdminDealsTable.tsx` (строки 103-128) просто обновляет статус в базе данных:
+Edge function `notify-deal-payment` форматирует дату с помощью стандартных методов JavaScript (`getHours()`, `getDate()`), которые работают в часовом поясе сервера (**UTC**).
 
+Цепочка событий:
+1. Пользователь выбирает 02:00 в часовом поясе UTC+2
+2. JavaScript конвертирует в UTC: `2026-01-27T00:00:00.000Z`
+3. База данных хранит UTC: `2026-01-27 00:00:00+00`
+4. Edge function читает и форматирует в UTC → показывает `00:00`
+5. Но пользователь ожидает увидеть `02:00` (его локальное время)
+
+### Текущий код (строки 151-163 в notify-deal-payment/index.ts)
 ```typescript
-const { error } = await supabase
-  .from('deals')
-  .update({ status: newStatus })
-  .eq('id', dealId);
+function formatDate(dateStr: string | null): string {
+  const date = new Date(dateStr);
+  const hours = date.getHours(); // <-- UTC время сервера!
+  return `${day}.${month}.${year} в ${hours}:${minutes}`;
+}
 ```
-
-А логика отправки уведомлений (`sendPaymentNotification`) находится только в edge function `check-escrow-payments`, которая вызывается автоматически при обнаружении платежа.
 
 ## Решение
 
-Создать новую edge function `notify-deal-payment`, которая будет отправлять уведомление владельцу канала. Вызывать её из админ-панели при смене статуса на `escrow`.
+Хранить и отображать время в часовом поясе пользователя. Есть два варианта:
 
-## Изменения
+### Вариант А: Хранить часовой пояс пользователя (рекомендуется)
+Сохранять `timezone` пользователя при создании сделки и использовать его для форматирования.
 
-### 1. Создать новую edge function `notify-deal-payment`
+### Вариант Б: Форматировать в фиксированном часовом поясе (быстрое решение)
+Для русскоязычного приложения использовать Московское время (UTC+3).
 
-```text
-supabase/functions/notify-deal-payment/index.ts
-```
+## План реализации (Вариант Б — быстрое решение)
 
-Эта функция будет:
-- Принимать `dealId` в теле запроса
-- Загружать данные сделки с каналом, кампанией и владельцем
-- Отправлять предпросмотр кампании и уведомление с кнопками в Telegram
+### 1. Обновить `notify-deal-payment/index.ts`
 
-Логика отправки будет скопирована из `check-escrow-payments`:
-- `sendCampaignPreview()` — отправка медиа и текста рекламы
-- `sendPaymentNotification()` — уведомление с суммой и кнопками Одобрить/Отклонить
-
-### 2. Обновить `AdminDealsTable.tsx`
-
-При смене статуса на `escrow` дополнительно вызывать edge function:
+Заменить функцию `formatDate()` на версию с явным часовым поясом:
 
 ```typescript
-const updateStatus = async (dealId: string, newStatus: DealStatus) => {
-  // ...обновление статуса...
+// Format date in Moscow timezone (UTC+3)
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return "По согласованию";
   
-  // Если новый статус "escrow" - отправить уведомление владельцу
-  if (newStatus === 'escrow') {
-    await supabase.functions.invoke('notify-deal-payment', {
-      body: { dealId }
-    });
-  }
-};
+  const date = new Date(dateStr);
+  
+  // Форматируем в московском часовом поясе
+  const formatter = new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'Europe/Moscow',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  
+  const parts = formatter.formatToParts(date);
+  const day = parts.find(p => p.type === 'day')?.value;
+  const month = parts.find(p => p.type === 'month')?.value;
+  const year = parts.find(p => p.type === 'year')?.value;
+  const hour = parts.find(p => p.type === 'hour')?.value;
+  const minute = parts.find(p => p.type === 'minute')?.value;
+  
+  return `${day}.${month}.${year} в ${hour}:${minute}`;
+}
 ```
 
-### 3. Обновить `config.toml`
+### 2. Также обновить `check-escrow-payments/index.ts`
 
-Добавить конфигурацию для новой функции:
+Та же функция `formatDate()` используется в `check-escrow-payments`. Нужно синхронизировать изменения.
 
-```toml
-[functions.notify-deal-payment]
-verify_jwt = false
-```
+## Файлы для изменения
 
-## Структура edge function
-
-```typescript
-// notify-deal-payment/index.ts
-
-serve(async (req) => {
-  const { dealId } = await req.json();
-  
-  // 1. Загрузить сделку с нужными данными
-  const { data: deal } = await supabase
-    .from('deals')
-    .select(`
-      id, total_price, posts_count, duration_hours, scheduled_at,
-      campaign:campaigns(text, media_urls, button_text, button_url),
-      channel:channels(
-        id, title,
-        owner:users!channels_owner_id_fkey(telegram_id)
-      )
-    `)
-    .eq('id', dealId)
-    .single();
-  
-  // 2. Отправить предпросмотр кампании
-  await sendCampaignPreview(ownerTelegramId, deal.campaign);
-  
-  // 3. Отправить уведомление с кнопками
-  await sendPaymentNotification(deal);
-  
-  return { success: true };
-});
-```
-
-## Файлы для создания/изменения
-
-| Файл | Действие |
-|------|----------|
-| `supabase/functions/notify-deal-payment/index.ts` | Создать |
-| `supabase/config.toml` | Добавить конфигурацию функции |
-| `src/components/admin/AdminDealsTable.tsx` | Добавить вызов функции при смене на `escrow` |
+| Файл | Изменение |
+|------|-----------|
+| `supabase/functions/notify-deal-payment/index.ts` | Обновить `formatDate()` |
+| `supabase/functions/check-escrow-payments/index.ts` | Обновить `formatDate()` |
 
 ## Результат
 
 После изменения:
-- Админ меняет статус на "Оплачено" → владелец получает:
-  1. Предпросмотр рекламного поста (медиа + текст + кнопка)
-  2. Уведомление с деталями сделки и кнопками "Одобрить" / "Отклонить"
-- Поведение идентично автоматическому обнаружению платежа
+- UTC время `2026-01-27T00:00:00Z` будет отображаться как `27.01.2026 в 03:00` (по Москве)
+- Время будет корректно отображаться для пользователей в московском часовом поясе
+
+## Примечание для будущего улучшения
+
+Для точного отображения времени в часовом поясе каждого пользователя потребуется:
+1. Добавить поле `timezone` в таблицу `users`
+2. Получать часовой пояс из Telegram Mini App (`Telegram.WebApp.initDataUnsafe.user`)
+3. Передавать timezone в edge functions
 
