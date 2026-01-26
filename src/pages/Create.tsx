@@ -1,19 +1,26 @@
 import { BottomNav } from "@/components/BottomNav";
 import { Button } from "@/components/ui/button";
-import { useState } from "react";
-import { Megaphone, Radio, ArrowRight, Check, ArrowLeft } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Megaphone, Radio, ArrowRight, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AddChannelWizard } from "@/components/create/AddChannelWizard";
 import { CreateCampaignForm } from "@/components/create/CreateCampaignForm";
-import { useNavigate } from "react-router-dom";
+import { MyChannelsList } from "@/components/create/MyChannelsList";
+import { MyCampaignsList } from "@/components/create/MyCampaignsList";
+import { useUserChannels } from "@/hooks/useUserChannels";
+import { useUserCampaigns } from "@/hooks/useUserCampaigns";
+import { useAuth } from "@/contexts/AuthContext";
 
 type UserRole = "advertiser" | "channel_owner" | null;
-type Step = "role" | "form";
+type Step = "role" | "list" | "form";
 
 const Create = () => {
-  const navigate = useNavigate();
+  const { user } = useAuth();
   const [selectedRole, setSelectedRole] = useState<UserRole>(null);
   const [currentStep, setCurrentStep] = useState<Step>("role");
+  
+  const { data: channels, isLoading: channelsLoading, refetch: refetchChannels } = useUserChannels();
+  const { data: campaigns, isLoading: campaignsLoading, refetch: refetchCampaigns } = useUserCampaigns();
 
   const roles = [
     {
@@ -33,42 +40,77 @@ const Create = () => {
   ];
 
   const handleContinue = () => {
-    if (selectedRole) {
-      setCurrentStep("form");
+    if (selectedRole === "channel_owner") {
+      // Если есть каналы — показываем список, иначе — форму
+      if (channels && channels.length > 0) {
+        setCurrentStep("list");
+      } else {
+        setCurrentStep("form");
+      }
+    } else if (selectedRole === "advertiser") {
+      // Если есть кампании — показываем список, иначе — форму
+      if (campaigns && campaigns.length > 0) {
+        setCurrentStep("list");
+      } else {
+        setCurrentStep("form");
+      }
     }
   };
 
   const handleBack = () => {
-    setCurrentStep("role");
+    if (currentStep === "form") {
+      // Из формы возвращаемся в список если есть данные, иначе — к выбору роли
+      if (selectedRole === "channel_owner" && channels && channels.length > 0) {
+        setCurrentStep("list");
+      } else if (selectedRole === "advertiser" && campaigns && campaigns.length > 0) {
+        setCurrentStep("list");
+      } else {
+        setCurrentStep("role");
+      }
+    } else if (currentStep === "list") {
+      setCurrentStep("role");
+    }
   };
 
-  const handleComplete = () => {
-    // Navigate to appropriate page after completion
+  const handleComplete = async () => {
+    // После успешного создания — обновляем данные и показываем список
     if (selectedRole === "channel_owner") {
-      navigate("/channels");
+      await refetchChannels();
     } else {
-      navigate("/deals");
+      await refetchCampaigns();
     }
+    setCurrentStep("list");
+  };
+
+  const handleAddNew = () => {
+    setCurrentStep("form");
+  };
+
+  const isLoading = (selectedRole === "channel_owner" && channelsLoading) || 
+                    (selectedRole === "advertiser" && campaignsLoading);
+
+  const getHeaderTitle = () => {
+    if (currentStep === "role") {
+      return "Начать";
+    }
+    if (selectedRole === "channel_owner") {
+      return currentStep === "list" ? "Мои каналы" : "Добавить";
+    }
+    return currentStep === "list" ? "Мои кампании" : "Кампания";
   };
 
   return (
     <div className="min-h-screen bg-transparent safe-bottom">
       {/* Header */}
       <header className="px-4 pt-4 pb-4 text-center">
-        {currentStep === "role" ? (
-          <>
-            <h1 className="font-handwriting text-3xl md:text-4xl text-white">Начать</h1>
-            <p className="text-muted-foreground mt-1">Выберите свою роль на платформе</p>
-          </>
-        ) : (
-          <h1 className="font-handwriting text-3xl md:text-4xl text-white">
-            {selectedRole === "channel_owner" ? "Добавить" : "Кампания"}
-          </h1>
+        <h1 className="font-handwriting text-3xl md:text-4xl text-white">{getHeaderTitle()}</h1>
+        {currentStep === "role" && (
+          <p className="text-muted-foreground mt-1">Выберите свою роль на платформе</p>
         )}
       </header>
 
-      <main className="px-4 space-y-4">
-        {currentStep === "role" ? (
+      <main className="px-4 space-y-4 pb-24">
+        {currentStep === "role" && (
           <>
             {/* Role Selection */}
             {roles.map((role) => {
@@ -131,11 +173,20 @@ const Create = () => {
               <Button
                 className="w-full"
                 size="lg"
-                disabled={!selectedRole}
+                disabled={!selectedRole || isLoading}
                 onClick={handleContinue}
               >
-                Продолжить
-                <ArrowRight className="w-5 h-5" />
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Загрузка...
+                  </>
+                ) : (
+                  <>
+                    Продолжить
+                    <ArrowRight className="w-5 h-5" />
+                  </>
+                )}
               </Button>
             </div>
 
@@ -146,14 +197,22 @@ const Create = () => {
               </p>
             </div>
           </>
-        ) : (
-          <>
-            {selectedRole === "channel_owner" ? (
-              <AddChannelWizard onBack={handleBack} onComplete={handleComplete} />
-            ) : (
-              <CreateCampaignForm onBack={handleBack} onComplete={handleComplete} />
-            )}
-          </>
+        )}
+
+        {currentStep === "list" && selectedRole === "channel_owner" && (
+          <MyChannelsList onAddChannel={handleAddNew} onBack={handleBack} />
+        )}
+
+        {currentStep === "list" && selectedRole === "advertiser" && (
+          <MyCampaignsList onAddCampaign={handleAddNew} onBack={handleBack} />
+        )}
+
+        {currentStep === "form" && selectedRole === "channel_owner" && (
+          <AddChannelWizard onBack={handleBack} onComplete={handleComplete} />
+        )}
+
+        {currentStep === "form" && selectedRole === "advertiser" && (
+          <CreateCampaignForm onBack={handleBack} onComplete={handleComplete} />
         )}
       </main>
 
