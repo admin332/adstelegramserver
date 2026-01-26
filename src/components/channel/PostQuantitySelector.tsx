@@ -2,6 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Minus, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import TonIcon from '@/assets/ton-icon.svg';
 
 interface PostQuantitySelectorProps {
   quantity: number;
@@ -99,7 +100,8 @@ const PostQuantitySelector: React.FC<PostQuantitySelectorProps> = ({
               exit={{ opacity: 0, scale: 0.8 }}
               className="flex items-center gap-1.5 font-bold text-xl"
             >
-              <span className="text-foreground">{totalPrice} TON</span>
+              <img src={TonIcon} alt="TON" className="w-5 h-5" />
+              <span className="text-foreground">{totalPrice}</span>
             </motion.div>
           </AnimatePresence>
         </div>
