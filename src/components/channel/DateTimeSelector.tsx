@@ -1,5 +1,5 @@
 import React from 'react';
-import { format, addDays } from 'date-fns';
+import { format, addDays, isToday } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { CalendarIcon, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -32,6 +32,23 @@ const DateTimeSelector: React.FC<DateTimeSelectorProps> = ({
   onHourChange,
 }) => {
   const hours = Array.from({ length: 24 }, (_, i) => i);
+
+  const getMinAvailableHour = () => {
+    const now = new Date();
+    // Минимум через 2 часа от текущего (чтобы был зазор больше часа)
+    return now.getHours() + 2;
+  };
+
+  const getAvailableHours = () => {
+    if (isToday(selectedDate)) {
+      const minHour = getMinAvailableHour();
+      // Если minHour >= 24, значит на сегодня слотов нет
+      return hours.filter(hour => hour >= minHour);
+    }
+    return hours;
+  };
+
+  const availableHours = getAvailableHours();
 
   const startDateTime = new Date(selectedDate);
   startDateTime.setHours(selectedHour, 0, 0, 0);
@@ -97,11 +114,17 @@ const DateTimeSelector: React.FC<DateTimeSelectorProps> = ({
             <SelectValue placeholder="Выберите время" />
           </SelectTrigger>
           <SelectContent className="z-[60] border-0">
-            {hours.map((hour) => (
-              <SelectItem key={hour} value={hour.toString()}>
-                {formatHour(hour)}
-              </SelectItem>
-            ))}
+            {availableHours.length > 0 ? (
+              availableHours.map((hour) => (
+                <SelectItem key={hour} value={hour.toString()}>
+                  {formatHour(hour)}
+                </SelectItem>
+              ))
+            ) : (
+              <div className="p-2 text-sm text-muted-foreground text-center">
+                На сегодня нет доступных слотов
+              </div>
+            )}
           </SelectContent>
         </Select>
       </div>

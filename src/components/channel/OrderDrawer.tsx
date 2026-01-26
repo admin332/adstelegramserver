@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { isToday } from 'date-fns';
 import { ArrowRight, ArrowLeft } from 'lucide-react';
 import {
   Drawer,
@@ -32,8 +33,10 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   const [quantity, setQuantity] = useState(1);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedHour, setSelectedHour] = useState(() => {
-    const nextHour = new Date().getHours() + 1;
-    return nextHour > 23 ? 0 : nextHour;
+    const now = new Date();
+    // Минимум через 2 часа
+    const minHour = now.getHours() + 2;
+    return minHour > 23 ? 0 : minHour;
   });
   const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>([]);
 
@@ -75,6 +78,18 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
 
   const handleCreateNewCampaign = () => {
     console.log('Create new campaign - TODO');
+  };
+
+  const handleDateChange = (date: Date) => {
+    setSelectedDate(date);
+    
+    // Если выбрана сегодняшняя дата и текущий час недоступен
+    if (isToday(date)) {
+      const minHour = new Date().getHours() + 2;
+      if (selectedHour < minHour) {
+        setSelectedHour(minHour > 23 ? 0 : minHour);
+      }
+    }
   };
 
   const canProceed = () => {
@@ -137,7 +152,7 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
                 <DateTimeSelector
                   selectedDate={selectedDate}
                   selectedHour={selectedHour}
-                  onDateChange={setSelectedDate}
+                  onDateChange={handleDateChange}
                   onHourChange={setSelectedHour}
                 />
               </motion.div>
