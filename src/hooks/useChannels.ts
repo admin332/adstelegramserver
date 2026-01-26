@@ -26,6 +26,7 @@ interface DatabaseChannel {
   price_1_24: number | null;
   price_2_48: number | null;
   rating: number | null;
+  reviews_count: number | null;
   verified: boolean | null;
   is_premium: boolean | null;
   description: string | null;
@@ -93,6 +94,7 @@ function mapDatabaseToChannel(dbChannel: DatabaseChannel): Channel {
     price: usdPrice,
     tonPrice: tonPrice,
     rating: Number(dbChannel.rating) || 4.5,
+    reviewsCount: dbChannel.reviews_count || 0,
     verified: dbChannel.verified || false,
     premium: dbChannel.is_premium || false,
     description: dbChannel.description || undefined,
