@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
+import { getTelegramInitData } from '@/lib/telegram';
 import type { Database } from '@/integrations/supabase/types';
 
 type DealStatus = Database['public']['Enums']['deal_status'];
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 export interface Deal {
   id: string;
@@ -15,6 +17,7 @@ export interface Deal {
   scheduled_at: string | null;
   created_at: string;
   expires_at: string | null;
+  role: 'advertiser' | 'channel_owner';
   channel: {
     id: string;
     title: string | null;
@@ -25,37 +28,36 @@ export interface Deal {
     id: string;
     name: string;
   } | null;
+  advertiser?: {
+    id: string;
+    first_name: string;
+    username?: string;
+    photo_url?: string;
+  };
 }
 
 export function useUserDeals() {
-  const { user } = useAuth();
-  
   return useQuery({
-    queryKey: ['user-deals', user?.id],
-    queryFn: async () => {
-      if (!user?.id) return [];
-      
-      const { data, error } = await supabase
-        .from('deals')
-        .select(`
-          id,
-          status,
-          total_price,
-          posts_count,
-          duration_hours,
-          escrow_address,
-          scheduled_at,
-          created_at,
-          expires_at,
-          channel:channels(id, title, avatar_url, username),
-          campaign:campaigns(id, name)
-        `)
-        .eq('advertiser_id', user.id)
-        .order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      return data as Deal[];
+    queryKey: ['user-deals'],
+    queryFn: async (): Promise<Deal[]> => {
+      const initData = getTelegramInitData();
+      if (!initData) return [];
+
+      const response = await fetch(
+        `${SUPABASE_URL}/functions/v1/user-deals`,
+        {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json", 
+            "apikey": ANON_KEY 
+          },
+          body: JSON.stringify({ initData }),
+        }
+      );
+
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error);
+      return data.deals;
     },
-    enabled: !!user?.id,
   });
 }
