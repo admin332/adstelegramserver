@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
+import { getTelegramInitData } from "@/lib/telegram";
 
 export interface UserChannel {
   id: string;
@@ -45,17 +46,35 @@ export function useUserChannels() {
 
 export function useToggleChannelActive() {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
 
   return useMutation({
     mutationFn: async ({ channelId, isActive }: { channelId: string; isActive: boolean }) => {
-      const { error } = await supabase
-        .from("channels")
-        .update({ is_active: isActive })
-        .eq("id", channelId)
-        .eq("owner_id", user?.id);
+      const initData = getTelegramInitData();
+      
+      if (!initData) {
+        throw new Error("Telegram data not available");
+      }
 
-      if (error) throw error;
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-channel-status`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({
+            channel_id: channelId,
+            is_active: isActive,
+            initData,
+          }),
+        }
+      );
+
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || "Failed to update channel");
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user-channels"] });
