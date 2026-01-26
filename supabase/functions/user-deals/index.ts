@@ -155,7 +155,10 @@ serve(async (req) => {
       });
     }
 
-    // Transform deals with role info
+    // Statuses to hide from channel owners (they don't need to act on these)
+    const hiddenStatusesForOwner = ['pending', 'expired'];
+
+    // Transform deals with role info and filter
     const transformedDeals = deals?.map((deal) => {
       const isChannelOwner = userChannelIds.includes(deal.channel_id) && deal.advertiser_id !== userId;
       const role = isChannelOwner ? "channel_owner" : "advertiser";
@@ -175,6 +178,12 @@ serve(async (req) => {
         role,
         advertiser: isChannelOwner ? advertisersMap[deal.advertiser_id] : undefined,
       };
+    }).filter((deal) => {
+      // Hide pending/expired deals from channel owners
+      if (deal.role === 'channel_owner' && hiddenStatusesForOwner.includes(deal.status)) {
+        return false;
+      }
+      return true;
     }) || [];
 
     return new Response(
