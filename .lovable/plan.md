@@ -1,90 +1,140 @@
 
 
-## План: Исправить валидацию category для существующих каналов
+## План: Отображение каналов для менеджеров
 
 ### Проблема
 
-В Edge Function `verify-channel` на строках 236-241 проверка `!category` выполняется **до** проверки существующего канала:
+Менеджер добавил канал `@newstutox`, запись появилась в `channel_admins` с `role: manager`, но канал не отображается в списке "Мои каналы".
+
+**Причины:**
+1. `useUserChannels` запрашивает каналы только по `owner_id` — менеджеры не учитываются
+2. RLS политика для `channel_admins` разрешает доступ только `service_role`, обычные пользователи не могут читать свои записи
+
+### Данные в БД
+
+```text
+channel_admins:
+- channel_id: 268a9c10... (newstutox)
+- user_id: de778487... (менеджер)
+- role: manager ✓
+
+channels:
+- id: 268a9c10...
+- owner_id: 3843ec7b... (владелец, не менеджер)
+```
+
+---
+
+### Решения
+
+| Файл/Таблица | Действие | Описание |
+|--------------|----------|----------|
+| **SQL миграция** | Добавить RLS | Пользователи могут читать свои записи в `channel_admins` |
+| `src/hooks/useUserChannels.ts` | Изменить запрос | Получать каналы через `channel_admins`, а не только `owner_id` |
+| `src/components/create/MyChannelsList.tsx` | Добавить бейдж роли | Показывать "Владелец" или "Менеджер" для каждого канала |
+
+---
+
+### 1. SQL миграция — RLS для channel_admins
+
+```sql
+-- Политика: пользователи могут читать свои записи в channel_admins
+CREATE POLICY "Users can view own admin entries"
+  ON public.channel_admins
+  FOR SELECT
+  TO authenticated
+  USING (user_id = auth.uid());
+
+-- Политика: пользователи могут читать админов каналов, где сами админы
+CREATE POLICY "Channel admins can view co-admins"
+  ON public.channel_admins
+  FOR SELECT
+  TO authenticated
+  USING (
+    channel_id IN (
+      SELECT ca.channel_id 
+      FROM public.channel_admins ca 
+      WHERE ca.user_id = auth.uid()
+    )
+  );
+```
+
+---
+
+### 2. Обновление useUserChannels.ts
+
+**Текущий запрос:**
+```typescript
+.from("channels")
+.select("*")
+.eq("owner_id", user.id)
+```
+
+**Новый запрос через channel_admins:**
+```typescript
+// Сначала получить channel_ids из channel_admins
+const { data: adminEntries } = await supabase
+  .from("channel_admins")
+  .select("channel_id, role")
+  .eq("user_id", user.id);
+
+if (!adminEntries || adminEntries.length === 0) return [];
+
+const channelIds = adminEntries.map(e => e.channel_id);
+
+// Затем получить каналы
+const { data: channels } = await supabase
+  .from("channels")
+  .select("*")
+  .in("id", channelIds)
+  .order("created_at", { ascending: false });
+
+// Добавить роль к каждому каналу
+return channels.map(ch => ({
+  ...ch,
+  userRole: adminEntries.find(e => e.channel_id === ch.id)?.role
+}));
+```
+
+---
+
+### 3. Обновление интерфейса UserChannel
 
 ```typescript
-// Текущий код (строки 236-241)
-if (!username || !category) {
-  return new Response(
-    JSON.stringify({ success: false, error: "Не все обязательные поля заполнены" }),
-    ...
-  );
+export interface UserChannel {
+  // ... существующие поля
+  userRole?: 'owner' | 'manager';
 }
 ```
 
-Это блокирует менеджеров, которые добавляют **существующий** канал, хотя им категория не нужна.
+---
 
-### Анализ безопасности (✅ Подтверждено)
+### 4. Отображение роли в MyChannelsList
 
-Проверка Telegram ID реализована **безопасно**:
-- `initData` валидируется через HMAC-SHA256 (строки 21-88)
-- `telegramId` извлекается из **валидированных** данных (строка 233)
-- Проверка прав в Telegram использует верифицированный `telegramId` (строка 293)
-- Frontend не может подделать ID пользователя
-
-### Решение
-
-Изменить порядок проверок в `verify-channel`:
-1. Сначала проверить существование канала
-2. Требовать `category` только для **новых** каналов
-
-### Изменения
-
-| Файл | Действие |
-|------|----------|
-| `supabase/functions/verify-channel/index.ts` | Изменить порядок валидации |
-
-### Код изменений
-
-**Было (строки 236-241):**
-```typescript
-if (!username || !category) {
-  return new Response(
-    JSON.stringify({ success: false, error: "Не все обязательные поля заполнены" }),
-    { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-  );
-}
-```
-
-**Станет:**
-```typescript
-// Username всегда обязателен
-if (!username) {
-  return new Response(
-    JSON.stringify({ success: false, error: "Не указан username канала" }),
-    { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-  );
-}
-
-// ... (далее код получения канала, проверка бота)
-
-// После получения existingChannel:
-// Для существующих каналов category не нужна
-// Для новых каналов category обязательна — проверить перед INSERT
-```
-
-Конкретно нужно:
-1. Убрать проверку `!category` на строке 236
-2. Добавить проверку `category` только перед вставкой нового канала (перед строкой 421)
+Добавить бейдж роли рядом с названием канала:
 
 ```typescript
-// Перед строкой 421 (INSERT новго канала):
-if (!category) {
-  return new Response(
-    JSON.stringify({ success: false, error: "Выберите категорию для нового канала" }),
-    { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-  );
-}
+<div className="flex items-center gap-2">
+  <h3 className="font-semibold text-foreground truncate">
+    {channel.title || channel.username}
+  </h3>
+  {channel.verified && (
+    <BadgeCheck className="w-4 h-4 text-primary flex-shrink-0" />
+  )}
+  {channel.userRole === 'manager' && (
+    <Badge variant="secondary" className="text-xs">
+      Менеджер
+    </Badge>
+  )}
+</div>
 ```
+
+---
 
 ### Результат
 
-| Сценарий | Категория | Результат |
-|----------|-----------|-----------|
-| Новый канал без категории | Требуется | Ошибка "Выберите категорию" |
-| Существующий канал (менеджер) | Не требуется | Успех — добавлен как менеджер |
+| Пользователь | Видит каналы | Бейдж |
+|--------------|--------------|-------|
+| Владелец | Свои каналы | — |
+| Менеджер | Каналы из `channel_admins` | "Менеджер" |
 
