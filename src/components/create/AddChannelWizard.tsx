@@ -191,6 +191,20 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
 
       if (result.success) {
         setVerifiedChannel(result.channel);
+        
+        // Show appropriate message based on result type
+        if (result.isNewAdmin) {
+          toast({
+            title: `Вы добавлены как ${result.role === 'owner' ? 'владелец' : 'менеджер'}`,
+            description: "Теперь вы можете управлять этим каналом",
+          });
+        } else if (result.isExistingAdmin) {
+          toast({
+            title: "Вы уже управляете этим каналом",
+            description: `Ваша роль: ${result.role === 'owner' ? 'владелец' : 'менеджер'}`,
+          });
+        }
+        
         setStep(3);
       } else {
         setVerificationError(result.error || "Не удалось верифицировать канал");
@@ -455,9 +469,9 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
 
           {/* Success checklist */}
           <div className="space-y-2">
-            {[
+          {[
               "Бот добавлен как администратор",
-              "Вы подтверждены как владелец",
+              "Вы подтверждены как администратор",
               "Статистика загружена",
             ].map((item, index) => (
               <div key={index} className="flex items-center gap-2 text-sm text-muted-foreground">
