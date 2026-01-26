@@ -46,6 +46,7 @@ export type Database = {
           id: string
           image_url: string | null
           is_active: boolean | null
+          media_urls: Json | null
           name: string
           owner_id: string
           text: string
@@ -58,6 +59,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean | null
+          media_urls?: Json | null
           name: string
           owner_id: string
           text: string
@@ -70,6 +72,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean | null
+          media_urls?: Json | null
           name?: string
           owner_id?: string
           text?: string

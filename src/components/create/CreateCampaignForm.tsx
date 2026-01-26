@@ -12,7 +12,7 @@ import {
   Loader2,
   X,
   FileVideo,
-  CheckCircle2
+  Plus
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -30,6 +30,9 @@ interface CreateCampaignFormProps {
   onComplete: () => void;
 }
 
+const MAX_MEDIA_FILES = 10;
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 МБ
+
 export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormProps) => {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
@@ -37,7 +40,7 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaFiles, setMediaFiles] = useState<File[]>([]);
   
   const [campaignData, setCampaignData] = useState<CampaignData>({
     name: "",
@@ -49,25 +52,35 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
   const progress = (step / 3) * 100;
 
   const handleMediaSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 50 * 1024 * 1024) {
+    const files = Array.from(e.target.files || []);
+    
+    // Проверка количества
+    const remainingSlots = MAX_MEDIA_FILES - mediaFiles.length;
+    const filesToAdd = files.slice(0, remainingSlots);
+    
+    // Проверка размера каждого файла
+    const validFiles = filesToAdd.filter(file => {
+      if (file.size > MAX_FILE_SIZE) {
         toast({
           title: "Файл слишком большой",
-          description: "Максимальный размер файла — 50 МБ",
+          description: `${file.name} превышает лимит 50 МБ`,
           variant: "destructive",
         });
-        return;
+        return false;
       }
-      setMediaFile(file);
-    }
-  };
-
-  const removeMedia = () => {
-    setMediaFile(null);
+      return true;
+    });
+    
+    setMediaFiles(prev => [...prev, ...validFiles]);
+    
+    // Сбрасываем input для повторного выбора тех же файлов
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+  };
+
+  const removeMedia = (index: number) => {
+    setMediaFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async () => {
@@ -92,23 +105,24 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
     setIsSubmitting(true);
 
     try {
-      let mediaUrl = null;
+      const mediaUrls: string[] = [];
 
-      if (mediaFile) {
-        const fileExt = mediaFile.name.split(".").pop();
-        const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+      // Загружаем все файлы
+      for (const file of mediaFiles) {
+        const fileExt = file.name.split(".").pop();
+        const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
         
         const { error: uploadError } = await supabase.storage
           .from("campaign-images")
-          .upload(fileName, mediaFile);
+          .upload(fileName, file);
 
-        if (uploadError) {
-          console.error("Upload error:", uploadError);
-        } else {
+        if (!uploadError) {
           const { data: { publicUrl } } = supabase.storage
             .from("campaign-images")
             .getPublicUrl(fileName);
-          mediaUrl = publicUrl;
+          mediaUrls.push(publicUrl);
+        } else {
+          console.error("Upload error:", uploadError);
         }
       }
 
@@ -126,7 +140,7 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
             text: campaignData.text,
             button_text: campaignData.button_text || null,
             button_url: campaignData.button_url || null,
-            image_url: mediaUrl,
+            media_urls: mediaUrls,
           }),
         }
       );
@@ -163,8 +177,6 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
 
   const canProceedStep1 = campaignData.name.trim().length > 0;
   const canSubmit = campaignData.text.trim().length > 0;
-
-  const isVideoFile = mediaFile?.type.startsWith("video/");
 
   return (
     <div className="space-y-6">
@@ -221,61 +233,77 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
           <div className="text-center space-y-2">
             <h2 className="text-xl font-semibold text-foreground">Медиа</h2>
             <p className="text-muted-foreground text-sm">
-              Добавьте изображение или видео (опционально)
+              Добавьте до {MAX_MEDIA_FILES} фото или видео (опционально)
             </p>
           </div>
 
-          <div className="space-y-3">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,video/*"
-              onChange={handleMediaSelect}
-              className="hidden"
-            />
-            
-            {mediaFile ? (
-              <div className="bg-card rounded-xl p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    {isVideoFile ? (
-                      <FileVideo className="w-5 h-5 text-primary" />
-                    ) : (
-                      <ImagePlus className="w-5 h-5 text-primary" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
-                      <span className="text-sm font-medium text-foreground truncate">
-                        {mediaFile.name}
-                      </span>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,video/*"
+            multiple
+            onChange={handleMediaSelect}
+            className="hidden"
+          />
+
+          {/* Сетка превью */}
+          {mediaFiles.length > 0 && (
+            <div className="grid grid-cols-3 gap-2">
+              {mediaFiles.map((file, index) => (
+                <div key={index} className="relative aspect-square rounded-xl overflow-hidden bg-secondary">
+                  {file.type.startsWith('video/') ? (
+                    <div className="w-full h-full flex items-center justify-center bg-card">
+                      <FileVideo className="w-8 h-8 text-primary" />
                     </div>
-                    <span className="text-xs text-muted-foreground">
-                      {(mediaFile.size / (1024 * 1024)).toFixed(2)} МБ
-                    </span>
+                  ) : (
+                    <img
+                      src={URL.createObjectURL(file)}
+                      alt={`Media ${index + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                  {/* Кнопка удаления */}
+                  <button
+                    onClick={() => removeMedia(index)}
+                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center"
+                  >
+                    <X className="w-4 h-4 text-white" />
+                  </button>
+                  {/* Размер файла */}
+                  <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-xs text-white">
+                    {(file.size / (1024 * 1024)).toFixed(1)} МБ
                   </div>
                 </div>
+              ))}
+              
+              {/* Кнопка добавления (если меньше 10 файлов) */}
+              {mediaFiles.length < MAX_MEDIA_FILES && (
                 <button
-                  onClick={removeMedia}
-                  className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors flex-shrink-0"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="aspect-square rounded-xl border-2 border-dashed border-secondary bg-card flex flex-col items-center justify-center gap-1 hover:border-primary/50 transition-colors"
                 >
-                  <X className="w-4 h-4" />
+                  <Plus className="w-6 h-6 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">
+                    {mediaFiles.length}/{MAX_MEDIA_FILES}
+                  </span>
                 </button>
+              )}
+            </div>
+          )}
+
+          {/* Пустое состояние */}
+          {mediaFiles.length === 0 && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full h-32 rounded-xl border-2 border-dashed border-secondary bg-card flex flex-col items-center justify-center gap-2 hover:border-primary/50 transition-colors"
+            >
+              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+                <ImagePlus className="w-6 h-6 text-primary" />
               </div>
-            ) : (
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full h-32 rounded-xl border-2 border-dashed border-secondary bg-card flex flex-col items-center justify-center gap-2 hover:border-primary/50 transition-colors"
-              >
-                <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-                  <ImagePlus className="w-6 h-6 text-primary" />
-                </div>
-                <span className="text-sm text-muted-foreground">Добавить медиа</span>
-                <span className="text-xs text-muted-foreground">Изображение или видео</span>
-              </button>
-            )}
-          </div>
+              <span className="text-sm text-muted-foreground">Добавить медиа</span>
+              <span className="text-xs text-muted-foreground">До {MAX_MEDIA_FILES} фото или видео</span>
+            </button>
+          )}
 
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setStep(1)} className="flex-1 border-0 text-white hover:bg-white/10">
