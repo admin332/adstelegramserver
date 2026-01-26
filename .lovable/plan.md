@@ -1,64 +1,72 @@
 
 
-## План: Изменения UI в Add Channel Wizard
+## План: Изменение формы стоимости размещения
 
-### Изменения
+### Изменения в `src/components/create/AddChannelWizard.tsx`
 
-#### 1. `src/pages/Create.tsx` (строка 72)
-
-**Изменить заголовок "Добавить канал" на "Добавить":**
+#### 1. Изменить заголовок (строка 248)
 
 ```tsx
 // Было:
-{selectedRole === "channel_owner" ? "Добавить канал" : "Новая кампания"}
+<Label>Стоимость размещения ($)</Label>
 
 // Станет:
-{selectedRole === "channel_owner" ? "Добавить" : "Новая кампания"}
+<Label>Стоимость размещения (TON за пост)</Label>
 ```
 
-**Убрать кнопку назад сверху** (строки 64-70):
+#### 2. Изменить поля ввода цен (строки 249-280)
 
-Убрать блок с кнопкой назад из header:
-```tsx
-// Убрать этот код:
-<button 
-  onClick={handleBack}
-  className="absolute left-4 p-2 rounded-full hover:bg-secondary transition-colors"
->
-  <ArrowLeft className="w-5 h-5 text-muted-foreground" />
-</button>
-```
+Заменить 3 поля на 2 поля с новыми лейблами:
 
----
+**Было:** 3 поля - "1/24", "2/48", "Пост"
 
-#### 2. `src/components/create/AddChannelWizard.tsx`
-
-**Добавить синюю обводку к кнопке "Назад" внизу** (строки 189 и 296):
+**Станет:** 2 поля - "1/24" (цена за 1 пост), "2+/24" (цена при заказе 2+ постов)
 
 ```tsx
-// Было:
-<Button variant="outline" onClick={onBack} className="flex-1">
-
-// Станет:
-<Button variant="outline" onClick={onBack} className="flex-1 border-primary text-primary hover:bg-primary/10">
+<div className="grid grid-cols-2 gap-3">
+  <div className="space-y-1">
+    <span className="text-xs text-muted-foreground">1/24</span>
+    <Input
+      type="number"
+      placeholder="0"
+      value={channelData.price_1_24}
+      onChange={(e) => setChannelData({ ...channelData, price_1_24: e.target.value })}
+      className="bg-card border-0"
+    />
+  </div>
+  <div className="space-y-1">
+    <span className="text-xs text-muted-foreground">2+/24</span>
+    <Input
+      type="number"
+      placeholder="0"
+      value={channelData.price_2_48}
+      onChange={(e) => setChannelData({ ...channelData, price_2_48: e.target.value })}
+      className="bg-card border-0"
+    />
+  </div>
+</div>
 ```
 
-**Убрать четвёртый пункт инструкции** (строки 171-174):
+#### 3. Убрать третье поле "Пост"
 
-Удалить этот блок из списка:
-```tsx
-<li className="flex gap-3">
-  <span className="...">4</span>
-  <span>Выдайте право «Публикация сообщений»</span>
-</li>
-```
+Поле `price_post` больше не нужно в форме - остаются только два тарифа.
 
 ---
 
 ### Итоговые изменения
 
-| Файл | Изменение |
-|------|-----------|
-| `src/pages/Create.tsx` | Заголовок "Добавить канал" → "Добавить", убрать кнопку назад сверху |
-| `src/components/create/AddChannelWizard.tsx` | Добавить `border-primary` к кнопкам "Назад", убрать 4-й пункт инструкции |
+| Строки | Изменение |
+|--------|-----------|
+| 248 | `Стоимость размещения ($)` → `Стоимость размещения (TON за пост)` |
+| 249 | `grid-cols-3` → `grid-cols-2` |
+| 251 | Лейбл "1/24" остаётся |
+| 261 | Лейбл "2/48" → "2+/24" |
+| 270-279 | Убрать третий input (поле "Пост") |
+
+---
+
+### Логика ценообразования
+
+- **1/24** — цена за 1 пост на 24 часа
+- **2+/24** — цена за пост при заказе 2 и более постов (может быть дешевле или дороже)
 
