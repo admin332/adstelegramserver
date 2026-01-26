@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.update-channel-status]
 verify_jwt = false
+
+[functions.user-channels]
+verify_jwt = false

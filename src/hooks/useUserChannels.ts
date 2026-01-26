@@ -1,6 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { getTelegramInitData } from "@/lib/telegram";
 
@@ -21,47 +19,38 @@ export interface UserChannel {
 }
 
 export function useUserChannels() {
-  const { user } = useAuth();
-
   return useQuery({
-    queryKey: ["user-channels", user?.id],
-    queryFn: async () => {
-      if (!user?.id) return [];
-
-      // Получаем записи из channel_admins для текущего пользователя
-      const { data: adminEntries, error: adminError } = await supabase
-        .from("channel_admins")
-        .select("channel_id, role")
-        .eq("user_id", user.id);
-
-      if (adminError) {
-        console.error("Error fetching admin entries:", adminError);
-        throw adminError;
+    queryKey: ["user-channels"],
+    queryFn: async (): Promise<UserChannel[]> => {
+      const initData = getTelegramInitData();
+      
+      if (!initData) {
+        console.log("[useUserChannels] No initData available");
+        return [];
       }
 
-      if (!adminEntries || adminEntries.length === 0) return [];
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/user-channels`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ initData }),
+        }
+      );
 
-      const channelIds = adminEntries.map(e => e.channel_id);
-
-      // Получаем каналы по ID
-      const { data: channels, error: channelsError } = await supabase
-        .from("channels")
-        .select("*")
-        .in("id", channelIds)
-        .order("created_at", { ascending: false });
-
-      if (channelsError) {
-        console.error("Error fetching channels:", channelsError);
-        throw channelsError;
+      const data = await response.json();
+      
+      if (!data.success) {
+        console.error("[useUserChannels] Error:", data.error);
+        throw new Error(data.error || "Failed to fetch channels");
       }
 
-      // Добавляем роль к каждому каналу
-      return (channels || []).map(ch => ({
-        ...ch,
-        userRole: adminEntries.find(e => e.channel_id === ch.id)?.role as 'owner' | 'manager' | undefined,
-      })) as UserChannel[];
+      return data.channels as UserChannel[];
     },
-    enabled: !!user?.id,
+    staleTime: 30000, // 30 seconds
   });
 }
 
