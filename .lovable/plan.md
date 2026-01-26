@@ -1,91 +1,155 @@
 
+## План: Исправить загрузку медиафайлов для Telegram пользователей
 
-## План: Исправить отправку фото/видео в превью и убрать заголовок
+### Обнаруженная проблема
 
-### Обнаруженные проблемы
-
-1. **Storage bucket `campaign-images` не существует** — загрузка файлов в Supabase Storage падает с ошибкой, и массив `media_urls` остаётся пустым `[]`
-2. **Заголовок "📝 Превью вашей рекламы:"** — добавляется в edge function, пользователь хочет его убрать
-
-### Что нужно сделать
-
-| Шаг | Действие | Файл/Ресурс |
-|-----|----------|-------------|
-| 1 | Создать storage bucket `campaign-images` | SQL миграция |
-| 2 | Настроить RLS политики для bucket | SQL миграция |
-| 3 | Убрать заголовок из текста превью | `send-campaign-preview/index.ts` |
-
----
-
-### 1. Создание Storage Bucket
-
-```sql
--- Создать bucket для изображений кампаний
-INSERT INTO storage.buckets (id, name, public)
-VALUES ('campaign-images', 'campaign-images', true);
-
--- Разрешить авторизованным пользователям загружать файлы
-CREATE POLICY "Users can upload campaign images"
-ON storage.objects FOR INSERT
-TO authenticated
-WITH CHECK (bucket_id = 'campaign-images');
-
--- Разрешить публичный доступ на чтение
-CREATE POLICY "Public read access for campaign images"
-ON storage.objects FOR SELECT
-TO public
-USING (bucket_id = 'campaign-images');
-
--- Разрешить владельцам удалять свои файлы
-CREATE POLICY "Users can delete own campaign images"
-ON storage.objects FOR DELETE
-TO authenticated
-USING (bucket_id = 'campaign-images' AND auth.uid()::text = (storage.foldername(name))[1]);
-```
-
----
-
-### 2. Изменение Edge Function
-
-**Текущий код (строки 74-76):**
-```typescript
-const previewHeader = "📝 <b>Превью вашей рекламы:</b>\n\n";
-const fullText = previewHeader + text;
-```
-
-**Новый код:**
-```typescript
-// Отправляем текст без заголовка — как будет выглядеть реклама
-const fullText = text;
-```
-
----
-
-### 3. Результат после изменений
-
-После создания bucket загрузка файлов будет работать:
+**Корневая причина**: Storage RLS политика требует роль `authenticated`, но Telegram авторизация НЕ создаёт Supabase сессию. Поэтому `auth.uid()` всегда `null` и загрузка файлов блокируется RLS.
 
 ```text
-Пользователь создаёт кампанию:
-1. Выбирает фото/видео → загружаются в Storage
-2. Получает массив URL → отправляется в edge function
-3. Bot отправляет пользователю:
-   - Медиа (фото/видео)
-   - Текст рекламы (без заголовка)
-   - Кнопка (если есть)
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Текущая ситуация                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│  1. Пользователь выбирает фото/видео                                │
+│                              ↓                                       │
+│  2. Фронтенд вызывает supabase.storage.upload()                     │
+│                              ↓                                       │
+│  3. RLS проверяет: roles = {authenticated}                          │
+│                              ↓                                       │
+│  4. У Telegram-пользователя НЕТ Supabase сессии                     │
+│                              ↓                                       │
+│  5. Загрузка ОТКЛОНЯЕТСЯ → media_urls = []                          │
+│                              ↓                                       │
+│  6. Edge function получает пустой массив                            │
+│                              ↓                                       │
+│  7. Отправляется только текст (sendMessage)                         │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Пример сообщения от бота (после исправления)
+### Решение
+
+Создать Edge Function `upload-campaign-media` которая:
+- Принимает файл напрямую
+- Использует service role key для загрузки (обходит RLS)
+- Возвращает публичный URL
+
+| Файл | Действие | Описание |
+|------|----------|----------|
+| `supabase/functions/upload-campaign-media/index.ts` | Создать | Edge function для загрузки с service role |
+| `src/components/create/CreateCampaignForm.tsx` | Изменить | Использовать edge function вместо прямого upload |
+| `supabase/config.toml` | Изменить | Добавить конфигурацию новой функции |
+
+---
+
+### Техническая реализация
+
+**1. Edge Function `upload-campaign-media`**
+
+```typescript
+// Принимает multipart/form-data с файлом
+// Загружает в Storage используя service role
+// Возвращает публичный URL
+
+interface UploadResponse {
+  success: boolean;
+  url?: string;
+  error?: string;
+}
+
+// Ключевой момент: используем SUPABASE_SERVICE_ROLE_KEY
+const supabaseAdmin = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+);
+
+// Загрузка обходит RLS
+const { error } = await supabaseAdmin.storage
+  .from('campaign-images')
+  .upload(fileName, fileBuffer, { contentType });
+```
+
+**2. Обновление фронтенда**
+
+```typescript
+// Вместо прямого upload
+// Было:
+const { error } = await supabase.storage
+  .from("campaign-images")
+  .upload(fileName, file);
+
+// Станет:
+const formData = new FormData();
+formData.append('file', file);
+formData.append('user_id', user.id);
+
+const response = await fetch(
+  `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-campaign-media`,
+  {
+    method: 'POST',
+    headers: { apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+    body: formData
+  }
+);
+
+const { url } = await response.json();
+mediaUrls.push(url);
+```
+
+---
+
+### Архитектура после исправления
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Новая архитектура                                │
+├─────────────────────────────────────────────────────────────────────┤
+│  1. Пользователь выбирает фото/видео                                │
+│                              ↓                                       │
+│  2. Фронтенд отправляет файл в Edge Function                        │
+│                              ↓                                       │
+│  3. Edge Function использует SERVICE_ROLE_KEY                       │
+│                              ↓                                       │
+│  4. Загрузка УСПЕШНА (обходит RLS)                                  │
+│                              ↓                                       │
+│  5. Возвращается публичный URL                                      │
+│                              ↓                                       │
+│  6. media_urls = [url1, url2, ...]                                  │
+│                              ↓                                       │
+│  7. send-campaign-preview получает URLs                             │
+│                              ↓                                       │
+│  8. Telegram Bot отправляет sendPhoto/sendVideo                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Дополнительные улучшения
+
+1. **Исправить ошибку Telegram SDK** в `initTelegramApp()`:
+   - Обернуть `requestFullscreen()` в try-catch (уже видно в логах ошибку `WebAppMethodUnsupported`)
+
+2. **Добавить валидацию файлов** в edge function:
+   - Проверка типа файла (image/*, video/*)
+   - Проверка размера (до 50 МБ)
+
+3. **Показывать прогресс загрузки** каждого файла в UI
+
+---
+
+### Результат после изменений
+
+Пользователь создаёт кампанию с медиа:
+1. Файлы загружаются через Edge Function ✅
+2. Получаем массив публичных URLs ✅
+3. Edge function send-campaign-preview получает URLs
+4. Telegram Bot отправляет фото/видео с caption ✅
+5. Пользователь видит полноценное превью в личке
 
 ```text
 ┌─────────────────────────────────┐
-│  [Фото или видео]               │
+│  [Фото или видео]               │  ← Теперь отображается!
 ├─────────────────────────────────┤
 │  Рекламаааааа тестовая          │
 │                                 │
 │  [Купить]                       │
 └─────────────────────────────────┘
 ```
-
-Без лишнего заголовка — точно как будет выглядеть в канале.
-
