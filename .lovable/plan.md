@@ -1,239 +1,266 @@
 
 
 ## Цель
-Реализовать реальное отображение сделок пользователя на странице `/deals` с действиями в зависимости от статуса
+Реализовать автоматическое отслеживание оплаты эскроу-адресов через TON API и отправку уведомлений владельцу канала при подтверждении оплаты.
 
-## Статусы сделок и их логика
+## Архитектура решения
 
-| Статус | Описание | Действия пользователя |
-|--------|----------|----------------------|
-| `pending` | Создана, не оплачена | Кнопка "Оплатить", "Посмотреть в блокчейне" |
-| `escrow` | Оплачена, средства на эскроу | "Посмотреть в блокчейне", ожидание публикации |
-| `in_progress` | Пост опубликован | Таймер до завершения |
-| `completed` | Завершена успешно | Оставить отзыв (если не оставлен) |
-| `cancelled` | Отменена | Только просмотр |
-| `disputed` | Спор | Связаться с поддержкой |
+```text
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  Рекламодатель  │────▶│  Эскроу-адрес    │────▶│   TON API       │
+│  оплачивает     │     │  (EQ...)         │     │  (TonCenter)    │
+└─────────────────┘     └──────────────────┘     └────────┬────────┘
+                                                          │
+                                                          ▼
+                        ┌──────────────────┐     ┌─────────────────┐
+                        │  Edge Function   │◀────│   Cron Job      │
+                        │  check-escrow    │     │   (каждую мин)  │
+                        └────────┬─────────┘     └─────────────────┘
+                                 │
+                    ┌────────────┴────────────┐
+                    ▼                         ▼
+           ┌───────────────┐         ┌───────────────┐
+           │ Обновить      │         │ Отправить     │
+           │ статус сделки │         │ уведомления   │
+           │ pending→escrow│         │ в Telegram    │
+           └───────────────┘         └───────────────┘
+```
 
 ## Изменения
 
-### 1. Создать хук `useUserDeals.ts`
+### 1. Создать Edge Function `check-escrow-payments`
 
-**Файл**: `src/hooks/useUserDeals.ts`
+**Файл**: `supabase/functions/check-escrow-payments/index.ts`
+
+Эта функция:
+- Получает все сделки со статусом `pending`
+- Для каждого эскроу-адреса проверяет баланс через TonCenter API
+- Если баланс >= total_price, обновляет статус на `escrow`
+- Отправляет владельцу канала два сообщения:
+  1. Превью рекламного поста (медиа + текст + кнопка)
+  2. Уведомление с кнопками "Одобрить" / "Отклонить"
 
 ```typescript
-import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
+// Структура функции
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-export interface Deal {
-  id: string;
-  status: 'pending' | 'escrow' | 'in_progress' | 'completed' | 'cancelled' | 'disputed';
-  total_price: number;
-  posts_count: number;
-  duration_hours: number;
-  escrow_address: string | null;
-  scheduled_at: string | null;
-  created_at: string;
-  channel: {
-    id: string;
-    title: string;
-    avatar_url: string | null;
-    username: string;
-  };
-  campaign: {
-    id: string;
-    name: string;
-  } | null;
-}
+// 1. Получить pending deals
+const { data: pendingDeals } = await supabase
+  .from('deals')
+  .select(`
+    id, escrow_address, total_price, posts_count, duration_hours, scheduled_at,
+    campaign:campaigns(text, media_urls, button_text, button_url),
+    channel:channels(
+      id, title, telegram_chat_id, owner_id,
+      owner:users!channels_owner_id_fkey(telegram_id)
+    )
+  `)
+  .eq('status', 'pending')
+  .not('escrow_address', 'is', null);
 
-export function useUserDeals() {
-  const { user } = useAuth();
+// 2. Для каждой сделки проверить баланс
+for (const deal of pendingDeals) {
+  const balance = await checkEscrowBalance(deal.escrow_address);
+  const requiredNano = deal.total_price * 1_000_000_000;
   
-  return useQuery({
-    queryKey: ['user-deals', user?.id],
-    queryFn: async () => {
-      if (!user?.id) return [];
-      
-      const { data, error } = await supabase
-        .from('deals')
-        .select(`
-          id,
-          status,
-          total_price,
-          posts_count,
-          duration_hours,
-          escrow_address,
-          scheduled_at,
-          created_at,
-          channel:channels(id, title, avatar_url, username),
-          campaign:campaigns(id, name)
-        `)
-        .eq('advertiser_id', user.id)
-        .order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      return data as Deal[];
-    },
-    enabled: !!user?.id,
+  if (balance >= requiredNano) {
+    // 3. Обновить статус
+    await supabase.from('deals').update({
+      status: 'escrow',
+      escrow_balance: balance / 1_000_000_000,
+      payment_verified_at: new Date().toISOString()
+    }).eq('id', deal.id);
+    
+    // 4. Отправить уведомления владельцу
+    await sendPaymentNotification(deal);
+  }
+}
+```
+
+### 2. Функция проверки баланса через TonCenter API
+
+TonCenter предоставляет бесплатный API (с лимитами) для проверки баланса:
+
+```typescript
+async function checkEscrowBalance(address: string): Promise<number> {
+  const apiKey = Deno.env.get("TONCENTER_API_KEY"); // Опционально
+  const baseUrl = "https://toncenter.com/api/v2";
+  
+  const url = apiKey 
+    ? `${baseUrl}/getAddressBalance?address=${address}&api_key=${apiKey}`
+    : `${baseUrl}/getAddressBalance?address=${address}`;
+  
+  const response = await fetch(url);
+  const data = await response.json();
+  
+  if (data.ok && data.result) {
+    return parseInt(data.result, 10); // Баланс в nanoTON
+  }
+  
+  return 0;
+}
+```
+
+### 3. Функция отправки уведомлений владельцу канала
+
+Два сообщения:
+1. **Превью рекламы** — медиа + текст + кнопка (как реальный пост)
+2. **Уведомление с кнопками** — информация о сделке + inline-кнопки
+
+```typescript
+async function sendPaymentNotification(deal: Deal) {
+  const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
+  const ownerTelegramId = deal.channel.owner.telegram_id;
+  const campaign = deal.campaign;
+  
+  // Сообщение 1: Превью рекламы (используем логику из send-campaign-preview)
+  if (campaign.media_urls?.length > 0) {
+    // sendPhoto/sendVideo/sendMediaGroup
+  } else {
+    await sendMessage(ownerTelegramId, campaign.text, {
+      button_text: campaign.button_text,
+      button_url: campaign.button_url
+    });
+  }
+  
+  // Сообщение 2: Уведомление с кнопками
+  const formattedDate = formatDate(deal.scheduled_at);
+  const postsWord = getPostsWord(deal.posts_count); // 1 пост, 2 поста, 5 постов
+  
+  const notificationText = `
+✅ <b>Реклама оплачена!</b>
+
+Рекламодатель оплатил <b>${deal.posts_count} ${postsWord}</b> на <b>${deal.duration_hours} часов</b>
+
+📅 Начало: <b>${formattedDate}</b>
+
+💰 Вы получите: <b>${deal.total_price} TON</b>
+
+Проверьте материалы выше и нажмите «Одобрить» для публикации или откройте бот и предложите изменения.
+`;
+
+  await sendMessage(ownerTelegramId, notificationText, {
+    inline_keyboard: [
+      [
+        { text: "✅ Одобрить", callback_data: `approve_deal:${deal.id}` },
+        { text: "❌ Отклонить", callback_data: `reject_deal:${deal.id}` }
+      ]
+    ]
   });
 }
 ```
 
-### 2. Обновить компонент `DealCard.tsx`
+### 4. Добавить Cron Job для периодической проверки
 
-**Файл**: `src/components/DealCard.tsx`
+Создать SQL-запрос для запуска функции каждую минуту:
 
-Добавить:
-- Кнопку "Оплатить" для статуса `pending` (открывает диалог оплаты)
-- Кнопку "Посмотреть в блокчейне" (ссылка на tonviewer)
-- Различное отображение в зависимости от статуса
-- Отображение цены в TON с конвертацией в USD
+```sql
+-- Включить расширения
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+CREATE EXTENSION IF NOT EXISTS pg_net;
+
+-- Создать cron job
+SELECT cron.schedule(
+  'check-escrow-payments',
+  '* * * * *', -- каждую минуту
+  $$
+  SELECT net.http_post(
+    url := 'https://fdxyittddmpyhaiijddp.supabase.co/functions/v1/check-escrow-payments',
+    headers := '{"Content-Type": "application/json", "Authorization": "Bearer [ANON_KEY]"}'::jsonb,
+    body := '{}'::jsonb
+  ) AS request_id;
+  $$
+);
+```
+
+### 5. Обновить supabase/config.toml
+
+```toml
+[functions.check-escrow-payments]
+verify_jwt = false
+```
+
+### 6. (Опционально) Добавить Edge Function для обработки callback-кнопок
+
+**Файл**: `supabase/functions/telegram-webhook/index.ts`
+
+Обрабатывает нажатия на кнопки "Одобрить" / "Отклонить":
 
 ```typescript
-// Новые пропсы
-interface DealCardProps {
-  id: string;
-  status: DealStatus;
-  totalPrice: number;       // в TON
-  postsCount: number;
-  escrowAddress: string | null;
-  scheduledAt: string | null;
-  createdAt: string;
-  channel: {
-    title: string;
-    avatar_url: string | null;
-    username: string;
-  };
-  campaign: { name: string } | null;
-  onPayClick?: () => void;
+// При нажатии approve_deal:xxx
+if (callbackData.startsWith('approve_deal:')) {
+  const dealId = callbackData.split(':')[1];
+  
+  // Обновить статус сделки
+  await supabase.from('deals').update({
+    status: 'in_progress',
+    posted_at: new Date().toISOString()
+  }).eq('id', dealId);
+  
+  // Опубликовать пост в канал (автоматическая публикация)
+  await publishAdToChannel(dealId);
+  
+  // Уведомить рекламодателя
+  await notifyAdvertiser(dealId, 'approved');
 }
-```
-
-Визуальная структура карточки:
-
-```
-┌──────────────────────────────────────────┐
-│ [Avatar] Название канала                 │
-│          @username                       │
-│          Кампания: "Название"            │
-│                                          │
-│ 💎 50 TON  •  1 пост  •  24ч            │
-├──────────────────────────────────────────┤
-│ 🟡 Ожидает оплаты          2 часа назад │
-│                                          │
-│ [ Оплатить ]  [ В блокчейне ]           │ ← только для pending
-└──────────────────────────────────────────┘
-```
-
-### 3. Создать компонент `PaymentDialog.tsx`
-
-**Файл**: `src/components/deals/PaymentDialog.tsx`
-
-Диалог для оплаты сделки:
-- Показывает сумму к оплате
-- Показывает эскроу-адрес
-- Кнопка "Оплатить" через TonConnect
-- Кнопка "Посмотреть в блокчейне"
-
-Использует ту же логику, что и `PaymentStep.tsx`:
-```typescript
-const handlePayViaWallet = async () => {
-  const amountNano = (totalPrice * 1_000_000_000).toString();
-  
-  await tonConnectUI.sendTransaction({
-    validUntil: Math.floor(Date.now() / 1000) + 600,
-    messages: [{ address: escrowAddress, amount: amountNano }]
-  });
-};
-```
-
-### 4. Обновить страницу `Deals.tsx`
-
-**Файл**: `src/pages/Deals.tsx`
-
-- Заменить `mockDeals` на реальные данные из `useUserDeals()`
-- Добавить состояния загрузки и ошибок
-- Добавить диалог оплаты
-- Обновить фильтрацию под новые статусы
-
-```typescript
-const Deals = () => {
-  const { data: deals, isLoading, error, refetch } = useUserDeals();
-  const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
-  const [filter, setFilter] = useState<DealFilter>("all");
-  
-  // Фильтры
-  const filters = [
-    { id: "all", label: "Все", icon: Inbox },
-    { id: "pending", label: "К оплате", icon: Wallet },
-    { id: "active", label: "Активные", icon: Clock },
-    { id: "completed", label: "Завершённые", icon: CheckCircle2 },
-  ];
-  
-  // ...
-};
-```
-
-### 5. Обновить конфигурацию статусов
-
-Новая конфигурация с учётом реальных статусов из базы:
-
-```typescript
-const statusConfig = {
-  pending: { 
-    label: "Ожидает оплаты", 
-    color: "text-yellow-500", 
-    bgColor: "bg-yellow-500/10",
-    icon: Wallet 
-  },
-  escrow: { 
-    label: "Оплачено", 
-    color: "text-blue-500", 
-    bgColor: "bg-blue-500/10",
-    icon: Shield 
-  },
-  in_progress: { 
-    label: "Публикуется", 
-    color: "text-primary", 
-    bgColor: "bg-primary/10",
-    icon: Clock 
-  },
-  completed: { 
-    label: "Завершено", 
-    color: "text-green-500", 
-    bgColor: "bg-green-500/10",
-    icon: CheckCircle2 
-  },
-  cancelled: { 
-    label: "Отменено", 
-    color: "text-red-500", 
-    bgColor: "bg-red-500/10",
-    icon: XCircle 
-  },
-  disputed: { 
-    label: "Спор", 
-    color: "text-orange-500", 
-    bgColor: "bg-orange-500/10",
-    icon: AlertTriangle 
-  },
-};
 ```
 
 ## Файлы для создания/изменения
 
 | Файл | Действие |
 |------|----------|
-| `src/hooks/useUserDeals.ts` | Создать |
-| `src/components/deals/PaymentDialog.tsx` | Создать |
-| `src/components/DealCard.tsx` | Переписать |
-| `src/pages/Deals.tsx` | Обновить |
+| `supabase/functions/check-escrow-payments/index.ts` | Создать |
+| `supabase/config.toml` | Обновить (добавить функцию) |
+| SQL: Cron Job | Выполнить через insert tool |
+
+## Секреты
+
+Опционально для повышения лимитов:
+- `TONCENTER_API_KEY` — API ключ от TonCenter (бесплатно, но с лимитами без ключа)
+
+Без ключа TonCenter позволяет делать ~1 запрос в секунду.
+
+## Текст уведомления
+
+```text
+Сообщение 1: [Медиа + текст рекламы + кнопка-ссылка]
+
+Сообщение 2:
+✅ Реклама оплачена!
+
+Рекламодатель оплатил 2 поста на 24 часа
+
+📅 Начало: 26.01.2026 в 22:00
+
+💰 Вы получите: 2 TON
+
+Проверьте материалы выше и нажмите «Одобрить» для публикации или откройте бот и предложите изменения.
+
+[✅ Одобрить]  [❌ Отклонить]
+```
+
+## Склонение слова "пост"
+
+```typescript
+function getPostsWord(count: number): string {
+  const lastTwo = count % 100;
+  const lastOne = count % 10;
+  
+  if (lastTwo >= 11 && lastTwo <= 19) return "постов";
+  if (lastOne === 1) return "пост";
+  if (lastOne >= 2 && lastOne <= 4) return "поста";
+  return "постов";
+}
+```
 
 ## Результат
 
-1. Пользователь видит свои реальные сделки из базы данных
-2. Для неоплаченных сделок (pending) — кнопки "Оплатить" и "В блокчейне"
-3. Для оплаченных (escrow) — информация об ожидании публикации
-4. Для завершённых (completed) — возможность оставить отзыв
-5. Корректное форматирование дат на русском языке
-6. Цены в TON с USD эквивалентом
+1. Каждую минуту система проверяет все pending-сделки
+2. При обнаружении оплаты:
+   - Статус сделки меняется на `escrow`
+   - Сохраняется баланс и время подтверждения
+   - Владельцу канала приходит превью рекламы
+   - Владельцу канала приходит уведомление с кнопками
+3. Владелец может одобрить или отклонить рекламу
 
