@@ -35,7 +35,7 @@ const Index = () => {
           channel.username.toLowerCase().includes(searchQuery.toLowerCase());
         
         const matchesCategory = activeCategory === "all" || 
-          channel.category.toLowerCase() === getCategoryName(activeCategory).toLowerCase();
+          channel.category === activeCategory;
         
         const matchesFavorites = !showFavoritesOnly || favorites.includes(channel.id);
         
@@ -56,21 +56,6 @@ const Index = () => {
         }
       });
   }, [channels, searchQuery, activeCategory, showFavoritesOnly, favorites, sortBy]);
-
-  function getCategoryName(id: string): string {
-    const map: Record<string, string> = {
-      crypto: "Крипто",
-      news: "Новости",
-      gaming: "Игры",
-      education: "Обучение",
-      lifestyle: "Лайфстайл",
-      food: "Еда",
-      travel: "Путешествия",
-      business: "Бизнес",
-      music: "Музыка",
-    };
-    return map[id] || "";
-  }
 
   return (
     <div className="min-h-screen bg-transparent safe-bottom">

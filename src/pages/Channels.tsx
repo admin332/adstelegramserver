@@ -24,21 +24,6 @@ const Channels = () => {
   // Use real channels if available, fallback to mock
   const channels = dbChannels && dbChannels.length > 0 ? dbChannels : mockChannels;
 
-  const getCategoryName = (id: string): string => {
-    const map: Record<string, string> = {
-      crypto: "Крипто",
-      news: "Новости",
-      gaming: "Игры",
-      education: "Обучение",
-      lifestyle: "Лайфстайл",
-      food: "Еда",
-      travel: "Путешествия",
-      business: "Бизнес",
-      music: "Музыка",
-    };
-    return map[id] || "";
-  };
-
   const filteredChannels = useMemo(() => {
     return channels
       .filter((channel) => {
@@ -48,7 +33,7 @@ const Channels = () => {
         
         const matchesCategory = 
           activeCategory === "all" ||
-          channel.category.toLowerCase() === getCategoryName(activeCategory).toLowerCase();
+          channel.category === activeCategory;
         
         const matchesFavorites = !showFavoritesOnly || favorites.includes(channel.id);
         

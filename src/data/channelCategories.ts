@@ -9,6 +9,10 @@ import {
   Film, 
   GraduationCap, 
   MoreHorizontal,
+  Sparkles,
+  Utensils,
+  Plane,
+  Music,
   LucideIcon
 } from "lucide-react";
 
@@ -18,6 +22,10 @@ export interface ChannelCategory {
   icon: LucideIcon;
 }
 
+// Категория "Все" для фильтров
+export const allCategory: ChannelCategory = { id: 'all', name: 'Все', icon: Sparkles };
+
+// Основные категории каналов (используются при добавлении канала)
 export const channelCategories: ChannelCategory[] = [
   { id: 'crypto', name: 'Криптовалюты', icon: Bitcoin },
   { id: 'tech', name: 'Технологии', icon: Cpu },
@@ -28,8 +36,14 @@ export const channelCategories: ChannelCategory[] = [
   { id: 'news', name: 'Новости', icon: Newspaper },
   { id: 'entertainment', name: 'Развлечения', icon: Film },
   { id: 'education', name: 'Образование', icon: GraduationCap },
+  { id: 'food', name: 'Еда', icon: Utensils },
+  { id: 'travel', name: 'Путешествия', icon: Plane },
+  { id: 'music', name: 'Музыка', icon: Music },
   { id: 'other', name: 'Другое', icon: MoreHorizontal },
 ];
+
+// Категории для фильтров (включая "Все")
+export const filterCategories: ChannelCategory[] = [allCategory, ...channelCategories];
 
 export const getCategoryById = (id: string): ChannelCategory | undefined => {
   return channelCategories.find(cat => cat.id === id);
