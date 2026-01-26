@@ -1,89 +1,56 @@
 
 
-## План: Унификация категорий каналов
+## План: Отображение названий категорий вместо ID
 
 ### Проблема
 
-Сейчас есть **три разных источника категорий**, которые не синхронизированы:
+Сейчас в карточке канала и на странице канала отображается ID категории (например, `crypto`) вместо человекочитаемого названия (`Криптовалюты`).
 
-| Файл | ID игр | ID крипты | Название крипты |
-|------|--------|-----------|-----------------|
-| `channelCategories.ts` | `games` | `crypto` | Криптовалюты |
-| `CategoryFilters.tsx` | `gaming` | `crypto` | Крипто |
-| `getCategoryName()` | `gaming` | `crypto` | Крипто |
+### Места для исправления
 
-### Ошибка в логике фильтрации
+| Файл | Строка | Текущее значение | Нужно |
+|------|--------|------------------|-------|
+| `ChannelCard.tsx` | 115 | `{category}` | `{getCategoryById(category)?.name \|\| category}` |
+| `Channel.tsx` | 93 | `channel.category` | `getCategoryById(channel.category)?.name \|\| channel.category` |
 
-В `Channels.tsx` и `Index.tsx` логика сравнения неверная:
+### Изменения
+
+#### 1. ChannelCard.tsx
+
+Импортировать функцию и использовать для отображения:
 
 ```typescript
-// Канал хранит ID категории: "crypto"
-channel.category.toLowerCase() === getCategoryName(activeCategory).toLowerCase()
-// "crypto" === "крипто" → false!
+import { getCategoryById } from '@/data/channelCategories';
+
+// В строке 115 изменить:
+{getCategoryById(category)?.name || category}
 ```
 
-Нужно сравнивать **ID с ID**, а не ID с названием.
+#### 2. Channel.tsx
 
-### Решение
+Импортировать функцию и использовать в статистике:
 
-#### 1. Унифицировать категории
-
-Использовать **единый источник** — `channelCategories.ts` — во всех местах.
-
-Обновить `channelCategories.ts`:
-- Добавить недостающие категории (`food`, `travel`, `music`)
-- Унифицировать ID: `games` вместо `gaming`
-- Добавить "Все" как опцию для фильтров
-
-#### 2. Обновить CategoryFilters.tsx
-
-Импортировать категории из `channelCategories.ts` вместо локального массива.
-
-#### 3. Исправить логику фильтрации
-
-В `Index.tsx` и `Channels.tsx` изменить сравнение:
-
-Было:
 ```typescript
-channel.category.toLowerCase() === getCategoryName(activeCategory).toLowerCase()
-```
+import { getCategoryById } from '@/data/channelCategories';
 
-Станет:
-```typescript
-channel.category === activeCategory
+// В detailedStats изменить:
+{
+  icon: Tag,
+  label: 'Категория',
+  value: getCategoryById(channel.category)?.name || channel.category,
+}
 ```
 
 ### Изменяемые файлы
 
 | Файл | Изменение |
 |------|-----------|
-| `src/data/channelCategories.ts` | Добавить недостающие категории (food, travel, music) и опцию "Все" |
-| `src/components/CategoryFilters.tsx` | Импортировать из единого источника |
-| `src/pages/Index.tsx` | Исправить логику фильтрации на сравнение ID |
-| `src/pages/Channels.tsx` | Исправить логику фильтрации на сравнение ID |
-
-### Итоговый список категорий
-
-```text
-all       → Все
-crypto    → Криптовалюты
-tech      → Технологии
-marketing → Маркетинг
-business  → Бизнес
-games     → Игры
-lifestyle → Лайфстайл
-news      → Новости
-entertainment → Развлечения
-education → Образование
-food      → Еда
-travel    → Путешествия
-music     → Музыка
-other     → Другое
-```
+| `src/components/ChannelCard.tsx` | Добавить импорт + использовать `getCategoryById` |
+| `src/pages/Channel.tsx` | Добавить импорт + использовать `getCategoryById` |
 
 ### Результат
 
-- Единый источник категорий для всего приложения
-- Фильтрация работает корректно по ID категории
-- При добавлении канала и при фильтрации используются одинаковые категории
+- Карточка канала показывает "Криптовалюты" вместо "crypto"
+- Страница канала показывает "Криптовалюты" в статистике
+- Если категория не найдена — fallback на оригинальное значение
 
