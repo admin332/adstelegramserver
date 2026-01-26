@@ -1,66 +1,201 @@
-import { Clock, CheckCircle2, AlertCircle, Wallet } from "lucide-react";
+import { Clock, CheckCircle2, AlertCircle, Wallet, Shield, XCircle, AlertTriangle, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { useTonPrice } from "@/hooks/useTonPrice";
+import TonIcon from "@/assets/ton-icon.svg";
+import { formatDistanceToNow } from "date-fns";
+import { ru } from "date-fns/locale";
+import type { Database } from "@/integrations/supabase/types";
 
-type DealStatus = "pending" | "in_review" | "approved" | "escrow" | "published" | "completed" | "cancelled";
+type DealStatus = Database['public']['Enums']['deal_status'];
 
 interface DealCardProps {
   id: string;
-  channelName: string;
-  channelAvatar: string;
-  advertiserName: string;
   status: DealStatus;
-  amount: number;
+  totalPrice: number;
+  postsCount: number;
+  durationHours: number;
+  escrowAddress: string | null;
+  scheduledAt: string | null;
   createdAt: string;
-  adFormat: string;
+  channel: {
+    title: string | null;
+    avatar_url: string | null;
+    username: string;
+  } | null;
+  campaign: { name: string } | null;
+  onPayClick?: () => void;
 }
 
-const statusConfig: Record<DealStatus, { label: string; color: string; icon: typeof Clock }> = {
-  pending: { label: "Ожидание", color: "text-warning", icon: Clock },
-  in_review: { label: "На проверке", color: "text-primary", icon: AlertCircle },
-  approved: { label: "Одобрено", color: "text-success", icon: CheckCircle2 },
-  escrow: { label: "Эскроу", color: "text-primary", icon: Wallet },
-  published: { label: "Опубликовано", color: "text-success", icon: CheckCircle2 },
-  completed: { label: "Завершено", color: "text-success", icon: CheckCircle2 },
-  cancelled: { label: "Отменено", color: "text-destructive", icon: AlertCircle },
+const statusConfig: Record<DealStatus, { 
+  label: string; 
+  color: string; 
+  bgColor: string;
+  icon: typeof Clock 
+}> = {
+  pending: { 
+    label: "Ожидает оплаты", 
+    color: "text-yellow-500", 
+    bgColor: "bg-yellow-500/10",
+    icon: Wallet 
+  },
+  escrow: { 
+    label: "Оплачено", 
+    color: "text-blue-500", 
+    bgColor: "bg-blue-500/10",
+    icon: Shield 
+  },
+  in_progress: { 
+    label: "Публикуется", 
+    color: "text-primary", 
+    bgColor: "bg-primary/10",
+    icon: Clock 
+  },
+  completed: { 
+    label: "Завершено", 
+    color: "text-green-500", 
+    bgColor: "bg-green-500/10",
+    icon: CheckCircle2 
+  },
+  cancelled: { 
+    label: "Отменено", 
+    color: "text-red-500", 
+    bgColor: "bg-red-500/10",
+    icon: XCircle 
+  },
+  disputed: { 
+    label: "Спор", 
+    color: "text-orange-500", 
+    bgColor: "bg-orange-500/10",
+    icon: AlertTriangle 
+  },
 };
 
 export const DealCard = ({
-  channelName,
-  channelAvatar,
-  advertiserName,
+  id,
   status,
-  amount,
+  totalPrice,
+  postsCount,
+  durationHours,
+  escrowAddress,
+  scheduledAt,
   createdAt,
-  adFormat,
+  channel,
+  campaign,
+  onPayClick,
 }: DealCardProps) => {
   const config = statusConfig[status];
   const StatusIcon = config.icon;
+  const { convertToUsd } = useTonPrice();
+  
+  const usdEquivalent = convertToUsd(totalPrice);
+  const channelTitle = channel?.title || "Канал";
+  const channelInitial = channelTitle.charAt(0).toUpperCase();
+
+  const timeAgo = formatDistanceToNow(new Date(createdAt), {
+    addSuffix: true,
+    locale: ru,
+  });
+
+  const handleViewBlockchain = () => {
+    if (!escrowAddress) return;
+    window.open(`https://tonviewer.com/${escrowAddress}`, "_blank");
+  };
+
+  const formatDuration = (hours: number) => {
+    if (hours < 24) return `${hours}ч`;
+    const days = Math.floor(hours / 24);
+    return `${days}д`;
+  };
 
   return (
     <div className="bg-card rounded-2xl p-4 animate-fade-in">
+      {/* Верхняя часть: информация о канале */}
       <div className="flex items-start gap-3">
-        <img
-          src={channelAvatar}
-          alt={channelName}
-          className="w-12 h-12 rounded-full object-cover"
-        />
+        <Avatar className="w-12 h-12">
+          <AvatarImage src={channel?.avatar_url || undefined} alt={channelTitle} />
+          <AvatarFallback className="bg-secondary text-foreground">
+            {channelInitial}
+          </AvatarFallback>
+        </Avatar>
+        
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-foreground truncate">{channelName}</h3>
-          <p className="text-sm text-muted-foreground">от {advertiserName}</p>
-        </div>
-        <div className="text-right">
-          <p className="font-bold text-foreground">${amount}</p>
-          <span className="text-2xs text-muted-foreground">{adFormat}</span>
+          <h3 className="font-semibold text-foreground truncate">{channelTitle}</h3>
+          {channel?.username && (
+            <p className="text-sm text-muted-foreground">@{channel.username}</p>
+          )}
+          {campaign && (
+            <p className="text-xs text-muted-foreground truncate mt-0.5">
+              Кампания: {campaign.name}
+            </p>
+          )}
         </div>
       </div>
 
-      <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/5">
-        <div className={cn("flex items-center gap-1.5", config.color)}>
-          <StatusIcon className="w-4 h-4" />
-          <span className="text-sm font-medium">{config.label}</span>
+      {/* Детали сделки */}
+      <div className="flex items-center gap-3 mt-3 text-sm">
+        <div className="flex items-center gap-1.5">
+          <img src={TonIcon} alt="TON" className="w-4 h-4" />
+          <span className="font-semibold text-foreground">{totalPrice} TON</span>
+          {usdEquivalent && (
+            <span className="text-muted-foreground">≈ ${usdEquivalent.toFixed(0)}</span>
+          )}
         </div>
-        <span className="text-sm text-muted-foreground">{createdAt}</span>
+        <span className="text-muted-foreground">•</span>
+        <span className="text-muted-foreground">
+          {postsCount} {postsCount === 1 ? "пост" : "поста"}
+        </span>
+        <span className="text-muted-foreground">•</span>
+        <span className="text-muted-foreground">{formatDuration(durationHours)}</span>
       </div>
+
+      {/* Статус и время */}
+      <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/5">
+        <div className={cn("flex items-center gap-1.5 px-2 py-1 rounded-full", config.bgColor)}>
+          <StatusIcon className={cn("w-4 h-4", config.color)} />
+          <span className={cn("text-sm font-medium", config.color)}>{config.label}</span>
+        </div>
+        <span className="text-sm text-muted-foreground">{timeAgo}</span>
+      </div>
+
+      {/* Кнопки действий для pending статуса */}
+      {status === "pending" && (
+        <div className="flex gap-2 mt-3">
+          <Button 
+            onClick={onPayClick} 
+            className="flex-1"
+            size="sm"
+          >
+            <Wallet className="w-4 h-4 mr-1.5" />
+            Оплатить
+          </Button>
+          {escrowAddress && (
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={handleViewBlockchain}
+            >
+              <ExternalLink className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Кнопка для escrow статуса */}
+      {status === "escrow" && escrowAddress && (
+        <div className="mt-3">
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={handleViewBlockchain}
+            className="w-full"
+          >
+            <ExternalLink className="w-4 h-4 mr-1.5" />
+            Посмотреть в блокчейне
+          </Button>
+        </div>
+      )}
     </div>
   );
 };
