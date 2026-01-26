@@ -96,7 +96,7 @@ const Create = () => {
     if (selectedRole === "channel_owner") {
       return currentStep === "list" ? "Мои каналы" : "Добавить";
     }
-    return currentStep === "list" ? "Мои кампании" : "Кампания";
+    return currentStep === "list" ? "Кампании" : "Кампания";
   };
 
   return (
