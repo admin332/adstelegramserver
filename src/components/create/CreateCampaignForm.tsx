@@ -151,9 +151,36 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
         throw new Error(result.error || "Ошибка создания кампании");
       }
 
+      // Отправить превью в Telegram
+      if (user.telegram_id) {
+        try {
+          await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-campaign-preview`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+              },
+              body: JSON.stringify({
+                telegram_id: user.telegram_id,
+                text: campaignData.text,
+                media_urls: mediaUrls,
+                button_text: campaignData.button_text || undefined,
+                button_url: campaignData.button_url || undefined,
+              }),
+            }
+          );
+        } catch (previewError) {
+          console.error("Failed to send preview:", previewError);
+        }
+      }
+
       toast({
         title: "Кампания создана!",
-        description: "Теперь вы можете выбрать каналы для размещения",
+        description: user.telegram_id 
+          ? "Превью отправлено вам в Telegram" 
+          : "Теперь вы можете выбрать каналы для размещения",
       });
       
       // Если есть returnTo параметр — вернуться на страницу канала
