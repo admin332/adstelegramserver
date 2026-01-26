@@ -193,7 +193,7 @@ const Create = () => {
             {/* Info */}
             <div className="text-center py-4">
               <p className="text-sm text-muted-foreground">
-                Вы сможете изменить роль в настройках профиля
+                Вы сможете изменить роль в любой момент
               </p>
             </div>
           </>
