@@ -11,7 +11,8 @@ interface CreateCampaignRequest {
   text: string;
   button_text?: string;
   button_url?: string;
-  image_url?: string;
+  image_url?: string; // Legacy field for backward compatibility
+  media_urls?: string[]; // New field for multiple media
 }
 
 Deno.serve(async (req) => {
@@ -25,7 +26,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: CreateCampaignRequest = await req.json();
-    const { user_id, name, text, button_text, button_url, image_url } = body;
+    const { user_id, name, text, button_text, button_url, image_url, media_urls } = body;
 
     if (!user_id || !name || !text) {
       return new Response(
@@ -48,6 +49,14 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Handle media URLs: prefer new media_urls array, fallback to legacy image_url
+    let finalMediaUrls: string[] = [];
+    if (media_urls && media_urls.length > 0) {
+      finalMediaUrls = media_urls;
+    } else if (image_url) {
+      finalMediaUrls = [image_url];
+    }
+
     // Create campaign
     const { data: campaign, error: insertError } = await supabase
       .from("campaigns")
@@ -57,7 +66,8 @@ Deno.serve(async (req) => {
         text,
         button_text: button_text || null,
         button_url: button_url || null,
-        image_url: image_url || null,
+        image_url: finalMediaUrls[0] || null, // Keep legacy field populated
+        media_urls: finalMediaUrls, // New JSONB array
         is_active: true,
       })
       .select()
@@ -81,6 +91,7 @@ Deno.serve(async (req) => {
           button_text: campaign.button_text,
           button_url: campaign.button_url,
           image_url: campaign.image_url,
+          media_urls: campaign.media_urls,
         },
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

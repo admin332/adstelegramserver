@@ -47,14 +47,22 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>([]);
 
   // Преобразовать данные из БД в формат для CampaignSelector
-  const campaigns = userCampaigns.map(c => ({
-    id: c.id,
-    name: c.name,
-    imageUrl: c.image_url || '/placeholder.svg',
-    text: c.text,
-    buttonText: c.button_text || '',
-    buttonUrl: c.button_url || '',
-  }));
+  const campaigns = userCampaigns.map(c => {
+    // Берём первое изображение из массива media_urls или fallback на image_url
+    const mediaUrls = (c as { media_urls?: string[] }).media_urls;
+    const imageUrl = (mediaUrls && mediaUrls.length > 0) 
+      ? mediaUrls[0] 
+      : c.image_url || '/placeholder.svg';
+    
+    return {
+      id: c.id,
+      name: c.name,
+      imageUrl,
+      text: c.text,
+      buttonText: c.button_text || '',
+      buttonUrl: c.button_url || '',
+    };
+  });
 
   const totalSteps = 3;
   const progressValue = (currentStep / totalSteps) * 100;
