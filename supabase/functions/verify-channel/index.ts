@@ -233,9 +233,10 @@ Deno.serve(async (req) => {
     const telegramId = validation.data.user.id;
     console.log(`[verify-channel] Validated user: ${telegramId}`);
 
-    if (!username || !category) {
+    // Username всегда обязателен (category проверяется позже только для новых каналов)
+    if (!username) {
       return new Response(
-        JSON.stringify({ success: false, error: "Не все обязательные поля заполнены" }),
+        JSON.stringify({ success: false, error: "Не указан username канала" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -418,7 +419,15 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 4. Insert channel with VERIFIED owner_id
+    // 4. Category обязательна только для новых каналов
+    if (!category) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Выберите категорию для нового канала" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // 5. Insert channel with VERIFIED owner_id
     const { data: newChannel, error: insertError } = await supabase
       .from("channels")
       .insert({
