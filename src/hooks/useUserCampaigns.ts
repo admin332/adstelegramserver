@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
+import { getTelegramInitData } from "@/lib/telegram";
 
 export interface UserCampaign {
   id: string;
@@ -74,20 +75,35 @@ export function useToggleCampaignActive() {
 
 export function useDeleteCampaign() {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
 
   return useMutation({
     mutationFn: async (campaignId: string) => {
-      if (!user?.id) {
-        throw new Error("Пользователь не авторизован");
+      // Get initData for secure authentication
+      const initData = getTelegramInitData();
+      
+      if (!initData) {
+        throw new Error("Требуется авторизация через Telegram");
       }
 
-      const { data, error } = await supabase.functions.invoke("delete-campaign", {
-        body: { campaign_id: campaignId, user_id: user.id },
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-campaign`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({
+            campaign_id: campaignId,
+            initData, // Secure: send initData instead of user_id
+          }),
+        }
+      );
 
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || "Ошибка удаления");
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || "Ошибка удаления");
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user-campaigns"] });
@@ -100,7 +116,7 @@ export function useDeleteCampaign() {
       console.error("Delete campaign error:", error);
       toast({
         title: "Ошибка",
-        description: "Не удалось удалить кампанию",
+        description: error instanceof Error ? error.message : "Не удалось удалить кампанию",
         variant: "destructive",
       });
     },

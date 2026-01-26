@@ -5,14 +5,97 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+interface TelegramUser {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+}
+
+interface ParsedInitData {
+  user?: TelegramUser;
+  auth_date: number;
+}
+
+// Validate Telegram initData using HMAC-SHA256
+async function validateTelegramData(initData: string, botToken: string): Promise<{ valid: boolean; data?: ParsedInitData }> {
+  try {
+    const urlParams = new URLSearchParams(initData);
+    const hash = urlParams.get("hash");
+    
+    if (!hash) {
+      return { valid: false };
+    }
+
+    urlParams.delete("hash");
+    const dataCheckString = Array.from(urlParams.entries())
+      .map(([key, value]) => `${key}=${value}`)
+      .sort()
+      .join("\n");
+
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode("WebAppData");
+    const tokenData = encoder.encode(botToken);
+    
+    const hmacKey = await crypto.subtle.importKey(
+      "raw",
+      keyData,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    
+    const secretKeyBuffer = await crypto.subtle.sign("HMAC", hmacKey, tokenData);
+    
+    const secretKey = await crypto.subtle.importKey(
+      "raw",
+      secretKeyBuffer,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    
+    const dataBuffer = encoder.encode(dataCheckString);
+    const hashBuffer = await crypto.subtle.sign("HMAC", secretKey, dataBuffer);
+    
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const calculatedHash = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+
+    if (calculatedHash !== hash) {
+      return { valid: false };
+    }
+
+    const userString = urlParams.get("user");
+    const authDate = parseInt(urlParams.get("auth_date") || "0", 10);
+    
+    const now = Math.floor(Date.now() / 1000);
+    if (now - authDate > 86400) {
+      return { valid: false };
+    }
+
+    let user: TelegramUser | undefined;
+    if (userString) {
+      user = JSON.parse(userString);
+    }
+
+    return {
+      valid: true,
+      data: { user, auth_date: authDate },
+    };
+  } catch (error) {
+    console.error("Validation error:", error);
+    return { valid: false };
+  }
+}
+
 interface CreateCampaignRequest {
-  user_id: string;
+  initData: string;
   name: string;
   text: string;
   button_text?: string;
   button_url?: string;
-  image_url?: string; // Legacy field for backward compatibility
-  media_urls?: string[]; // New field for multiple media
+  image_url?: string;
+  media_urls?: string[];
 }
 
 Deno.serve(async (req) => {
@@ -21,30 +104,55 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
+    if (!botToken) {
+      throw new Error("TELEGRAM_BOT_TOKEN not configured");
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: CreateCampaignRequest = await req.json();
-    const { user_id, name, text, button_text, button_url, image_url, media_urls } = body;
+    const { initData, name, text, button_text, button_url, image_url, media_urls } = body;
 
-    if (!user_id || !name || !text) {
+    // 1. VALIDATE INITDATA (critical for security!)
+    if (!initData) {
       return new Response(
-        JSON.stringify({ success: false, error: "Не все обязательные поля заполнены" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ success: false, error: "Не предоставлены данные авторизации" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Verify user exists
+    const validation = await validateTelegramData(initData, botToken);
+    if (!validation.valid || !validation.data?.user) {
+      console.log("[create-campaign] Invalid Telegram data");
+      return new Response(
+        JSON.stringify({ success: false, error: "Неверные данные авторизации Telegram" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const telegramId = validation.data.user.id;
+    console.log(`[create-campaign] Validated user: ${telegramId}`);
+
+    // 2. Find user by VERIFIED telegram_id
     const { data: userData, error: userError } = await supabase
       .from("users")
       .select("id")
-      .eq("id", user_id)
+      .eq("telegram_id", telegramId)
       .maybeSingle();
 
     if (userError || !userData) {
       return new Response(
         JSON.stringify({ success: false, error: "Пользователь не найден" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!name || !text) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Не все обязательные поля заполнены" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -57,17 +165,17 @@ Deno.serve(async (req) => {
       finalMediaUrls = [image_url];
     }
 
-    // Create campaign
+    // 3. Create campaign with VERIFIED owner_id
     const { data: campaign, error: insertError } = await supabase
       .from("campaigns")
       .insert({
-        owner_id: user_id,
+        owner_id: userData.id, // Trusted user ID from DB
         name,
         text,
         button_text: button_text || null,
         button_url: button_url || null,
-        image_url: finalMediaUrls[0] || null, // Keep legacy field populated
-        media_urls: finalMediaUrls, // New JSONB array
+        image_url: finalMediaUrls[0] || null,
+        media_urls: finalMediaUrls,
         is_active: true,
       })
       .select()
@@ -80,6 +188,8 @@ Deno.serve(async (req) => {
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    console.log(`[create-campaign] Created campaign ${campaign.id} for user ${userData.id}`);
 
     return new Response(
       JSON.stringify({
