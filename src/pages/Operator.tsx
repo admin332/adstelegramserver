@@ -5,6 +5,7 @@ import { AdminRegisterForm } from '@/components/admin/AdminRegisterForm';
 import { AdminSidebar, AdminSection } from '@/components/admin/AdminSidebar';
 import { AdminDashboard } from '@/components/admin/AdminDashboard';
 import { AdminUsersTable } from '@/components/admin/AdminUsersTable';
+import { AdminDealsTable } from '@/components/admin/AdminDealsTable';
 import { AdminSettings } from '@/components/admin/AdminSettings';
 import { ShieldX, Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -97,15 +98,7 @@ export default function Operator() {
           </Card>
         );
       case 'deals':
-        return (
-          <Card className="bg-card border-border">
-            <CardContent className="pt-6">
-              <p className="text-muted-foreground text-center">
-                💰 Раздел сделок будет доступен после создания таблицы deals
-              </p>
-            </CardContent>
-          </Card>
-        );
+        return <AdminDealsTable />;
       case 'settings':
         return <AdminSettings />;
       default:
