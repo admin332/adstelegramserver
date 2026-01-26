@@ -5,224 +5,343 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-interface RefreshResponse {
-  success: boolean;
-  updated: boolean;
-  channel?: {
-    subscribers_count: number;
-    description: string | null;
-    title: string | null;
-    avatar_url: string | null;
-    stats_updated_at: string;
-  };
-  error?: string;
+// Parse views text like "15.2K" → 15200, "1.5M" → 1500000
+function parseViewsText(text: string): number {
+  const cleaned = text.trim().replace(/\s/g, "");
+  const num = parseFloat(cleaned.replace(/[^0-9.]/g, ""));
+  if (isNaN(num)) return 0;
+  if (cleaned.toUpperCase().includes("K")) return Math.round(num * 1000);
+  if (cleaned.toUpperCase().includes("M")) return Math.round(num * 1000000);
+  return Math.round(num);
 }
 
-async function getChatMemberCount(botToken: string, chatId: number): Promise<number | null> {
+// Fetch views for a single post from t.me embed
+async function fetchPostViews(
+  username: string,
+  messageId: number
+): Promise<{ views: number; date: string | null } | null> {
+  try {
+    const url = `https://t.me/${username}/${messageId}?embed=1`;
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; StatsBot/1.0)",
+      },
+    });
+    
+    if (!response.ok) return null;
+    
+    const html = await response.text();
+    
+    // Parse views: <span class="tgme_widget_message_views">15.2K</span>
+    const viewsMatch = html.match(/tgme_widget_message_views[^>]*>([^<]+)</);
+    // Parse date: datetime="2026-01-26T12:00:00+00:00"
+    const dateMatch = html.match(/datetime="([^"]+)"/);
+    
+    if (!viewsMatch) return null;
+    
+    const views = parseViewsText(viewsMatch[1]);
+    const date = dateMatch ? dateMatch[1].split("T")[0] : null;
+    
+    return { views, date };
+  } catch (error) {
+    console.error(`[refresh] Failed to fetch post ${messageId}:`, error);
+    return null;
+  }
+}
+
+// Find the latest message ID by parsing the channel's public page
+async function findLatestMessageId(username: string): Promise<number | null> {
+  try {
+    const response = await fetch(`https://t.me/s/${username}`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; StatsBot/1.0)",
+      },
+    });
+    
+    if (!response.ok) return null;
+    
+    const html = await response.text();
+    
+    // Find post IDs in HTML: data-post="username/123"
+    const matches = [...html.matchAll(/data-post="[^/]+\/(\d+)"/g)];
+    const ids = matches.map((m) => parseInt(m[1]));
+    
+    if (ids.length > 0) {
+      return Math.max(...ids);
+    }
+    return null;
+  } catch (error) {
+    console.error(`[refresh] Failed to find latest message for ${username}:`, error);
+    return null;
+  }
+}
+
+// Collect stats for the last N posts
+async function collectRecentPostsStats(
+  username: string,
+  startMessageId: number,
+  maxPosts: number = 10
+): Promise<{ messageId: number; views: number; date: string }[]> {
+  const stats: { messageId: number; views: number; date: string }[] = [];
+  
+  // Try up to 30 message IDs to find 10 valid posts (some may be deleted/service messages)
+  for (let i = 0; i < 30 && stats.length < maxPosts; i++) {
+    const msgId = startMessageId - i;
+    if (msgId <= 0) break;
+    
+    const postData = await fetchPostViews(username, msgId);
+    if (postData && postData.views > 0) {
+      stats.push({
+        messageId: msgId,
+        views: postData.views,
+        date: postData.date || new Date().toISOString().split("T")[0],
+      });
+    }
+    
+    // Small delay to avoid rate limiting
+    if (i > 0 && i % 5 === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  
+  return stats;
+}
+
+// Calculate average views and engagement rate
+function calculateMetrics(
+  subscribersCount: number,
+  recentPosts: { views: number }[]
+): { avgViews: number; engagement: number } {
+  if (recentPosts.length === 0) {
+    return { avgViews: 0, engagement: 0 };
+  }
+  
+  const totalViews = recentPosts.reduce((sum, p) => sum + p.views, 0);
+  const avgViews = Math.round(totalViews / recentPosts.length);
+  
+  // ER = (Average Views / Subscribers) × 100%
+  const engagement =
+    subscribersCount > 0
+      ? Math.round((avgViews / subscribersCount) * 100 * 10) / 10
+      : 0;
+  
+  return { avgViews, engagement };
+}
+
+// Get subscriber count via Bot API
+async function getSubscriberCount(
+  botToken: string,
+  chatId: number
+): Promise<number | null> {
   try {
     const response = await fetch(
       `https://api.telegram.org/bot${botToken}/getChatMemberCount?chat_id=${chatId}`
     );
     const data = await response.json();
+    
     if (data.ok) {
       return data.result;
     }
-    console.error("[refresh-channel-stats] getChatMemberCount error:", data);
+    console.error("[refresh] getChatMemberCount failed:", data);
     return null;
   } catch (error) {
-    console.error("[refresh-channel-stats] getChatMemberCount fetch error:", error);
+    console.error("[refresh] getChatMemberCount error:", error);
     return null;
   }
 }
 
-async function getChat(botToken: string, chatId: number): Promise<any | null> {
+// Get channel info via Bot API
+async function getChatInfo(
+  botToken: string,
+  chatId: number
+): Promise<{
+  title?: string;
+  description?: string;
+  photoFileId?: string;
+} | null> {
   try {
     const response = await fetch(
       `https://api.telegram.org/bot${botToken}/getChat?chat_id=${chatId}`
     );
     const data = await response.json();
+    
     if (data.ok) {
-      return data.result;
+      return {
+        title: data.result.title,
+        description: data.result.description,
+        photoFileId: data.result.photo?.big_file_id,
+      };
     }
-    console.error("[refresh-channel-stats] getChat error:", data);
+    console.error("[refresh] getChat failed:", data);
     return null;
   } catch (error) {
-    console.error("[refresh-channel-stats] getChat fetch error:", error);
+    console.error("[refresh] getChat error:", error);
     return null;
   }
 }
 
-async function getFileUrl(botToken: string, fileId: string): Promise<string | null> {
+// Get file URL from Telegram
+async function getFileUrl(
+  botToken: string,
+  fileId: string
+): Promise<string | null> {
   try {
     const response = await fetch(
       `https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`
     );
     const data = await response.json();
-    if (data.ok && data.result?.file_path) {
+    
+    if (data.ok && data.result.file_path) {
       return `https://api.telegram.org/file/bot${botToken}/${data.result.file_path}`;
     }
     return null;
   } catch (error) {
-    console.error("[refresh-channel-stats] getFileUrl error:", error);
+    console.error("[refresh] getFile error:", error);
     return null;
   }
 }
 
 Deno.serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
     const { channel_id } = await req.json();
-
+    
     if (!channel_id) {
       return new Response(
-        JSON.stringify({ success: false, error: "channel_id is required" } as RefreshResponse),
+        JSON.stringify({ success: false, error: "channel_id is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 
-    if (!botToken) {
-      console.error("[refresh-channel-stats] TELEGRAM_BOT_TOKEN not configured");
-      return new Response(
-        JSON.stringify({ success: false, error: "Bot token not configured" } as RefreshResponse),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Fetch channel from database
-    const { data: channel, error: channelError } = await supabase
+    const { data: channel, error: fetchError } = await supabase
       .from("channels")
-      .select("id, telegram_chat_id, stats_updated_at, title, description, subscribers_count, avatar_url")
+      .select("*")
       .eq("id", channel_id)
       .maybeSingle();
 
-    if (channelError) {
-      console.error("[refresh-channel-stats] DB error:", channelError);
+    if (fetchError || !channel) {
+      console.error("[refresh] Channel not found:", fetchError);
       return new Response(
-        JSON.stringify({ success: false, error: "Database error" } as RefreshResponse),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    if (!channel) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Channel not found" } as RefreshResponse),
+        JSON.stringify({ success: false, error: "Channel not found" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Check if update is needed (24 hours threshold)
+    // Check if stats are fresh (less than 24 hours old)
     const statsUpdatedAt = new Date(channel.stats_updated_at || 0);
     const hoursAgo = (Date.now() - statsUpdatedAt.getTime()) / (1000 * 60 * 60);
-
+    
     if (hoursAgo < 24) {
-      console.log(`[refresh-channel-stats] Channel ${channel_id} stats are fresh (${hoursAgo.toFixed(1)}h ago)`);
+      console.log(`[refresh] Stats are ${hoursAgo.toFixed(1)}h old, skipping update`);
       return new Response(
-        JSON.stringify({ 
-          success: true, 
-          updated: false,
-          channel: {
-            subscribers_count: channel.subscribers_count,
-            description: channel.description,
-            title: channel.title,
-            avatar_url: channel.avatar_url,
-            stats_updated_at: channel.stats_updated_at,
-          }
-        } as RefreshResponse),
+        JSON.stringify({ success: true, updated: false, reason: "Stats are fresh" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    if (!channel.telegram_chat_id) {
-      console.log(`[refresh-channel-stats] Channel ${channel_id} has no telegram_chat_id`);
-      return new Response(
-        JSON.stringify({ success: false, error: "Channel has no Telegram ID" } as RefreshResponse),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    console.log(`[refresh] Updating stats for channel @${channel.username}`);
 
-    console.log(`[refresh-channel-stats] Refreshing stats for channel ${channel_id} (${hoursAgo.toFixed(1)}h since last update)`);
-
-    // Fetch fresh data from Telegram
-    const [subscribersCount, chatInfo] = await Promise.all([
-      getChatMemberCount(botToken, channel.telegram_chat_id),
-      getChat(botToken, channel.telegram_chat_id),
-    ]);
-
-    // Get avatar URL if available
-    let avatarUrl: string | null = channel.avatar_url;
-    if (chatInfo?.photo?.big_file_id) {
-      const newAvatarUrl = await getFileUrl(botToken, chatInfo.photo.big_file_id);
-      if (newAvatarUrl) {
-        avatarUrl = newAvatarUrl;
+    // Get subscriber count from Bot API (if we have telegram_chat_id)
+    let subscribersCount = channel.subscribers_count || 0;
+    let title = channel.title;
+    let description = channel.description;
+    let avatarUrl = channel.avatar_url;
+    
+    if (channel.telegram_chat_id) {
+      const newCount = await getSubscriberCount(botToken, channel.telegram_chat_id);
+      if (newCount !== null) {
+        subscribersCount = newCount;
+      }
+      
+      const chatInfo = await getChatInfo(botToken, channel.telegram_chat_id);
+      if (chatInfo) {
+        title = chatInfo.title || title;
+        description = chatInfo.description || description;
+        
+        if (chatInfo.photoFileId) {
+          const photoUrl = await getFileUrl(botToken, chatInfo.photoFileId);
+          if (photoUrl) {
+            avatarUrl = photoUrl;
+          }
+        }
       }
     }
 
-    // Prepare update data
-    const updateData: Record<string, any> = {
-      stats_updated_at: new Date().toISOString(),
-    };
+    // Scrape recent posts stats from t.me
+    let recentPostsStats: { messageId: number; views: number; date: string }[] = [];
+    let avgViews = channel.avg_views || 0;
+    let engagement = channel.engagement || 0;
 
-    if (subscribersCount !== null) {
-      updateData.subscribers_count = subscribersCount;
-    }
-
-    if (chatInfo) {
-      if (chatInfo.title) {
-        updateData.title = chatInfo.title;
+    if (channel.username) {
+      const latestMsgId = await findLatestMessageId(channel.username);
+      
+      if (latestMsgId) {
+        console.log(`[refresh] Found latest message ID: ${latestMsgId}`);
+        recentPostsStats = await collectRecentPostsStats(channel.username, latestMsgId);
+        console.log(`[refresh] Collected ${recentPostsStats.length} post stats`);
+        
+        const metrics = calculateMetrics(subscribersCount, recentPostsStats);
+        avgViews = metrics.avgViews;
+        engagement = metrics.engagement;
+      } else {
+        console.log(`[refresh] Could not find latest message ID for @${channel.username}`);
       }
-      if (chatInfo.description !== undefined) {
-        updateData.description = chatInfo.description || null;
-      }
-    }
-
-    if (avatarUrl) {
-      updateData.avatar_url = avatarUrl;
     }
 
     // Update channel in database
     const { error: updateError } = await supabase
       .from("channels")
-      .update(updateData)
+      .update({
+        subscribers_count: subscribersCount,
+        avg_views: avgViews,
+        engagement: engagement,
+        title: title,
+        description: description,
+        avatar_url: avatarUrl,
+        recent_posts_stats: recentPostsStats,
+        stats_updated_at: new Date().toISOString(),
+      })
       .eq("id", channel_id);
 
     if (updateError) {
-      console.error("[refresh-channel-stats] Update error:", updateError);
+      console.error("[refresh] Update error:", updateError);
       return new Response(
-        JSON.stringify({ success: false, error: "Failed to update channel" } as RefreshResponse),
+        JSON.stringify({ success: false, error: "Failed to update channel" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`[refresh-channel-stats] Successfully updated channel ${channel_id}:`, updateData);
+    console.log(`[refresh] Successfully updated stats for @${channel.username}`);
 
     return new Response(
       JSON.stringify({
         success: true,
         updated: true,
         channel: {
-          subscribers_count: updateData.subscribers_count ?? channel.subscribers_count,
-          description: updateData.description ?? channel.description,
-          title: updateData.title ?? channel.title,
-          avatar_url: updateData.avatar_url ?? channel.avatar_url,
-          stats_updated_at: updateData.stats_updated_at,
+          subscribers_count: subscribersCount,
+          avg_views: avgViews,
+          engagement: engagement,
+          recent_posts_stats: recentPostsStats,
+          stats_updated_at: new Date().toISOString(),
         },
-      } as RefreshResponse),
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("[refresh-channel-stats] Unexpected error:", error);
+    console.error("[refresh] Error:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
     return new Response(
-      JSON.stringify({ success: false, error: "Internal server error" } as RefreshResponse),
+      JSON.stringify({ success: false, error: errorMessage }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

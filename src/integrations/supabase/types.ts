@@ -148,19 +148,25 @@ export type Database = {
           created_at: string | null
           description: string | null
           engagement: number | null
+          growth_rate: number | null
           id: string
           is_active: boolean | null
           is_premium: boolean | null
+          language_stats: Json | null
+          notifications_enabled: number | null
           owner_id: string
+          premium_percentage: number | null
           price_1_24: number | null
           price_2_48: number | null
           price_post: number | null
           rating: number | null
+          recent_posts_stats: Json | null
           stats_updated_at: string | null
           subscribers_count: number | null
           successful_ads: number | null
           telegram_chat_id: number | null
           title: string | null
+          top_hours: Json | null
           updated_at: string | null
           username: string
           verified: boolean | null
@@ -173,19 +179,25 @@ export type Database = {
           created_at?: string | null
           description?: string | null
           engagement?: number | null
+          growth_rate?: number | null
           id?: string
           is_active?: boolean | null
           is_premium?: boolean | null
+          language_stats?: Json | null
+          notifications_enabled?: number | null
           owner_id: string
+          premium_percentage?: number | null
           price_1_24?: number | null
           price_2_48?: number | null
           price_post?: number | null
           rating?: number | null
+          recent_posts_stats?: Json | null
           stats_updated_at?: string | null
           subscribers_count?: number | null
           successful_ads?: number | null
           telegram_chat_id?: number | null
           title?: string | null
+          top_hours?: Json | null
           updated_at?: string | null
           username: string
           verified?: boolean | null
@@ -198,19 +210,25 @@ export type Database = {
           created_at?: string | null
           description?: string | null
           engagement?: number | null
+          growth_rate?: number | null
           id?: string
           is_active?: boolean | null
           is_premium?: boolean | null
+          language_stats?: Json | null
+          notifications_enabled?: number | null
           owner_id?: string
+          premium_percentage?: number | null
           price_1_24?: number | null
           price_2_48?: number | null
           price_post?: number | null
           rating?: number | null
+          recent_posts_stats?: Json | null
           stats_updated_at?: string | null
           subscribers_count?: number | null
           successful_ads?: number | null
           telegram_chat_id?: number | null
           title?: string | null
+          top_hours?: Json | null
           updated_at?: string | null
           username?: string
           verified?: boolean | null
