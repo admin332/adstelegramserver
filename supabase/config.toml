@@ -18,5 +18,8 @@ verify_jwt = false
 [functions.send-campaign-preview]
 verify_jwt = false
 
+[functions.preview-channel]
+verify_jwt = false
+
 [functions.upload-campaign-media]
 verify_jwt = false
