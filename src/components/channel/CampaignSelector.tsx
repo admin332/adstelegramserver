@@ -3,7 +3,15 @@ import { motion } from 'framer-motion';
 import { Plus, ExternalLink, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import type { Campaign } from '@/data/mockCampaigns';
+
+interface Campaign {
+  id: string;
+  name: string;
+  imageUrl: string;
+  text: string;
+  buttonText: string;
+  buttonUrl: string;
+}
 
 interface CampaignSelectorProps {
   campaigns: Campaign[];
@@ -41,6 +49,14 @@ const CampaignSelector: React.FC<CampaignSelectorProps> = ({
         <p className="text-sm text-muted-foreground text-center">
           Выбрано {selectedCampaigns.length} из {requiredCount} кампаний
         </p>
+      )}
+
+      {/* Empty State */}
+      {campaigns.length === 0 && (
+        <div className="text-center py-8">
+          <p className="text-muted-foreground">У вас пока нет кампаний</p>
+          <p className="text-sm text-muted-foreground mt-1">Создайте первую кампанию</p>
+        </div>
       )}
 
       {/* Campaign List */}

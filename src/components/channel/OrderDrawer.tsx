@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { isToday } from 'date-fns';
 import { ArrowRight, ArrowLeft } from 'lucide-react';
@@ -14,7 +15,7 @@ import { Progress } from '@/components/ui/progress';
 import PostQuantitySelector from './PostQuantitySelector';
 import DateTimeSelector from './DateTimeSelector';
 import CampaignSelector from './CampaignSelector';
-import { mockCampaigns } from '@/data/mockCampaigns';
+import { useUserCampaigns } from '@/hooks/useUserCampaigns';
 
 interface OrderDrawerProps {
   isOpen: boolean;
@@ -29,6 +30,9 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   channelName,
   pricePerPost,
 }) => {
+  const navigate = useNavigate();
+  const { data: userCampaigns = [] } = useUserCampaigns();
+  
   const [currentStep, setCurrentStep] = useState(1);
   const [quantity, setQuantity] = useState(1);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -39,6 +43,16 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
     return minHour > 23 ? 0 : minHour;
   });
   const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>([]);
+
+  // Преобразовать данные из БД в формат для CampaignSelector
+  const campaigns = userCampaigns.map(c => ({
+    id: c.id,
+    name: c.name,
+    imageUrl: c.image_url || '/placeholder.svg',
+    text: c.text,
+    buttonText: c.button_text || '',
+    buttonUrl: c.button_url || '',
+  }));
 
   const totalSteps = 3;
   const progressValue = (currentStep / totalSteps) * 100;
@@ -77,7 +91,8 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   };
 
   const handleCreateNewCampaign = () => {
-    console.log('Create new campaign - TODO');
+    onClose();
+    navigate('/create?role=advertiser&action=new-campaign');
   };
 
   const handleDateChange = (date: Date) => {
@@ -166,7 +181,7 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
                 exit={{ opacity: 0, x: 20 }}
               >
                 <CampaignSelector
-                  campaigns={mockCampaigns}
+                  campaigns={campaigns}
                   selectedCampaigns={selectedCampaigns}
                   requiredCount={quantity}
                   onSelectionChange={setSelectedCampaigns}
