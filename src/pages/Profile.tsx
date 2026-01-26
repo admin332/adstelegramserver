@@ -11,12 +11,9 @@ import {
   LogOut, 
   ChevronRight,
   Shield,
-  Bell,
-  CreditCard,
   Star,
   Crown,
-  Loader2,
-  FlaskConical
+  Loader2
 } from "lucide-react";
 
 const Profile = () => {
@@ -34,8 +31,6 @@ const Profile = () => {
 
   const menuItems = [
     { icon: Wallet, label: "Кошелёк", description: "$1,250.00", action: true },
-    { icon: CreditCard, label: "Способы оплаты", action: true },
-    { icon: Bell, label: "Уведомления", action: true },
     { icon: Shield, label: "Безопасность", action: true },
     { icon: Settings, label: "Настройки", action: true },
     { icon: HelpCircle, label: "Помощь", action: true },
