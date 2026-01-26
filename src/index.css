@@ -90,6 +90,12 @@
     padding: 0;
     background-color: transparent;
     height: 100%;
+    touch-action: manipulation;
+  }
+
+  /* Предотвращает auto-zoom на iOS при фокусе на input */
+  input, textarea, select {
+    font-size: 16px !important;
   }
 
   body {
