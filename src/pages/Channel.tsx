@@ -4,15 +4,23 @@ import { motion } from 'framer-motion';
 import { Star, TrendingUp, Tag, ShoppingCart } from 'lucide-react';
 import { mockChannels } from '@/data/mockChannels';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import ChannelHero from '@/components/channel/ChannelHero';
 import ChannelStats from '@/components/channel/ChannelStats';
 import OrderDrawer from '@/components/channel/OrderDrawer';
 import { getTelegramWebApp, isTelegramMiniApp } from '@/lib/telegram';
+import { useChannel } from '@/hooks/useChannels';
 
 const Channel: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [isOrderDrawerOpen, setIsOrderDrawerOpen] = useState(false);
+  
+  const { data: dbChannel, isLoading, error } = useChannel(id);
+  
+  // Fallback to mock if not found in DB
+  const mockChannel = mockChannels.find((c) => c.id === id);
+  const channel = dbChannel || mockChannel;
 
   // Telegram BackButton integration
   const handleBack = useCallback(() => {
@@ -34,7 +42,26 @@ const Channel: React.FC = () => {
     }
   }, [handleBack]);
 
-  const channel = mockChannels.find((c) => c.id === id);
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background pb-24">
+        <div className="relative h-48 bg-gradient-to-b from-primary/20 to-background">
+          <div className="absolute -bottom-12 left-1/2 -translate-x-1/2">
+            <Skeleton className="w-24 h-24 rounded-full" />
+          </div>
+        </div>
+        <div className="mt-16 px-4 space-y-4">
+          <Skeleton className="h-6 w-48 mx-auto" />
+          <Skeleton className="h-4 w-32 mx-auto" />
+          <div className="grid grid-cols-3 gap-3 mt-6">
+            <Skeleton className="h-20 rounded-xl" />
+            <Skeleton className="h-20 rounded-xl" />
+            <Skeleton className="h-20 rounded-xl" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!channel) {
     return (

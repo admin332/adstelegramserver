@@ -7,8 +7,10 @@ import { FilterChip } from "@/components/FilterChip";
 import { PromoBannerCarousel } from "@/components/PromoBannerCarousel";
 import { mockChannels } from "@/data/mockChannels";
 import { useFavorites } from "@/hooks/useFavorites";
+import { useChannels } from "@/hooks/useChannels";
+import { Skeleton } from "@/components/ui/skeleton";
 import { TrendingUp, Users, Heart, DollarSign, ArrowUpDown } from "lucide-react";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
 type SortOption = "subscribers" | "price" | "engagement" | "rating";
@@ -21,33 +23,39 @@ const Index = () => {
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [sortBy, setSortBy] = useState<SortOption>("subscribers");
   const { favorites, toggleFavorite, isFavorite } = useFavorites();
+  const { data: dbChannels, isLoading } = useChannels();
+  
+  // Use real channels if available, fallback to mock
+  const channels = dbChannels && dbChannels.length > 0 ? dbChannels : mockChannels;
 
-  const filteredChannels = mockChannels
-    .filter((channel) => {
-      const matchesSearch = channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        channel.username.toLowerCase().includes(searchQuery.toLowerCase());
-      
-      const matchesCategory = activeCategory === "all" || 
-        channel.category.toLowerCase() === getCategoryName(activeCategory).toLowerCase();
-      
-      const matchesFavorites = !showFavoritesOnly || favorites.includes(channel.id);
-      
-      return matchesSearch && matchesCategory && matchesFavorites;
-    })
-    .sort((a, b) => {
-      switch (sortBy) {
-        case "subscribers":
-          return b.subscribers - a.subscribers;
-        case "price":
-          return a.price - b.price;
-        case "engagement":
-          return (b.avgViews / b.subscribers) - (a.avgViews / a.subscribers);
-        case "rating":
-          return b.rating - a.rating;
-        default:
-          return 0;
-      }
-    });
+  const filteredChannels = useMemo(() => {
+    return channels
+      .filter((channel) => {
+        const matchesSearch = channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          channel.username.toLowerCase().includes(searchQuery.toLowerCase());
+        
+        const matchesCategory = activeCategory === "all" || 
+          channel.category.toLowerCase() === getCategoryName(activeCategory).toLowerCase();
+        
+        const matchesFavorites = !showFavoritesOnly || favorites.includes(channel.id);
+        
+        return matchesSearch && matchesCategory && matchesFavorites;
+      })
+      .sort((a, b) => {
+        switch (sortBy) {
+          case "subscribers":
+            return b.subscribers - a.subscribers;
+          case "price":
+            return a.price - b.price;
+          case "engagement":
+            return (b.avgViews / b.subscribers) - (a.avgViews / a.subscribers);
+          case "rating":
+            return b.rating - a.rating;
+          default:
+            return 0;
+        }
+      });
+  }, [channels, searchQuery, activeCategory, showFavoritesOnly, favorites, sortBy]);
 
   function getCategoryName(id: string): string {
     const map: Record<string, string> = {
@@ -154,7 +162,22 @@ const Index = () => {
             </button>
           </div>
           <div className="space-y-3">
-            {filteredChannels.length > 0 ? (
+            {isLoading ? (
+              <>
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="bg-secondary/50 rounded-2xl p-4">
+                    <div className="flex items-center gap-3">
+                      <Skeleton className="w-12 h-12 rounded-full" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-3 w-24" />
+                      </div>
+                      <Skeleton className="h-8 w-16" />
+                    </div>
+                  </div>
+                ))}
+              </>
+            ) : filteredChannels.length > 0 ? (
               filteredChannels.map((channel) => (
                 <ChannelCard 
                   key={channel.id} 

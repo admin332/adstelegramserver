@@ -88,17 +88,22 @@ export type Database = {
       channels: {
         Row: {
           avatar_url: string | null
+          avg_views: number | null
           bot_is_admin: boolean | null
           category: string
           created_at: string | null
           description: string | null
+          engagement: number | null
           id: string
           is_active: boolean | null
+          is_premium: boolean | null
           owner_id: string
           price_1_24: number | null
           price_2_48: number | null
           price_post: number | null
+          rating: number | null
           subscribers_count: number | null
+          successful_ads: number | null
           telegram_chat_id: number | null
           title: string | null
           updated_at: string | null
@@ -107,17 +112,22 @@ export type Database = {
         }
         Insert: {
           avatar_url?: string | null
+          avg_views?: number | null
           bot_is_admin?: boolean | null
           category: string
           created_at?: string | null
           description?: string | null
+          engagement?: number | null
           id?: string
           is_active?: boolean | null
+          is_premium?: boolean | null
           owner_id: string
           price_1_24?: number | null
           price_2_48?: number | null
           price_post?: number | null
+          rating?: number | null
           subscribers_count?: number | null
+          successful_ads?: number | null
           telegram_chat_id?: number | null
           title?: string | null
           updated_at?: string | null
@@ -126,17 +136,22 @@ export type Database = {
         }
         Update: {
           avatar_url?: string | null
+          avg_views?: number | null
           bot_is_admin?: boolean | null
           category?: string
           created_at?: string | null
           description?: string | null
+          engagement?: number | null
           id?: string
           is_active?: boolean | null
+          is_premium?: boolean | null
           owner_id?: string
           price_1_24?: number | null
           price_2_48?: number | null
           price_post?: number | null
+          rating?: number | null
           subscribers_count?: number | null
+          successful_ads?: number | null
           telegram_chat_id?: number | null
           title?: string | null
           updated_at?: string | null
