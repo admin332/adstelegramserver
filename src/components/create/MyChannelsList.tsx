@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import { Plus, Users, BadgeCheck, ArrowLeft } from "lucide-react";
 import { useUserChannels, useToggleChannelActive, UserChannel } from "@/hooks/useUserChannels";
 import { channelCategories } from "@/data/channelCategories";
@@ -76,6 +77,11 @@ export const MyChannelsList = ({ onAddChannel, onBack }: MyChannelsListProps) =>
                   </h3>
                   {channel.verified && (
                     <BadgeCheck className="w-4 h-4 text-primary flex-shrink-0" />
+                  )}
+                  {channel.userRole === 'manager' && (
+                    <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                      Менеджер
+                    </Badge>
                   )}
                 </div>
                 <p className="text-sm text-muted-foreground">@{channel.username}</p>

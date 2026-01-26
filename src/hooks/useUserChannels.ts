@@ -17,6 +17,7 @@ export interface UserChannel {
   price_1_24: number | null;
   price_2_48: number | null;
   created_at: string | null;
+  userRole?: 'owner' | 'manager';
 }
 
 export function useUserChannels() {
@@ -27,18 +28,38 @@ export function useUserChannels() {
     queryFn: async () => {
       if (!user?.id) return [];
 
-      const { data, error } = await supabase
-        .from("channels")
-        .select("*")
-        .eq("owner_id", user.id)
-        .order("created_at", { ascending: false });
+      // Получаем записи из channel_admins для текущего пользователя
+      const { data: adminEntries, error: adminError } = await supabase
+        .from("channel_admins")
+        .select("channel_id, role")
+        .eq("user_id", user.id);
 
-      if (error) {
-        console.error("Error fetching user channels:", error);
-        throw error;
+      if (adminError) {
+        console.error("Error fetching admin entries:", adminError);
+        throw adminError;
       }
 
-      return data as UserChannel[];
+      if (!adminEntries || adminEntries.length === 0) return [];
+
+      const channelIds = adminEntries.map(e => e.channel_id);
+
+      // Получаем каналы по ID
+      const { data: channels, error: channelsError } = await supabase
+        .from("channels")
+        .select("*")
+        .in("id", channelIds)
+        .order("created_at", { ascending: false });
+
+      if (channelsError) {
+        console.error("Error fetching channels:", channelsError);
+        throw channelsError;
+      }
+
+      // Добавляем роль к каждому каналу
+      return (channels || []).map(ch => ({
+        ...ch,
+        userRole: adminEntries.find(e => e.channel_id === ch.id)?.role as 'owner' | 'manager' | undefined,
+      })) as UserChannel[];
     },
     enabled: !!user?.id,
   });
