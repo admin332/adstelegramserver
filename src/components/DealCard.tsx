@@ -119,7 +119,14 @@ export const DealCard = ({
   };
 
   return (
-    <div className="bg-card rounded-2xl p-4 animate-fade-in">
+    <div className="bg-card rounded-2xl p-4 animate-fade-in relative">
+      {/* Таймер в правом верхнем углу */}
+      {status === "pending" && expiresAt && (
+        <div className="absolute top-4 right-4">
+          <ExpirationTimer expiresAt={expiresAt} />
+        </div>
+      )}
+
       {/* Верхняя часть: информация о канале */}
       <div className="flex items-start gap-3">
         <Avatar className="w-12 h-12">
@@ -165,12 +172,7 @@ export const DealCard = ({
           <StatusIcon className={cn("w-4 h-4", config.color)} />
           <span className={cn("text-sm font-medium", config.color)}>{config.label}</span>
         </div>
-        <div className="flex items-center gap-2">
-          {status === "pending" && expiresAt && (
-            <ExpirationTimer expiresAt={expiresAt} />
-          )}
-          <span className="text-sm text-muted-foreground">{timeAgo}</span>
-        </div>
+        <span className="text-sm text-muted-foreground">{timeAgo}</span>
       </div>
 
       {/* Кнопки действий для pending статуса */}
