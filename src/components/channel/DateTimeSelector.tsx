@@ -96,7 +96,7 @@ const DateTimeSelector: React.FC<DateTimeSelectorProps> = ({
           <SelectTrigger className="w-full h-12 rounded-xl bg-secondary/50 border-0">
             <SelectValue placeholder="Выберите время" />
           </SelectTrigger>
-          <SelectContent className="z-[60]">
+          <SelectContent className="z-[60] border-0">
             {hours.map((hour) => (
               <SelectItem key={hour} value={hour.toString()}>
                 {formatHour(hour)}
