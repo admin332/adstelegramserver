@@ -3,6 +3,7 @@ import { Copy, ExternalLink, CheckCircle, Loader2, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTonWallet } from '@/hooks/useTonWallet';
 import { useTonPrice } from '@/hooks/useTonPrice';
+import { useTonConnectUI } from '@tonconnect/ui-react';
 import { toast } from 'sonner';
 import tonIcon from '@/assets/ton-icon.svg';
 
@@ -19,9 +20,11 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
   isCreatingDeal,
   onPaymentComplete,
 }) => {
-  const { address: walletAddress, isConnected, connect } = useTonWallet();
-  const { tonPrice, convertToUsd } = useTonPrice();
+  const { isConnected, connect } = useTonWallet();
+  const { convertToUsd } = useTonPrice();
+  const [tonConnectUI] = useTonConnectUI();
   const [copied, setCopied] = useState(false);
+  const [isPaying, setIsPaying] = useState(false);
 
   const usdEquivalent = convertToUsd(totalPriceTon);
 
@@ -41,6 +44,36 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
   const openExplorer = () => {
     if (!escrowAddress) return;
     window.open(`https://tonviewer.com/${escrowAddress}`, '_blank');
+  };
+
+  const handlePayViaWallet = async () => {
+    if (!escrowAddress) return;
+    
+    setIsPaying(true);
+    
+    // Конвертация TON в nanoTON (1 TON = 10^9 nanoTON)
+    const amountNano = (totalPriceTon * 1_000_000_000).toString();
+    
+    const transaction = {
+      validUntil: Math.floor(Date.now() / 1000) + 600, // 10 минут
+      messages: [
+        {
+          address: escrowAddress,
+          amount: amountNano,
+        }
+      ]
+    };
+    
+    try {
+      await tonConnectUI.sendTransaction(transaction);
+      toast.success('Транзакция отправлена!');
+      onPaymentComplete();
+    } catch (error) {
+      // Пользователь отменил или ошибка
+      console.error('Transaction error:', error);
+    } finally {
+      setIsPaying(false);
+    }
   };
 
   // Если кошелёк не подключён
@@ -93,7 +126,7 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
       {/* Эскроу адрес */}
       <div className="bg-secondary/50 rounded-2xl p-4">
         <p className="text-sm text-muted-foreground mb-2 text-center">
-          Отправьте средства на адрес эскроу:
+          Временный адрес эскроу
         </p>
         
         <div className="bg-background rounded-xl p-3 flex items-center gap-2">
@@ -125,14 +158,6 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
         </Button>
       </div>
 
-      {/* Информация о кошельке пользователя */}
-      <div className="bg-secondary/30 rounded-xl p-3 text-center">
-        <p className="text-xs text-muted-foreground">Ваш кошелёк</p>
-        <p className="font-mono text-sm">
-          {walletAddress?.slice(0, 8)}...{walletAddress?.slice(-6)}
-        </p>
-      </div>
-
       {/* Предупреждение */}
       <div className="text-center text-sm text-muted-foreground">
         <p>
@@ -141,9 +166,27 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
         </p>
       </div>
 
-      {/* Кнопка подтверждения */}
-      <Button onClick={onPaymentComplete} className="w-full h-12 text-base font-semibold">
-        Я оплатил
+      {/* Кнопка оплаты через кошелёк */}
+      <Button 
+        onClick={handlePayViaWallet} 
+        className="w-full h-12 text-base font-semibold"
+        disabled={isPaying}
+      >
+        {isPaying ? (
+          <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+        ) : (
+          <Wallet className="w-5 h-5 mr-2" />
+        )}
+        Оплатить
+      </Button>
+
+      {/* Кнопка "Я оплатил" как запасной вариант */}
+      <Button 
+        onClick={onPaymentComplete} 
+        variant="outline"
+        className="w-full h-12 text-base"
+      >
+        Я оплатил вручную
       </Button>
     </div>
   );
