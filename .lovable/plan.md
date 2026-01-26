@@ -2,86 +2,180 @@
 
 ## Задача
 
-Скрыть от владельцев каналов сделки со статусами "pending" (ожидает оплаты) и "expired" (истекло), так как они не требуют действий от владельца.
+Реализовать автопубликацию рекламы в каналы при наступлении запланированного времени + добавить редактирование даты публикации в админ-панели.
 
-## Текущее поведение
+## Текущее состояние
 
-В `user-deals/index.ts` (строки 158-178) все сделки трансформируются и возвращаются без фильтрации по статусу:
+### Проблема
+После одобрения владельцем (статус `in_progress`) **бот НЕ публикует пост** в канал. Нет функции, которая:
+1. Отслеживает наступление `scheduled_at`
+2. Публикует рекламу в канал через Telegram Bot API
+3. Обновляет статус на `completed` после успешной публикации
 
-```typescript
-const transformedDeals = deals?.map((deal) => {
-  const isChannelOwner = userChannelIds.includes(deal.channel_id) && deal.advertiser_id !== userId;
-  const role = isChannelOwner ? "channel_owner" : "advertiser";
-  return { ...deal, role };
-}) || [];
+### Существующие данные
 ```
+id: a802c68d-..., status: in_progress, scheduled_at: 2026-01-27 00:00:00+00
+```
+Сделка одобрена, но пост не будет опубликован.
 
 ## Решение
 
-Добавить фильтрацию после трансформации: исключать сделки со статусами `pending` и `expired` для роли `channel_owner`.
+### Часть 1: Edge Function для автопубликации
 
-## Изменение в `supabase/functions/user-deals/index.ts`
+Создать `supabase/functions/publish-scheduled-posts/index.ts`:
 
-Заменить строки 158-178:
+1. Запрашивает сделки со статусом `in_progress` где `scheduled_at <= now()`
+2. Для каждой сделки:
+   - Получает данные кампании (текст, медиа, кнопка)
+   - Публикует в канал через `telegram_chat_id`
+   - Обновляет `posted_at = now()`, `status = 'completed'`
+   - Уведомляет рекламодателя об успешной публикации
 
-```typescript
-// Statuses to hide from channel owners (they don't need to act on these)
-const hiddenStatusesForOwner = ['pending', 'expired'];
+### Часть 2: Cron job для автозапуска
 
-// Transform deals with role info
-const transformedDeals = deals?.map((deal) => {
-  const isChannelOwner = userChannelIds.includes(deal.channel_id) && deal.advertiser_id !== userId;
-  const role = isChannelOwner ? "channel_owner" : "advertiser";
+Добавить pg_cron задачу для запуска `publish-scheduled-posts` каждую минуту:
 
-  return {
-    id: deal.id,
-    status: deal.status,
-    total_price: deal.total_price,
-    posts_count: deal.posts_count,
-    duration_hours: deal.duration_hours,
-    escrow_address: deal.escrow_address,
-    scheduled_at: deal.scheduled_at,
-    created_at: deal.created_at,
-    expires_at: deal.expires_at,
-    channel: deal.channel,
-    campaign: deal.campaign,
-    role,
-    advertiser: isChannelOwner ? advertisersMap[deal.advertiser_id] : undefined,
-  };
-}).filter((deal) => {
-  // Hide pending/expired deals from channel owners
-  if (deal.role === 'channel_owner' && hiddenStatusesForOwner.includes(deal.status)) {
-    return false;
-  }
-  return true;
-}) || [];
+```sql
+select cron.schedule(
+  'publish-scheduled-posts',
+  '* * * * *',
+  $$
+  select net.http_post(
+    url:='https://fdxyittddmpyhaiijddp.supabase.co/functions/v1/publish-scheduled-posts',
+    headers:='{"Content-Type": "application/json", "Authorization": "Bearer <anon_key>"}'::jsonb,
+    body:='{}'::jsonb
+  ) as request_id;
+  $$
+);
 ```
 
-## Логика фильтрации
+### Часть 3: Редактирование даты в админ-панели
 
-| Статус | Рекламодатель | Владелец канала |
-|--------|---------------|-----------------|
-| `pending` | ✅ Видит (нужно оплатить) | ❌ Скрыто |
-| `expired` | ✅ Видит (история) | ❌ Скрыто |
-| `escrow` | ✅ Видит | ✅ Видит (нужно одобрить) |
-| `in_progress` | ✅ Видит | ✅ Видит |
-| `completed` | ✅ Видит | ✅ Видит |
-| `cancelled` | ✅ Видит | ✅ Видит |
-| `disputed` | ✅ Видит | ✅ Видит |
+Обновить `AdminDealsTable.tsx`:
 
-## Файл для изменения
+1. Добавить колонку "Публикация" с текущим `scheduled_at`
+2. Добавить кнопку редактирования даты
+3. Создать `ScheduleEditDialog` с DateTimePicker
+4. При сохранении обновлять `scheduled_at` в базе
+
+## Файлы для создания/изменения
 
 | Файл | Действие |
 |------|----------|
-| `supabase/functions/user-deals/index.ts` | Добавить фильтрацию по статусу для роли `channel_owner` |
+| `supabase/functions/publish-scheduled-posts/index.ts` | Создать — автопубликация в каналы |
+| `supabase/config.toml` | Добавить функцию |
+| `src/components/admin/AdminDealsTable.tsx` | Обновить — добавить колонку и редактирование даты |
+| `src/components/admin/ScheduleEditDialog.tsx` | Создать — диалог редактирования даты |
+
+## Техническая реализация
+
+### 1. publish-scheduled-posts/index.ts
+
+```typescript
+// Основная логика
+1. Запросить сделки: status = 'in_progress' AND scheduled_at <= NOW()
+2. Для каждой сделки:
+   - Получить channel.telegram_chat_id
+   - Получить campaign (text, media_urls, button_text, button_url)
+   - Вызвать Telegram API для публикации:
+     * sendPhoto/sendVideo для одного медиа
+     * sendMediaGroup для нескольких медиа
+     * sendMessage для текста без медиа
+   - Обновить deal: posted_at = now(), status = 'completed'
+   - Уведомить рекламодателя: "Ваша реклама опубликована в канале X"
+```
+
+### 2. Логика публикации в канал
+
+```typescript
+async function publishToChannel(chatId: number, campaign: Campaign) {
+  const replyMarkup = button_text && button_url 
+    ? { inline_keyboard: [[{ text: button_text, url: button_url }]] }
+    : undefined;
+
+  if (!media_urls?.length) {
+    await sendMessage(chatId, text, replyMarkup);
+  } else if (media_urls.length === 1) {
+    await sendPhoto/sendVideo(chatId, media_urls[0], text, replyMarkup);
+  } else {
+    await sendMediaGroup(chatId, media_urls, text);
+    if (replyMarkup) await sendMessage(chatId, "👆", replyMarkup);
+  }
+}
+```
+
+### 3. AdminDealsTable — новая колонка
+
+Добавить в таблицу:
+- Колонка "Публикация" показывающая `scheduled_at`
+- Кнопка с иконкой Calendar для редактирования
+- При клике открывается `ScheduleEditDialog`
+
+```typescript
+<TableHead>Публикация</TableHead>
+...
+<TableCell>
+  <div className="flex items-center gap-2">
+    <span>{formatScheduledAt(deal.scheduled_at)}</span>
+    <Button size="icon" variant="ghost" onClick={() => openEditDialog(deal)}>
+      <CalendarIcon className="h-4 w-4" />
+    </Button>
+  </div>
+</TableCell>
+```
+
+### 4. ScheduleEditDialog
+
+```typescript
+interface ScheduleEditDialogProps {
+  deal: AdminDeal;
+  open: boolean;
+  onClose: () => void;
+  onSave: (dealId: string, newDate: Date) => void;
+}
+
+// Содержит:
+// - Calendar для выбора даты
+// - Select для выбора часа
+// - Кнопки "Сохранить" / "Отмена"
+```
+
+### 5. Запрос данных в AdminDealsTable
+
+Добавить `scheduled_at` в SELECT:
+
+```typescript
+.select(`
+  id, status, total_price, posts_count, duration_hours,
+  escrow_address, created_at, expires_at, scheduled_at,  // <-- добавить
+  channel:channels(title, username),
+  ...
+`)
+```
 
 ## Результат
 
-После изменения владельцы каналов будут видеть только релевантные сделки:
-- `escrow` — требует одобрения/отклонения
-- `in_progress` — реклама публикуется
-- `completed` — завершённые сделки
-- `cancelled` / `disputed` — проблемные сделки
+После реализации:
+1. **Автопубликация**: Бот публикует рекламу в канал при наступлении `scheduled_at`
+2. **Уведомления**: Рекламодатель получает уведомление о публикации
+3. **Контроль**: Админ может изменить дату публикации прямо в панели
+4. **Статусы**: Сделка автоматически переходит в `completed` после публикации
 
-Сделки `pending` и `expired` не будут отображаться, так как они не требуют действий от владельца канала.
+## Уведомления рекламодателю
+
+При успешной публикации:
+```
+📢 Ваша реклама опубликована!
+
+Канал: Channel Name (@username)
+Время публикации: 27.01.2026 в 03:00
+
+Спасибо за использование Adsingo!
+```
+
+## Обработка ошибок
+
+- Если бот не админ канала → логировать ошибку, не менять статус
+- Если медиа недоступно → попробовать опубликовать без медиа
+- Retry logic для временных ошибок Telegram API
 
