@@ -113,7 +113,7 @@ serve(async (req) => {
         advertiser_id,
         channel_id,
         channel:channels(id, title, avatar_url, username),
-        campaign:campaigns(id, name)
+        campaign:campaigns(id, name, media_urls, image_url)
       `)
       .order("created_at", { ascending: false });
 
@@ -132,27 +132,6 @@ serve(async (req) => {
         JSON.stringify({ success: false, error: "Failed to fetch deals" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
-    }
-
-    // Collect advertiser IDs for channel owner deals
-    const advertiserIds = new Set<string>();
-    deals?.forEach((deal) => {
-      if (userChannelIds.includes(deal.channel_id) && deal.advertiser_id !== userId) {
-        advertiserIds.add(deal.advertiser_id);
-      }
-    });
-
-    // Fetch advertiser info
-    let advertisersMap: Record<string, any> = {};
-    if (advertiserIds.size > 0) {
-      const { data: advertisers } = await supabase
-        .from("users")
-        .select("id, first_name, username, photo_url")
-        .in("id", Array.from(advertiserIds));
-
-      advertisers?.forEach((adv) => {
-        advertisersMap[adv.id] = adv;
-      });
     }
 
     // Statuses to hide from channel owners (they don't need to act on these)
@@ -176,7 +155,6 @@ serve(async (req) => {
         channel: deal.channel,
         campaign: deal.campaign,
         role,
-        advertiser: isChannelOwner ? advertisersMap[deal.advertiser_id] : undefined,
       };
     }).filter((deal) => {
       // Hide pending/expired deals from channel owners
