@@ -1,25 +1,21 @@
 
 
 ## Цель
-Обновить манифест TON Connect с продакшен доменом `adsingo.online`
+Установить загруженный логотип как иконку в манифесте TON Connect
 
-## Текущий файл
+## Шаги реализации
 
-**Файл**: `public/tonconnect-manifest.json`
+### Шаг 1: Скопировать изображение в public/
 
-```json
-{
-  "url": "https://adstelegramserver.lovable.app",
-  "name": "Adsingo",
-  "iconUrl": "https://adstelegramserver.lovable.app/favicon.ico",
-  "termsOfUseUrl": "https://adstelegramserver.lovable.app/terms",
-  "privacyPolicyUrl": "https://adstelegramserver.lovable.app/privacy"
-}
+```
+user-uploads://logosvg1.png → public/icon.png
 ```
 
-## Изменения
+Файл будет доступен по адресу `https://adsingo.online/icon.png`
 
-Заменить все URL на продакшен домен:
+### Шаг 2: Обновить манифест
+
+**Файл**: `public/tonconnect-manifest.json`
 
 ```json
 {
@@ -31,11 +27,9 @@
 }
 ```
 
-## Важно
+Изменение: `favicon.ico` → `icon.png`
 
-Убедитесь, что файл `icon.png` существует в папке `public/` — иначе TON кошельки не смогут отобразить иконку приложения. Если иконки нет, нужно будет её добавить или использовать существующий `favicon.ico`:
+## Результат
 
-```json
-"iconUrl": "https://adsingo.online/favicon.ico"
-```
+TON кошельки (Tonkeeper, TON Wallet и др.) будут отображать ваш логотип с мегафоном при подключении к приложению.
 
