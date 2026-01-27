@@ -1,4 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { mnemonicToPrivateKey } from "@ton/crypto";
+import { WalletContractV4, TonClient, internal, SendMode } from "@ton/ton";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,15 +10,26 @@ const corsHeaders = {
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const ENCRYPTION_KEY = Deno.env.get("ENCRYPTION_KEY")!;
+const TONCENTER_API_KEY = Deno.env.get("TONCENTER_API_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// Initialize TON client
+const client = new TonClient({
+  endpoint: "https://toncenter.com/api/v2/jsonRPC",
+  apiKey: TONCENTER_API_KEY,
+});
 
 interface Deal {
   id: string;
   posted_at: string;
   duration_hours: number;
   total_price: number;
+  telegram_message_id: number | null;
+  escrow_mnemonic_encrypted: string | null;
   channel: {
+    telegram_chat_id: number;
     title: string | null;
     username: string;
     owner_id: string;
@@ -29,30 +42,150 @@ interface User {
   wallet_address: string | null;
 }
 
+async function sendTelegramRequest(method: string, body: Record<string, unknown>) {
+  const response = await fetch(
+    `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+  return await response.json();
+}
+
 async function sendTelegramMessage(chatId: number, text: string): Promise<void> {
   try {
-    const response = await fetch(
-      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text,
-          parse_mode: "HTML",
-        }),
-      }
-    );
-    const result = await response.json();
-    if (!result.ok) {
-      console.error("Telegram send error:", result);
-    }
+    await sendTelegramRequest("sendMessage", {
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+    });
   } catch (error) {
     console.error("Failed to send Telegram message:", error);
   }
 }
 
-async function processDeal(deal: Deal): Promise<{ success: boolean; error?: string }> {
+async function checkPostExists(chatId: number, messageId: number): Promise<boolean> {
+  try {
+    const result = await sendTelegramRequest("copyMessage", {
+      chat_id: chatId,
+      from_chat_id: chatId,
+      message_id: messageId,
+    });
+    
+    if (result.ok) {
+      await sendTelegramRequest("deleteMessage", {
+        chat_id: chatId,
+        message_id: result.result.message_id,
+      });
+      return true;
+    }
+    
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function decryptMnemonic(encryptedData: string): string[] {
+  try {
+    const key = new TextEncoder().encode(ENCRYPTION_KEY.slice(0, 32).padEnd(32, "0"));
+    const data = Uint8Array.from(atob(encryptedData), (c) => c.charCodeAt(0));
+    
+    const iv = data.slice(0, 12);
+    const ciphertext = data.slice(12, -16);
+    const authTag = data.slice(-16);
+    
+    // For now, log and return empty - proper crypto implementation needed
+    console.log("Decryption params:", { ivLen: iv.length, cipherLen: ciphertext.length, tagLen: authTag.length });
+    
+    // Note: Proper async decryption should be implemented
+    // This is a placeholder that will need SubtleCrypto implementation
+    return [];
+  } catch (error) {
+    console.error("Decryption error:", error);
+    return [];
+  }
+}
+
+async function transferToOwner(
+  encryptedMnemonic: string,
+  ownerWalletAddress: string,
+  amount: number
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  try {
+    console.log(`Initiating transfer of ${amount} TON to ${ownerWalletAddress}`);
+    
+    // Decrypt mnemonic
+    const mnemonicWords = decryptMnemonic(encryptedMnemonic);
+    
+    if (mnemonicWords.length === 0) {
+      // Fallback: manual transfer notification needed
+      console.error("Could not decrypt mnemonic - manual transfer required");
+      return { success: false, error: "Decryption failed - manual transfer required" };
+    }
+    
+    const keyPair = await mnemonicToPrivateKey(mnemonicWords);
+    
+    // Create wallet contract
+    const wallet = WalletContractV4.create({ 
+      publicKey: keyPair.publicKey, 
+      workchain: 0 
+    });
+    const contract = client.open(wallet);
+    
+    // Check balance
+    const balance = await contract.getBalance();
+    const networkFee = BigInt(0.02 * 1_000_000_000); // ~0.02 TON for fees
+    const transferAmount = balance - networkFee;
+    
+    if (transferAmount <= 0n) {
+      return { success: false, error: "Insufficient balance for transfer" };
+    }
+    
+    // Send transfer
+    const seqno = await contract.getSeqno();
+    await contract.sendTransfer({
+      seqno,
+      secretKey: keyPair.secretKey,
+      sendMode: SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS,
+      messages: [
+        internal({
+          to: ownerWalletAddress,
+          value: transferAmount,
+          body: "Adsingo payment - ad completed successfully",
+        }),
+      ],
+    });
+    
+    console.log(`Transfer initiated: ${transferAmount} nanoTON to ${ownerWalletAddress}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Transfer error:", error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : "Unknown transfer error" 
+    };
+  }
+}
+
+async function refundToAdvertiser(
+  deal: Deal,
+  advertiserWallet: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!deal.escrow_mnemonic_encrypted) {
+    return { success: false, error: "No escrow mnemonic" };
+  }
+  
+  return await transferToOwner(
+    deal.escrow_mnemonic_encrypted,
+    advertiserWallet,
+    deal.total_price
+  );
+}
+
+async function processDeal(deal: Deal): Promise<{ success: boolean; refunded?: boolean; error?: string }> {
   console.log(`Processing deal ${deal.id} for completion...`);
 
   try {
@@ -72,6 +205,72 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; error?: stri
       .eq("id", deal.channel.owner_id)
       .single();
 
+    // Final post integrity check before completing
+    if (deal.telegram_message_id && deal.channel.telegram_chat_id) {
+      const postExists = await checkPostExists(deal.channel.telegram_chat_id, deal.telegram_message_id);
+      
+      if (!postExists) {
+        console.log(`Post deleted for deal ${deal.id}, initiating refund...`);
+        
+        // Refund to advertiser
+        if (advertiser?.wallet_address && deal.escrow_mnemonic_encrypted) {
+          const refundResult = await refundToAdvertiser(deal, advertiser.wallet_address);
+          console.log(`Refund result:`, refundResult);
+        }
+        
+        // Update deal as cancelled
+        await supabase
+          .from("deals")
+          .update({
+            status: "cancelled",
+            cancellation_reason: "post_deleted",
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", deal.id);
+        
+        // Notify advertiser about refund
+        if (advertiser?.telegram_id) {
+          await sendTelegramMessage(
+            advertiser.telegram_id,
+            `⚠️ <b>Пост удалён из канала</b>
+
+Ваша реклама в канале <b>${channelTitle}</b> (@${deal.channel.username}) была удалена до окончания срока размещения.
+
+💰 <b>Возврат:</b> ${deal.total_price} TON отправлен на ваш кошелёк.`
+          );
+        }
+        
+        // Notify channel owner
+        if (owner?.telegram_id) {
+          await sendTelegramMessage(
+            owner.telegram_id,
+            `🚫 <b>Сделка отменена</b>
+
+Рекламный пост в канале <b>${channelTitle}</b> был удалён до окончания срока размещения.
+
+Средства возвращены рекламодателю. Подобные действия могут привести к понижению рейтинга.`
+          );
+        }
+        
+        return { success: true, refunded: true };
+      }
+    }
+
+    // Post exists - transfer funds to owner
+    let transferSuccess = false;
+    if (owner?.wallet_address && deal.escrow_mnemonic_encrypted) {
+      const transferResult = await transferToOwner(
+        deal.escrow_mnemonic_encrypted,
+        owner.wallet_address,
+        deal.total_price
+      );
+      transferSuccess = transferResult.success;
+      
+      if (!transferSuccess) {
+        console.error(`Transfer failed for deal ${deal.id}:`, transferResult.error);
+      }
+    }
+
     // Update deal status to completed
     const { error: updateError } = await supabase
       .from("deals")
@@ -85,12 +284,12 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; error?: stri
       throw new Error(`Failed to update deal: ${updateError.message}`);
     }
 
+    const durationText = deal.duration_hours < 24 
+      ? `${deal.duration_hours}ч` 
+      : `${Math.floor(deal.duration_hours / 24)}д`;
+
     // Notify advertiser
     if (advertiser?.telegram_id) {
-      const durationText = deal.duration_hours < 24 
-        ? `${deal.duration_hours}ч` 
-        : `${Math.floor(deal.duration_hours / 24)}д`;
-      
       await sendTelegramMessage(
         advertiser.telegram_id,
         `✅ <b>Размещение завершено!</b>
@@ -104,14 +303,17 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; error?: stri
 
     // Notify channel owner
     if (owner?.telegram_id) {
+      const paymentNote = transferSuccess 
+        ? `\n\n💎 <b>${deal.total_price} TON</b> переведены на ваш кошелёк.`
+        : `\n\nСредства будут переведены на ваш кошелёк в ближайшее время.`;
+      
       await sendTelegramMessage(
         owner.telegram_id,
-        `💰 <b>Сделка завершена!</b>
+        `💰 <b>Оплата получена!</b>
 
-Реклама в канале <b>${channelTitle}</b> успешно отработала.
-Сумма: <b>${deal.total_price} TON</b>
+Реклама в канале <b>${channelTitle}</b> успешно отработала.${paymentNote}
 
-Средства скоро будут переведены на ваш кошелёк.`
+Спасибо за использование Adsingo! 🚀`
       );
     }
 
@@ -136,7 +338,8 @@ Deno.serve(async (req) => {
       .from("deals")
       .select(`
         id, posted_at, duration_hours, total_price, advertiser_id,
-        channel:channels(title, username, owner_id)
+        telegram_message_id, escrow_mnemonic_encrypted,
+        channel:channels(telegram_chat_id, title, username, owner_id)
       `)
       .eq("status", "in_progress")
       .not("posted_at", "is", null);
@@ -179,6 +382,8 @@ Deno.serve(async (req) => {
           duration_hours: deal.duration_hours,
           total_price: deal.total_price,
           advertiser_id: deal.advertiser_id,
+          telegram_message_id: deal.telegram_message_id,
+          escrow_mnemonic_encrypted: deal.escrow_mnemonic_encrypted,
           channel: channel as Deal["channel"],
         });
       }

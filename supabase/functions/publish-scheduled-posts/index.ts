@@ -60,7 +60,7 @@ function isVideo(url: string): boolean {
   return videoExtensions.some(ext => lowerUrl.includes(ext));
 }
 
-async function publishToChannel(chatId: number, campaign: Campaign): Promise<void> {
+async function publishToChannel(chatId: number, campaign: Campaign): Promise<number> {
   const { text, media_urls, button_text, button_url } = campaign;
   
   const replyMarkup = button_text && button_url
@@ -69,13 +69,13 @@ async function publishToChannel(chatId: number, campaign: Campaign): Promise<voi
 
   // No media - just send text
   if (!media_urls || media_urls.length === 0) {
-    await sendTelegramRequest("sendMessage", {
+    const result = await sendTelegramRequest("sendMessage", {
       chat_id: chatId,
       text,
       parse_mode: "HTML",
       reply_markup: replyMarkup,
     });
-    return;
+    return result.result.message_id;
   }
 
   // Single media
@@ -84,23 +84,24 @@ async function publishToChannel(chatId: number, campaign: Campaign): Promise<voi
     const isVideoFile = isVideo(mediaUrl);
     
     if (isVideoFile) {
-      await sendTelegramRequest("sendVideo", {
+      const result = await sendTelegramRequest("sendVideo", {
         chat_id: chatId,
         video: mediaUrl,
         caption: text,
         parse_mode: "HTML",
         reply_markup: replyMarkup,
       });
+      return result.result.message_id;
     } else {
-      await sendTelegramRequest("sendPhoto", {
+      const result = await sendTelegramRequest("sendPhoto", {
         chat_id: chatId,
         photo: mediaUrl,
         caption: text,
         parse_mode: "HTML",
         reply_markup: replyMarkup,
       });
+      return result.result.message_id;
     }
-    return;
   }
 
   // Multiple media - use sendMediaGroup
@@ -113,10 +114,13 @@ async function publishToChannel(chatId: number, campaign: Campaign): Promise<voi
     };
   });
 
-  await sendTelegramRequest("sendMediaGroup", {
+  const result = await sendTelegramRequest("sendMediaGroup", {
     chat_id: chatId,
     media: mediaGroup,
   });
+  
+  // For media group, return the first message ID
+  const firstMessageId = result.result[0].message_id;
 
   // Send button separately if exists (can't attach to media group)
   if (replyMarkup) {
@@ -126,6 +130,8 @@ async function publishToChannel(chatId: number, campaign: Campaign): Promise<voi
       reply_markup: replyMarkup,
     });
   }
+  
+  return firstMessageId;
 }
 
 async function notifyAdvertiser(
@@ -202,14 +208,15 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; error?: stri
       console.error("Failed to get advertiser:", advertiserError);
     }
 
-    // Publish to channel
-    await publishToChannel(channel.telegram_chat_id, campaign as Campaign);
+    // Publish to channel and get message ID
+    const messageId = await publishToChannel(channel.telegram_chat_id, campaign as Campaign);
 
-    // Update deal - keep in_progress, set posted_at (completion handled by separate cron)
+    // Update deal - keep in_progress, set posted_at and telegram_message_id
     const { error: updateError } = await supabase
       .from("deals")
       .update({
         posted_at: new Date().toISOString(),
+        telegram_message_id: messageId,
       })
       .eq("id", deal.id);
 
