@@ -157,6 +157,9 @@ Deno.serve(async (req) => {
 
     const now = new Date();
     const dealsToComplete: Deal[] = [];
+    
+    // Minimum buffer to prevent completing deals immediately after posting
+    const MIN_BUFFER_HOURS = 1;
 
     for (const deal of deals) {
       if (!deal.posted_at) continue;
@@ -165,9 +168,11 @@ Deno.serve(async (req) => {
       if (!channel) continue;
 
       const postedAt = new Date(deal.posted_at);
+      const minWaitTime = new Date(postedAt.getTime() + MIN_BUFFER_HOURS * 60 * 60 * 1000);
       const completionTime = new Date(postedAt.getTime() + deal.duration_hours * 60 * 60 * 1000);
 
-      if (now >= completionTime) {
+      // Only complete if both: duration has passed AND minimum buffer has passed
+      if (now >= completionTime && now >= minWaitTime) {
         dealsToComplete.push({
           id: deal.id,
           posted_at: deal.posted_at,
