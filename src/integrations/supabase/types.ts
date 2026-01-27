@@ -42,6 +42,7 @@ export type Database = {
         Row: {
           button_text: string | null
           button_url: string | null
+          campaign_type: string
           created_at: string | null
           id: string
           image_url: string | null
@@ -55,6 +56,7 @@ export type Database = {
         Insert: {
           button_text?: string | null
           button_url?: string | null
+          campaign_type?: string
           created_at?: string | null
           id?: string
           image_url?: string | null
@@ -68,6 +70,7 @@ export type Database = {
         Update: {
           button_text?: string | null
           button_url?: string | null
+          campaign_type?: string
           created_at?: string | null
           id?: string
           image_url?: string | null
@@ -249,6 +252,8 @@ export type Database = {
       deals: {
         Row: {
           advertiser_id: string
+          author_draft: string | null
+          author_draft_media_urls: Json | null
           campaign_id: string | null
           cancellation_reason: string | null
           channel_id: string
@@ -260,11 +265,13 @@ export type Database = {
           escrow_mnemonic_encrypted: string | null
           expires_at: string | null
           id: string
+          is_draft_approved: boolean | null
           last_integrity_check_at: string | null
           payment_verified_at: string | null
           posted_at: string | null
           posts_count: number
           price_per_post: number
+          revision_count: number | null
           scheduled_at: string | null
           status: Database["public"]["Enums"]["deal_status"]
           telegram_message_id: number | null
@@ -273,6 +280,8 @@ export type Database = {
         }
         Insert: {
           advertiser_id: string
+          author_draft?: string | null
+          author_draft_media_urls?: Json | null
           campaign_id?: string | null
           cancellation_reason?: string | null
           channel_id: string
@@ -284,11 +293,13 @@ export type Database = {
           escrow_mnemonic_encrypted?: string | null
           expires_at?: string | null
           id?: string
+          is_draft_approved?: boolean | null
           last_integrity_check_at?: string | null
           payment_verified_at?: string | null
           posted_at?: string | null
           posts_count?: number
           price_per_post: number
+          revision_count?: number | null
           scheduled_at?: string | null
           status?: Database["public"]["Enums"]["deal_status"]
           telegram_message_id?: number | null
@@ -297,6 +308,8 @@ export type Database = {
         }
         Update: {
           advertiser_id?: string
+          author_draft?: string | null
+          author_draft_media_urls?: Json | null
           campaign_id?: string | null
           cancellation_reason?: string | null
           channel_id?: string
@@ -308,11 +321,13 @@ export type Database = {
           escrow_mnemonic_encrypted?: string | null
           expires_at?: string | null
           id?: string
+          is_draft_approved?: boolean | null
           last_integrity_check_at?: string | null
           payment_verified_at?: string | null
           posted_at?: string | null
           posts_count?: number
           price_per_post?: number
+          revision_count?: number | null
           scheduled_at?: string | null
           status?: Database["public"]["Enums"]["deal_status"]
           telegram_message_id?: number | null

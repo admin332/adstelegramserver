@@ -1,4 +1,4 @@
-import { Clock, CheckCircle2, Wallet, Shield, XCircle, AlertTriangle, ExternalLink, TimerOff, MoreVertical, ImageIcon, FileVideo } from "lucide-react";
+import { Clock, CheckCircle2, Wallet, Shield, XCircle, AlertTriangle, ExternalLink, TimerOff, MoreVertical, ImageIcon, FileVideo, FileText, Edit3, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -22,6 +22,9 @@ interface DealCardProps {
   createdAt: string;
   expiresAt: string | null;
   postedAt: string | null;
+  authorDraft: string | null;
+  isDraftApproved: boolean | null;
+  revisionCount: number;
   channel: {
     title: string | null;
     avatar_url: string | null;
@@ -29,13 +32,19 @@ interface DealCardProps {
   } | null;
   campaign: { 
     name: string;
+    campaign_type?: string;
+    text?: string;
     media_urls?: string[];
     image_url?: string;
+    button_text?: string;
+    button_url?: string;
   } | null;
   usdEquivalent: number | null;
   role: 'advertiser' | 'channel_owner';
   onPayClick?: () => void;
   onOwnerAction?: () => void;
+  onWriteDraft?: () => void;
+  onReviewDraft?: () => void;
 }
 
 const statusConfig: Record<DealStatus, { 
@@ -117,20 +126,37 @@ export const DealCard = ({
   createdAt,
   expiresAt,
   postedAt,
+  authorDraft,
+  isDraftApproved,
+  revisionCount,
   channel,
   campaign,
   usdEquivalent,
   role,
   onPayClick,
   onOwnerAction,
+  onWriteDraft,
+  onReviewDraft,
 }: DealCardProps) => {
   const config = statusConfig[status];
   const StatusIcon = config.icon;
   
-  // Dynamic status label: "Опубликовано" when in_progress AND posted_at is set
-  const dynamicStatusLabel = status === "in_progress" && postedAt 
-    ? "Опубликовано" 
-    : config.label;
+  // Check if this is a prompt campaign
+  const isPromptCampaign = campaign?.campaign_type === "prompt";
+  
+  // Dynamic status label based on campaign type and draft status
+  let dynamicStatusLabel = config.label;
+  if (status === "escrow" && isPromptCampaign) {
+    if (!authorDraft) {
+      dynamicStatusLabel = "Ожидает черновик";
+    } else if (isDraftApproved === null) {
+      dynamicStatusLabel = "На проверке";
+    } else if (isDraftApproved === false) {
+      dynamicStatusLabel = `Доработка #${revisionCount}`;
+    }
+  } else if (status === "in_progress" && postedAt) {
+    dynamicStatusLabel = "Опубликовано";
+  }
   
   const isChannelOwner = role === 'channel_owner';
   
@@ -321,8 +347,43 @@ export const DealCard = ({
         </div>
       )}
 
-      {/* Action buttons for escrow status (channel owner) */}
-      {status === "escrow" && isChannelOwner && (
+      {/* Action buttons for escrow status (channel owner) - prompt campaign */}
+      {status === "escrow" && isChannelOwner && isPromptCampaign && (
+        <div className="mt-3">
+          {!authorDraft || isDraftApproved === false ? (
+            <Button 
+              onClick={onWriteDraft}
+              className="w-full"
+              size="sm"
+            >
+              <Edit3 className="w-4 h-4 mr-1.5" />
+              {authorDraft ? "Редактировать черновик" : "Написать пост"}
+            </Button>
+          ) : (
+            <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-2">
+              <Clock className="w-4 h-4" />
+              Ожидает проверки рекламодателя
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Action buttons for escrow status (advertiser) - prompt campaign with draft */}
+      {status === "escrow" && !isChannelOwner && isPromptCampaign && authorDraft && isDraftApproved === null && (
+        <div className="mt-3">
+          <Button 
+            onClick={onReviewDraft}
+            className="w-full"
+            size="sm"
+          >
+            <Eye className="w-4 h-4 mr-1.5" />
+            Проверить черновик
+          </Button>
+        </div>
+      )}
+
+      {/* Action buttons for escrow status (channel owner) - ready_post campaign */}
+      {status === "escrow" && isChannelOwner && !isPromptCampaign && (
         <div className="mt-3">
           <Button 
             onClick={onOwnerAction}

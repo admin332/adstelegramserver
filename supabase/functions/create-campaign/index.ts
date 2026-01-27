@@ -91,6 +91,7 @@ async function validateTelegramData(initData: string, botToken: string): Promise
 interface CreateCampaignRequest {
   initData: string;
   name: string;
+  campaign_type?: string;
   text: string;
   button_text?: string;
   button_url?: string;
@@ -114,7 +115,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: CreateCampaignRequest = await req.json();
-    const { initData, name, text, button_text, button_url, image_url, media_urls } = body;
+    const { initData, name, campaign_type, text, button_text, button_url, image_url, media_urls } = body;
 
     // 1. VALIDATE INITDATA (critical for security!)
     if (!initData) {
@@ -171,6 +172,7 @@ Deno.serve(async (req) => {
       .insert({
         owner_id: userData.id, // Trusted user ID from DB
         name,
+        campaign_type: campaign_type || "ready_post",
         text,
         button_text: button_text || null,
         button_url: button_url || null,
@@ -197,6 +199,7 @@ Deno.serve(async (req) => {
         campaign: {
           id: campaign.id,
           name: campaign.name,
+          campaign_type: campaign.campaign_type,
           text: campaign.text,
           button_text: campaign.button_text,
           button_url: campaign.button_url,

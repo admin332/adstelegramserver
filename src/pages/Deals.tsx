@@ -4,6 +4,8 @@ import { DealCard } from "@/components/DealCard";
 import { FilterChip } from "@/components/FilterChip";
 import { PaymentDialog } from "@/components/deals/PaymentDialog";
 import { OwnerActionsDialog } from "@/components/deals/OwnerActionsDialog";
+import { DraftEditorDialog } from "@/components/deals/DraftEditorDialog";
+import { DraftReviewDialog } from "@/components/deals/DraftReviewDialog";
 import { useUserDeals, type Deal } from "@/hooks/useUserDeals";
 import { useDealAction } from "@/hooks/useDealAction";
 import { useTonPrice } from "@/hooks/useTonPrice";
@@ -22,6 +24,8 @@ const Deals = () => {
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
   const [ownerActionDeal, setOwnerActionDeal] = useState<Deal | null>(null);
+  const [draftEditorDeal, setDraftEditorDeal] = useState<Deal | null>(null);
+  const [draftReviewDeal, setDraftReviewDeal] = useState<Deal | null>(null);
 
   const filters = [
     { id: "all" as const, label: "Все", icon: Inbox },
@@ -163,12 +167,17 @@ const Deals = () => {
               createdAt={deal.created_at}
               expiresAt={deal.expires_at}
               postedAt={deal.posted_at}
+              authorDraft={deal.author_draft}
+              isDraftApproved={deal.is_draft_approved}
+              revisionCount={deal.revision_count}
               channel={deal.channel}
               campaign={deal.campaign}
               usdEquivalent={convertToUsd(deal.total_price)}
               role={deal.role}
               onPayClick={() => handlePayClick(deal)}
               onOwnerAction={() => handleOwnerAction(deal)}
+              onWriteDraft={() => setDraftEditorDeal(deal)}
+              onReviewDraft={() => setDraftReviewDeal(deal)}
             />
           ))
         ) : (
@@ -211,6 +220,42 @@ const Deals = () => {
           onReject={handleReject}
           onRequestChanges={handleRequestChanges}
           isLoading={dealAction.isPending}
+        />
+      )}
+
+      {/* Draft Editor Dialog (for channel owners) */}
+      {draftEditorDeal && (
+        <DraftEditorDialog
+          open={!!draftEditorDeal}
+          onOpenChange={(open) => !open && setDraftEditorDeal(null)}
+          dealId={draftEditorDeal.id}
+          briefText={draftEditorDeal.campaign?.text || ""}
+          channelName={draftEditorDeal.channel?.title || draftEditorDeal.channel?.username || "Канал"}
+          existingDraft={draftEditorDeal.author_draft || undefined}
+          existingMedia={draftEditorDeal.author_draft_media_urls || undefined}
+          onSuccess={() => {
+            setDraftEditorDeal(null);
+            refetch();
+          }}
+        />
+      )}
+
+      {/* Draft Review Dialog (for advertisers) */}
+      {draftReviewDeal && (
+        <DraftReviewDialog
+          open={!!draftReviewDeal}
+          onOpenChange={(open) => !open && setDraftReviewDeal(null)}
+          dealId={draftReviewDeal.id}
+          channelName={draftReviewDeal.channel?.title || draftReviewDeal.channel?.username || "Канал"}
+          draftText={draftReviewDeal.author_draft || ""}
+          draftMediaUrls={draftReviewDeal.author_draft_media_urls || []}
+          buttonText={draftReviewDeal.campaign?.button_text}
+          buttonUrl={draftReviewDeal.campaign?.button_url}
+          revisionCount={draftReviewDeal.revision_count}
+          onSuccess={() => {
+            setDraftReviewDeal(null);
+            refetch();
+          }}
         />
       )}
 
