@@ -18,6 +18,10 @@ export interface Deal {
   created_at: string;
   expires_at: string | null;
   posted_at: string | null;
+  author_draft: string | null;
+  author_draft_media_urls: string[] | null;
+  revision_count: number;
+  is_draft_approved: boolean | null;
   role: 'advertiser' | 'channel_owner';
   channel: {
     id: string;
@@ -28,8 +32,12 @@ export interface Deal {
   campaign: {
     id: string;
     name: string;
+    campaign_type?: string;
+    text?: string;
     media_urls?: string[];
     image_url?: string;
+    button_text?: string;
+    button_url?: string;
   } | null;
 }
 

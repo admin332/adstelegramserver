@@ -24,6 +24,7 @@ interface Campaign {
   media_urls: string[] | null;
   button_text: string | null;
   button_url: string | null;
+  campaign_type: string | null;
 }
 
 interface Channel {
@@ -171,14 +172,14 @@ async function notifyAdvertiser(
   }
 }
 
-async function processDeal(deal: Deal): Promise<{ success: boolean; error?: string }> {
+async function processDeal(deal: Deal & { author_draft?: string; author_draft_media_urls?: string[] }): Promise<{ success: boolean; error?: string }> {
   console.log(`Processing deal ${deal.id}...`);
 
   try {
     // Get campaign data
     const { data: campaign, error: campaignError } = await supabase
       .from("campaigns")
-      .select("text, media_urls, button_text, button_url")
+      .select("text, media_urls, button_text, button_url, campaign_type")
       .eq("id", deal.campaign_id)
       .single();
 
@@ -208,8 +209,25 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; error?: stri
       console.error("Failed to get advertiser:", advertiserError);
     }
 
+    // For prompt campaigns, use author's draft; otherwise use campaign content
+    const isPromptCampaign = campaign.campaign_type === "prompt";
+    const textToPost = isPromptCampaign && deal.author_draft 
+      ? deal.author_draft 
+      : campaign.text;
+    const mediaToPost = isPromptCampaign && deal.author_draft_media_urls?.length 
+      ? deal.author_draft_media_urls 
+      : campaign.media_urls;
+
+    const publishContent: Campaign = {
+      text: textToPost,
+      media_urls: mediaToPost || null,
+      button_text: campaign.button_text,
+      button_url: campaign.button_url,
+      campaign_type: campaign.campaign_type,
+    };
+
     // Publish to channel and get message ID
-    const messageId = await publishToChannel(channel.telegram_chat_id, campaign as Campaign);
+    const messageId = await publishToChannel(channel.telegram_chat_id, publishContent);
 
     // Update deal - keep in_progress, set posted_at and telegram_message_id
     const { error: updateError } = await supabase
@@ -253,7 +271,7 @@ Deno.serve(async (req) => {
     // Get all in_progress deals where scheduled_at has passed
     const { data: deals, error: dealsError } = await supabase
       .from("deals")
-      .select("id, campaign_id, channel_id, advertiser_id, scheduled_at")
+      .select("id, campaign_id, channel_id, advertiser_id, scheduled_at, author_draft, author_draft_media_urls")
       .eq("status", "in_progress")
       .is("posted_at", null)
       .not("scheduled_at", "is", null)

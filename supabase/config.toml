@@ -71,3 +71,9 @@ verify_jwt = false
 
 [functions.verify-post-integrity]
 verify_jwt = false
+
+[functions.submit-draft]
+verify_jwt = false
+
+[functions.review-draft]
+verify_jwt = false

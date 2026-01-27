@@ -111,10 +111,14 @@ serve(async (req) => {
         created_at,
         expires_at,
         posted_at,
+        author_draft,
+        author_draft_media_urls,
+        revision_count,
+        is_draft_approved,
         advertiser_id,
         channel_id,
         channel:channels(id, title, avatar_url, username),
-        campaign:campaigns(id, name, media_urls, image_url)
+        campaign:campaigns(id, name, campaign_type, text, media_urls, image_url, button_text, button_url)
       `)
       .order("created_at", { ascending: false });
 
@@ -154,6 +158,10 @@ serve(async (req) => {
         created_at: deal.created_at,
         expires_at: deal.expires_at,
         posted_at: deal.posted_at,
+        author_draft: deal.author_draft,
+        author_draft_media_urls: deal.author_draft_media_urls,
+        revision_count: deal.revision_count || 0,
+        is_draft_approved: deal.is_draft_approved,
         channel: deal.channel,
         campaign: deal.campaign,
         role,
