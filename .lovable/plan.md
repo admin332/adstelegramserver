@@ -1,209 +1,275 @@
 
+## Добавление режима "Промт" (Sponsored Content / Native Ad)
 
-## Задача
+### Концепция
 
-Добавить:
-1. Автоматический перевод TON владельцу канала при успешном завершении сделки
-2. Проверку наличия поста каждые 4 часа (если удалён/изменён — возврат рекламодателю)
+Это ценная функция для маркетплейса — "Native Ad" формат, где владелец канала сам пишет пост по брифу рекламодателя. Это повышает конверсию и доверие аудитории.
 
 ---
 
-## Часть 1: Сохранение message_id при публикации
+## Изменения в базе данных
 
-### Изменение схемы базы данных
+### Добавить столбец в таблицу `campaigns`:
 
 ```sql
-ALTER TABLE public.deals ADD COLUMN telegram_message_id bigint;
-ALTER TABLE public.deals ADD COLUMN last_integrity_check_at timestamp with time zone;
+ALTER TABLE public.campaigns 
+ADD COLUMN campaign_type text NOT NULL DEFAULT 'ready_post';
+-- Значения: 'ready_post' (готовый пост) | 'prompt' (бриф для автора)
 ```
 
-### Изменение publish-scheduled-posts
+### Добавить столбцы в таблицу `deals`:
 
-При отправке сообщения Telegram API возвращает `message_id`. Нужно его сохранить:
-
-```typescript
-// publishToChannel теперь возвращает message_id
-async function publishToChannel(chatId: number, campaign: Campaign): Promise<number> {
-  // ...отправка сообщения...
-  const result = await sendTelegramRequest("sendMessage", {...});
-  return result.result.message_id;  // ← Сохраняем
-}
-
-// В processDeal — сохраняем message_id в базу
-const messageId = await publishToChannel(channel.telegram_chat_id, campaign);
-await supabase.from("deals").update({
-  posted_at: new Date().toISOString(),
-  telegram_message_id: messageId,
-}).eq("id", deal.id);
+```sql
+ALTER TABLE public.deals
+ADD COLUMN author_draft text,                    -- Черновик от автора канала
+ADD COLUMN author_draft_media_urls jsonb DEFAULT '[]'::jsonb, -- Медиа от автора
+ADD COLUMN revision_count integer DEFAULT 0,     -- Количество доработок
+ADD COLUMN is_draft_approved boolean DEFAULT NULL; -- NULL = ожидает, true = одобрен, false = на доработке
 ```
 
 ---
 
-## Часть 2: Проверка целостности поста каждые 4 часа
+## Изменения в UI
 
-### Новая Edge Function: verify-post-integrity
+### 1. Форма создания кампании (CreateCampaignForm.tsx)
 
-Логика проверки наличия поста:
+**Текущий флоу:** 3 шага  
+**Новый флоу:** 4 шага
 
-```typescript
-// Способ проверки: copyMessage с chat_id=бота (dry run не поддерживается)
-// Если сообщение удалено — ошибка "message to copy not found"
-// Если изменено — проверяем текст через forwardMessage + сравнение
+1. Название кампании
+2. **НОВЫЙ ШАГ: Выбор типа**
+   - "Готовый пост" — я сам загружаю контент
+   - "Промт для автора" — автор напишет пост по моему брифу
+3. Медиа (только для "Готовый пост") / Бриф (для "Промт")
+4. Текст и кнопка (для "Готовый пост") / Требования к посту (для "Промт")
 
-async function checkPostExists(chatId: number, messageId: number): Promise<boolean> {
-  try {
-    // Используем copyMessage к самому боту — если пост удалён, будет ошибка
-    const result = await sendTelegramRequest("copyMessage", {
-      chat_id: BOT_CHAT_ID,  // ID чата бота с самим собой
-      from_chat_id: chatId,
-      message_id: messageId,
-    });
-    
-    // Удаляем скопированное сообщение сразу
-    if (result.ok) {
-      await sendTelegramRequest("deleteMessage", {
-        chat_id: BOT_CHAT_ID,
-        message_id: result.result.message_id,
-      });
-    }
-    
-    return result.ok;
-  } catch {
-    return false;  // Пост удалён
-  }
-}
+**UI выбора типа:**
+```text
+┌─────────────────────────────────────────┐
+│         Выберите тип кампании           │
+│                                         │
+│   ┌───────────────┐ ┌───────────────┐   │
+│   │  📝 Промт     │ │  📦 Готовый   │   │
+│   │               │ │     пост      │   │
+│   │ Автор напишет │ │ Вы загружаете │   │
+│   │ пост сам      │ │ готовый пост  │   │
+│   └───────────────┘ └───────────────┘   │
+│                                         │
+│ ⭐ Рекомендуем "Промт" — нативная       │
+│ реклама работает эффективнее!           │
+└─────────────────────────────────────────┘
 ```
 
-### Алгоритм функции
+### 2. Изменения в шагах для режима "Промт"
+
+**Шаг 3 (вместо медиа):** Референсы (опционально)
+- Ссылки на примеры или материалы для автора
+
+**Шаг 4 (вместо текста):** Бриф
+- Textarea с placeholder: "Опишите что нужно упомянуть, какой тон, особые требования..."
+- Поля для кнопки остаются
+
+---
+
+## Новый workflow для "Промт" кампаний
 
 ```text
-1. Найти все deals:
-   - status = 'in_progress'
-   - posted_at IS NOT NULL
-   - telegram_message_id IS NOT NULL
-   - (last_integrity_check_at IS NULL OR last_integrity_check_at < NOW() - 4 hours)
-
-2. Для каждой сделки:
-   a. Проверить существование поста
-   b. Если пост удалён → возврат рекламодателю, статус 'cancelled'
-   c. Если пост на месте → обновить last_integrity_check_at
+                     ┌─────────────────────────────────────┐
+                     │     РЕКЛАМОДАТЕЛЬ СОЗДАЕТ СДЕЛКУ     │
+                     │   campaign_type = 'prompt'           │
+                     │   text = бриф/промт для автора       │
+                     └─────────────────┬───────────────────┘
+                                       │
+                                       ▼
+                     ┌─────────────────────────────────────┐
+                     │     ОПЛАТА В ESCROW                  │
+                     │   status = 'escrow'                  │
+                     └─────────────────┬───────────────────┘
+                                       │
+                                       ▼
+                     ┌─────────────────────────────────────┐
+                     │  ВЛАДЕЛЕЦ КАНАЛА ПИШЕТ ЧЕРНОВИК      │
+                     │  author_draft = текст поста          │
+                     │  author_draft_media_urls = [...]     │
+                     │  Уведомление рекламодателю           │
+                     └─────────────────┬───────────────────┘
+                                       │
+                    ┌──────────────────┴──────────────────┐
+                    │                                     │
+                    ▼                                     ▼
+        ┌───────────────────────┐           ┌───────────────────────┐
+        │   РЕКЛАМОДАТЕЛЬ:      │           │   РЕКЛАМОДАТЕЛЬ:      │
+        │   "Принять"           │           │   "На доработку"      │
+        │                       │           │                       │
+        │   is_draft_approved   │           │   revision_count++    │
+        │   = true              │           │   is_draft_approved   │
+        │                       │           │   = false             │
+        │   status →            │           │                       │
+        │   'in_progress'       │           │   → автор дорабатывает│
+        └───────────────────────┘           └───────────────────────┘
 ```
 
 ---
 
-## Часть 3: Автоматический перевод средств при завершении
+## Изменения в существующих компонентах
 
-### Изменение complete-posted-deals
+### 1. OwnerActionsDialog.tsx
 
-Добавить логику перевода TON после успешного завершения:
+**Для campaign_type = 'prompt':**
+- Добавить кнопку "Написать пост" → открывает DraftEditorDialog
+- Скрыть "Одобрить публикацию" пока черновик не одобрен
 
-```typescript
-import { decryptMnemonic } from "./crypto";
-import { mnemonicToPrivateKey } from "@ton/crypto";
-import { WalletContractV4, TonClient, internal, SendMode } from "@ton/ton";
+### 2. Новый компонент: DraftEditorDialog.tsx
 
-async function transferToOwner(
-  encryptedMnemonic: string,
-  ownerWalletAddress: string,
-  amount: number
-): Promise<{ success: boolean; error?: string }> {
-  // 1. Расшифровать мнемонику
-  const mnemonic = decryptMnemonic(encryptedMnemonic, ENCRYPTION_KEY);
-  const keyPair = await mnemonicToPrivateKey(mnemonic.split(" "));
-  
-  // 2. Открыть escrow-кошелёк
-  const wallet = WalletContractV4.create({ publicKey: keyPair.publicKey, workchain: 0 });
-  const contract = client.open(wallet);
-  
-  // 3. Проверить баланс
-  const balance = await contract.getBalance();
-  const networkFee = BigInt(0.02 * 1_000_000_000);  // ~0.02 TON
-  const transferAmount = balance - networkFee;
-  
-  if (transferAmount <= 0n) {
-    return { success: false, error: "Insufficient balance" };
-  }
-  
-  // 4. Отправить средства владельцу
-  const seqno = await contract.getSeqno();
-  await contract.sendTransfer({
-    seqno,
-    secretKey: keyPair.secretKey,
-    sendMode: SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS,
-    messages: [
-      internal({
-        to: ownerWalletAddress,
-        value: transferAmount,
-        body: "Adsingo payment - ad completed successfully",
-      }),
-    ],
-  });
-  
-  return { success: true };
-}
+```text
+┌─────────────────────────────────────────────────────────┐
+│              Напишите пост для рекламодателя             │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  📋 Бриф:                                                │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │ "Нужен обзор бота для заказа еды, упомяни         │  │
+│  │  скидку 10%, стиль — дружелюбный"                 │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│  🖼️ Медиа (до 10 файлов):                               │
+│  ┌──────┐ ┌──────┐ ┌──────┐                              │
+│  │  +   │ │ img  │ │      │                              │
+│  └──────┘ └──────┘ └──────┘                              │
+│                                                          │
+│  📝 Текст поста:                                         │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │ Напишите текст который увидит ваша аудитория...   │  │
+│  │                                                    │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│  ┌──────────────────────────────────────────────────────┐│
+│  │               Отправить на проверку                  ││
+│  └──────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────┘
 ```
 
-### Интеграция в processDeal
+### 3. Новый компонент: DraftReviewDialog.tsx (для рекламодателя)
 
-```typescript
-async function processDeal(deal: Deal): Promise<{ success: boolean; error?: string }> {
-  // 1. Финальная проверка поста
-  const postExists = await checkPostExists(channel.telegram_chat_id, deal.telegram_message_id);
-  
-  if (!postExists) {
-    // Пост удалён — возврат рекламодателю
-    await refundToAdvertiser(deal);
-    return { success: true, refunded: true };
-  }
-  
-  // 2. Перевод владельцу канала
-  if (owner?.wallet_address && deal.escrow_mnemonic_encrypted) {
-    const transferResult = await transferToOwner(
-      deal.escrow_mnemonic_encrypted,
-      owner.wallet_address,
-      deal.total_price
-    );
-    
-    if (!transferResult.success) {
-      console.error(`Transfer failed: ${transferResult.error}`);
-      // Не блокируем завершение, уведомим о проблеме
-    }
-  }
-  
-  // 3. Обновить статус
-  await supabase.from("deals").update({
-    status: "completed",
-    completed_at: new Date().toISOString(),
-  }).eq("id", deal.id);
-  
-  // 4. Уведомления
-  // ...
-}
+```text
+┌─────────────────────────────────────────────────────────┐
+│                 Проверьте черновик                       │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  🖼️ Превью поста:                                        │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │ [Изображение]                                      │  │
+│  │                                                    │  │
+│  │ Привет! Я тут нашёл крутой бот для заказа еды...  │  │
+│  │ Сейчас там скидка 10% на первый заказ! 🍕         │  │
+│  │                                                    │  │
+│  │            [ Попробовать ]                         │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│  ┌─────────────────────┐ ┌────────────────────────────┐  │
+│  │   На доработку  📝  │ │       Принять ✅           │  │
+│  └─────────────────────┘ └────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Часть 4: Cron Jobs
+## Backend: Новые Edge Functions
 
-### Существующие cron jobs:
-- `check-escrow-payments` — каждую минуту
-- `publish-scheduled-posts` — каждый час (в :00)
-- `complete-posted-deals` — каждый час (в :15)
+### 1. submit-draft (для владельца канала)
 
-### Новый cron job:
+```typescript
+POST /functions/v1/submit-draft
+{
+  initData,
+  dealId,
+  draftText,
+  draftMediaUrls[]
+}
+```
 
-```sql
-SELECT cron.schedule(
-  'verify-post-integrity',
-  '30 */4 * * *',  -- каждые 4 часа в :30
-  $$
-  SELECT net.http_post(
-    url:='https://fdxyittddmpyhaiijddp.supabase.co/functions/v1/verify-post-integrity',
-    headers:='{"Authorization": "Bearer ANON_KEY", "Content-Type": "application/json"}'::jsonb,
-    body:='{}'::jsonb
-  );
-  $$
-);
+- Сохраняет черновик в deals.author_draft
+- Уведомляет рекламодателя в Telegram
+- Устанавливает is_draft_approved = null (ожидает проверки)
+
+### 2. review-draft (для рекламодателя)
+
+```typescript
+POST /functions/v1/review-draft
+{
+  initData,
+  dealId,
+  action: 'approve' | 'request_revision',
+  revisionComment?: string
+}
+```
+
+**approve:**
+- is_draft_approved = true
+- status → 'in_progress'
+- Публикация по расписанию (publish-scheduled-posts использует author_draft)
+
+**request_revision:**
+- is_draft_approved = false
+- revision_count++
+- Уведомление владельцу канала
+
+---
+
+## Изменения в publish-scheduled-posts
+
+При публикации проверять campaign_type:
+
+```typescript
+// Для 'prompt' кампаний используем черновик автора
+const textToPost = campaign.campaign_type === 'prompt' && deal.author_draft
+  ? deal.author_draft
+  : campaign.text;
+
+const mediaToPost = campaign.campaign_type === 'prompt' && deal.author_draft_media_urls?.length > 0
+  ? deal.author_draft_media_urls
+  : campaign.media_urls;
+```
+
+---
+
+## Уведомления
+
+### Владельцу канала (при создании prompt-сделки):
+
+```text
+📝 <b>Новый заказ на Native Ad</b>
+
+Рекламодатель ожидает, что вы напишете пост для канала {channelTitle}.
+
+<b>Бриф:</b>
+"{prompt_text}"
+
+💰 {total_price} TON
+
+Напишите черновик в приложении Adsingo.
+```
+
+### Рекламодателю (при отправке черновика):
+
+```text
+📝 <b>Черновик готов к проверке</b>
+
+Автор канала {channelTitle} написал пост по вашему брифу.
+
+Проверьте и одобрите в приложении Adsingo.
+```
+
+### Владельцу (при запросе доработки):
+
+```text
+✏️ <b>Требуется доработка</b>
+
+Рекламодатель просит внести изменения в черновик для канала {channelTitle}.
+
+{revision_comment}
+
+Отредактируйте пост в приложении.
 ```
 
 ---
@@ -212,114 +278,42 @@ SELECT cron.schedule(
 
 | Файл | Действие |
 |------|----------|
-| `supabase/functions/publish-scheduled-posts/index.ts` | Сохранять telegram_message_id |
-| `supabase/functions/verify-post-integrity/index.ts` | Создать новую функцию |
-| `supabase/functions/complete-posted-deals/index.ts` | Добавить перевод TON |
-| `supabase/config.toml` | Зарегистрировать функцию |
-| База данных | Добавить колонки + cron job |
+| **База данных** | Миграция: добавить столбцы |
+| `src/components/create/CreateCampaignForm.tsx` | Добавить шаг выбора типа |
+| `src/components/deals/DraftEditorDialog.tsx` | **Создать** — UI для написания черновика |
+| `src/components/deals/DraftReviewDialog.tsx` | **Создать** — UI для проверки черновика |
+| `src/components/deals/OwnerActionsDialog.tsx` | Добавить кнопку "Написать пост" |
+| `src/components/DealCard.tsx` | Отображать статус черновика |
+| `src/pages/Deals.tsx` | Добавить обработку review-draft |
+| `supabase/functions/submit-draft/index.ts` | **Создать** |
+| `supabase/functions/review-draft/index.ts` | **Создать** |
+| `supabase/functions/create-campaign/index.ts` | Принимать campaign_type |
+| `supabase/functions/publish-scheduled-posts/index.ts` | Использовать author_draft |
 
 ---
 
-## Визуальная схема процесса
+## Техническая часть
 
-```text
-                    ┌─────────────────────────────────────┐
-                    │          ПУБЛИКАЦИЯ                 │
-                    │   publish-scheduled-posts           │
-                    │   → сохраняет telegram_message_id   │
-                    └─────────────┬───────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                         IN_PROGRESS                                 │
-│                     (posted_at заполнен)                            │
-└─────────────────────────────────────────────────────────────────────┘
-                    │                             │
-          каждые 4 часа                   duration_hours истёк
-                    │                             │
-                    ▼                             ▼
-        ┌───────────────────────┐    ┌────────────────────────────┐
-        │ verify-post-integrity │    │   complete-posted-deals    │
-        │                       │    │                            │
-        │ copyMessage проверка  │    │ 1. Финальная проверка      │
-        └───────────┬───────────┘    │    поста                   │
-                    │                │ 2. Перевод TON владельцу   │
-           ┌────────┴────────┐       │    или возврат             │
-           │                 │       │ 3. Статус → completed      │
-        Пост есть       Пост удалён  └────────────────────────────┘
-           │                 │
-           ▼                 ▼
-   last_integrity_    ┌──────────────────────┐
-   check_at = NOW()   │ Возврат рекламодателю│
-                      │ status = 'cancelled' │
-                      │ reason = 'post_deleted'│
-                      └──────────────────────┘
+### SQL миграция
+
+```sql
+-- 1. Добавить тип кампании
+ALTER TABLE public.campaigns 
+ADD COLUMN campaign_type text NOT NULL DEFAULT 'ready_post';
+
+-- 2. Добавить поля для черновика в deals
+ALTER TABLE public.deals
+ADD COLUMN author_draft text,
+ADD COLUMN author_draft_media_urls jsonb DEFAULT '[]'::jsonb,
+ADD COLUMN revision_count integer DEFAULT 0,
+ADD COLUMN is_draft_approved boolean;
+
+-- 3. Комментарии для документации
+COMMENT ON COLUMN public.campaigns.campaign_type IS 'ready_post = готовый пост, prompt = автор пишет по брифу';
+COMMENT ON COLUMN public.deals.is_draft_approved IS 'NULL = ожидает черновик, false = на доработке, true = одобрен';
 ```
 
----
+### Обновление типов Supabase
 
-## Уведомления
-
-### При удалении поста (рекламодателю):
-
-```text
-⚠️ <b>Пост удалён из канала</b>
-
-Ваша реклама в канале {channelTitle} была удалена до окончания срока размещения.
-
-💰 <b>Возврат:</b> {total_price} TON отправлен на ваш кошелёк.
-```
-
-### При удалении поста (владельцу канала):
-
-```text
-🚫 <b>Сделка отменена</b>
-
-Рекламный пост в канале {channelTitle} был удалён до окончания срока размещения.
-
-Средства возвращены рекламодателю. Подобные действия могут привести к понижению рейтинга.
-```
-
-### При успешном завершении (владельцу):
-
-```text
-💰 <b>Оплата получена!</b>
-
-Реклама в канале {channelTitle} успешно отработала.
-
-<b>{total_price} TON</b> переведены на ваш кошелёк.
-
-Спасибо за использование Adsingo! 🚀
-```
-
----
-
-## Технические детали
-
-### Проверка изменения контента (опционально)
-
-Для полной проверки можно сравнивать контент:
-
-```typescript
-// При публикации сохраняем хеш контента
-const contentHash = crypto.createHash('md5')
-  .update(campaign.text + JSON.stringify(campaign.media_urls))
-  .digest('hex');
-
-// При проверке — получаем сообщение через forwardMessage и сравниваем
-```
-
-**Примечание:** Telegram Bot API не предоставляет getMessages для каналов. Можно использовать:
-1. `copyMessage` — проверяет только существование
-2. `forwardMessage` — пересылает сообщение, можно сравнить текст
-
-Для MVP достаточно проверки существования через `copyMessage`.
-
-### Обработка ошибок TON-переводов
-
-```typescript
-// Если перевод не удался — логируем и уведомляем
-// Сделка всё равно завершается, но владелец получает уведомление
-// Администратор может вручную произвести перевод
-```
+После миграции типы обновятся автоматически.
 
