@@ -12,7 +12,8 @@ import {
   Loader2,
   X,
   FileVideo,
-  Plus
+  Plus,
+  Lightbulb
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
@@ -314,7 +315,10 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
 
               <div className="space-y-4">
                 <div className="bg-secondary/30 rounded-xl p-4 text-sm text-muted-foreground">
-                  <p>💡 Вы можете добавить ссылки на:</p>
+                  <p className="flex items-center gap-1.5">
+                    <Lightbulb className="w-4 h-4" />
+                    Вы можете добавить ссылки на:
+                  </p>
                   <ul className="list-disc list-inside mt-2 space-y-1">
                     <li>Примеры постов, которые вам нравятся</li>
                     <li>Ваш сайт или лендинг</li>
@@ -450,11 +454,6 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
                 className="bg-card border-0 min-h-[120px] resize-none"
                 autoFocus
               />
-              {isPromptMode && (
-                <p className="text-xs text-muted-foreground">
-                  💡 Пример: "Нужен обзор моего бота для заказа еды, упомяни скидку 10%, стиль — дружелюбный"
-                </p>
-              )}
             </div>
 
             <div className="space-y-2">
