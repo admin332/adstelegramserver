@@ -255,6 +255,7 @@ Deno.serve(async (req) => {
       .from("deals")
       .select("id, campaign_id, channel_id, advertiser_id, scheduled_at")
       .eq("status", "in_progress")
+      .is("posted_at", null)
       .not("scheduled_at", "is", null)
       .lte("scheduled_at", new Date().toISOString());
 
