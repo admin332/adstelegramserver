@@ -127,6 +127,11 @@ export const DealCard = ({
   const config = statusConfig[status];
   const StatusIcon = config.icon;
   
+  // Dynamic status label: "Опубликовано" when in_progress AND posted_at is set
+  const dynamicStatusLabel = status === "in_progress" && postedAt 
+    ? "Опубликовано" 
+    : config.label;
+  
   const isChannelOwner = role === 'channel_owner';
   
   // Get campaign media info for channel owner preview
@@ -288,7 +293,7 @@ export const DealCard = ({
       <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/5">
         <div className={cn("flex items-center gap-1.5 px-2 py-1 rounded-full", config.bgColor)}>
           <StatusIcon className={cn("w-4 h-4", config.color)} />
-          <span className={cn("text-sm font-medium", config.color)}>{config.label}</span>
+          <span className={cn("text-sm font-medium", config.color)}>{dynamicStatusLabel}</span>
         </div>
         <span className="text-sm text-muted-foreground">{timeAgo}</span>
       </div>

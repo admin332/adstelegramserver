@@ -205,13 +205,11 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; error?: stri
     // Publish to channel
     await publishToChannel(channel.telegram_chat_id, campaign as Campaign);
 
-    // Update deal status
+    // Update deal - keep in_progress, set posted_at (completion handled by separate cron)
     const { error: updateError } = await supabase
       .from("deals")
       .update({
-        status: "completed",
         posted_at: new Date().toISOString(),
-        completed_at: new Date().toISOString(),
       })
       .eq("id", deal.id);
 
