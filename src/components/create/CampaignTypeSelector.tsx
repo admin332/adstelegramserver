@@ -68,14 +68,6 @@ export const CampaignTypeSelector = ({ value, onChange }: CampaignTypeSelectorPr
           </div>
         </button>
       </div>
-
-      {/* Recommendation */}
-      <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 text-center">
-        <p className="text-xs text-muted-foreground">
-          ⭐ <span className="text-primary font-medium">Рекомендуем "Промт"</span> — нативная реклама 
-          работает эффективнее, потому что автор лучше знает свою аудиторию
-        </p>
-      </div>
     </div>
   );
 };
