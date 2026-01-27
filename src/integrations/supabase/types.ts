@@ -260,12 +260,14 @@ export type Database = {
           escrow_mnemonic_encrypted: string | null
           expires_at: string | null
           id: string
+          last_integrity_check_at: string | null
           payment_verified_at: string | null
           posted_at: string | null
           posts_count: number
           price_per_post: number
           scheduled_at: string | null
           status: Database["public"]["Enums"]["deal_status"]
+          telegram_message_id: number | null
           total_price: number
           updated_at: string | null
         }
@@ -282,12 +284,14 @@ export type Database = {
           escrow_mnemonic_encrypted?: string | null
           expires_at?: string | null
           id?: string
+          last_integrity_check_at?: string | null
           payment_verified_at?: string | null
           posted_at?: string | null
           posts_count?: number
           price_per_post: number
           scheduled_at?: string | null
           status?: Database["public"]["Enums"]["deal_status"]
+          telegram_message_id?: number | null
           total_price: number
           updated_at?: string | null
         }
@@ -304,12 +308,14 @@ export type Database = {
           escrow_mnemonic_encrypted?: string | null
           expires_at?: string | null
           id?: string
+          last_integrity_check_at?: string | null
           payment_verified_at?: string | null
           posted_at?: string | null
           posts_count?: number
           price_per_post?: number
           scheduled_at?: string | null
           status?: Database["public"]["Enums"]["deal_status"]
+          telegram_message_id?: number | null
           total_price?: number
           updated_at?: string | null
         }

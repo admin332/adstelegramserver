@@ -68,3 +68,6 @@ verify_jwt = false
 
 [functions.complete-posted-deals]
 verify_jwt = false
+
+[functions.verify-post-integrity]
+verify_jwt = false
