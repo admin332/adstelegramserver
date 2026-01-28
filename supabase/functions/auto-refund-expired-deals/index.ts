@@ -175,6 +175,11 @@ serve(async (req) => {
     
     if (!expiredDeals || expiredDeals.length === 0) {
       console.log("No expired escrow deals found");
+      
+      // Check if we should deactivate cron jobs (no more active deals)
+      const { data: cronResult } = await supabase.rpc('manage_cron_jobs', { action: 'check_and_deactivate' });
+      console.log("Cron jobs management:", cronResult);
+      
       return new Response(
         JSON.stringify({ success: true, processed: 0 }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
