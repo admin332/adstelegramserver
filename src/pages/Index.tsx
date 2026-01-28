@@ -28,6 +28,17 @@ const Index = () => {
   // Use real channels if available, fallback to mock
   const channels = dbChannels && dbChannels.length > 0 ? dbChannels : mockChannels;
 
+  // Вычисляем статистику из реальных данных
+  const totalChannels = channels.length;
+  const totalSubscribers = channels.reduce((sum, ch) => sum + ch.subscribers, 0);
+
+  // Форматирование больших чисел
+  const formatNumber = (num: number): string => {
+    if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+    if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+    return num.toString();
+  };
+
   const filteredChannels = useMemo(() => {
     return channels
       .filter((channel) => {
@@ -115,14 +126,12 @@ const Index = () => {
           <StatsCard
             icon={<Users className="w-5 h-5" />}
             label="Каналов"
-            value="2,450"
-            trend={12}
+            value={isLoading ? "..." : formatNumber(totalChannels)}
           />
           <StatsCard
             icon={<TrendingUp className="w-5 h-5" />}
             label="Подписчиков"
-            value="22M"
-            trend={5}
+            value={isLoading ? "..." : formatNumber(totalSubscribers)}
           />
         </div>
 
