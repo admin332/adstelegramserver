@@ -28,6 +28,7 @@ interface Deal {
   total_price: number;
   telegram_message_id: number | null;
   escrow_mnemonic_encrypted: string | null;
+  channel_id: string;
   channel: {
     telegram_chat_id: number;
     title: string | null;
@@ -63,6 +64,32 @@ async function sendTelegramMessage(chatId: number, text: string): Promise<void> 
     });
   } catch (error) {
     console.error("Failed to send Telegram message:", error);
+  }
+}
+
+async function sendRatingRequest(
+  chatId: number,
+  text: string,
+  dealId: string,
+  ratingType: "rate_channel" | "rate_advertiser"
+): Promise<void> {
+  try {
+    await sendTelegramRequest("sendMessage", {
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "1 ⭐", callback_data: `${ratingType}:${dealId}:1` },
+          { text: "2 ⭐", callback_data: `${ratingType}:${dealId}:2` },
+          { text: "3 ⭐", callback_data: `${ratingType}:${dealId}:3` },
+          { text: "4 ⭐", callback_data: `${ratingType}:${dealId}:4` },
+          { text: "5 ⭐", callback_data: `${ratingType}:${dealId}:5` },
+        ]],
+      },
+    });
+  } catch (error) {
+    console.error("Failed to send rating request:", error);
   }
 }
 
@@ -288,7 +315,26 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; refunded?: b
       ? `${deal.duration_hours}ч` 
       : `${Math.floor(deal.duration_hours / 24)}д`;
 
-    // Notify advertiser
+    // Increment successful_ads counter for the channel using raw update
+    const { data: channelData } = await supabase
+      .from("channels")
+      .select("successful_ads")
+      .eq("id", deal.channel_id)
+      .maybeSingle();
+
+    const currentAds = channelData?.successful_ads || 0;
+    const { error: incrementError } = await supabase
+      .from("channels")
+      .update({ successful_ads: currentAds + 1 })
+      .eq("id", deal.channel_id);
+
+    if (incrementError) {
+      console.error("Failed to increment successful_ads:", incrementError);
+    } else {
+      console.log(`Incremented successful_ads for channel ${deal.channel_id}`);
+    }
+
+    // Notify advertiser and request rating
     if (advertiser?.telegram_id) {
       await sendTelegramMessage(
         advertiser.telegram_id,
@@ -299,9 +345,19 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; refunded?: b
 Средства переведены владельцу канала.
 Спасибо за использование Adsingo! 🚀`
       );
+
+      // Send rating request
+      await sendRatingRequest(
+        advertiser.telegram_id,
+        `⭐ <b>Оцените работу канала</b>
+
+Пожалуйста, оцените качество размещения в канале <b>${channelTitle}</b>:`,
+        deal.id,
+        "rate_channel"
+      );
     }
 
-    // Notify channel owner
+    // Notify channel owner and request rating
     if (owner?.telegram_id) {
       const paymentNote = transferSuccess 
         ? `\n\n💎 <b>${deal.total_price} TON</b> переведены на ваш кошелёк.`
@@ -314,6 +370,16 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; refunded?: b
 Реклама в канале <b>${channelTitle}</b> успешно отработала.${paymentNote}
 
 Спасибо за использование Adsingo! 🚀`
+      );
+
+      // Send rating request for advertiser
+      await sendRatingRequest(
+        owner.telegram_id,
+        `⭐ <b>Оцените рекламодателя</b>
+
+Пожалуйста, оцените сотрудничество с рекламодателем:`,
+        deal.id,
+        "rate_advertiser"
       );
     }
 
@@ -338,7 +404,7 @@ Deno.serve(async (req) => {
       .from("deals")
       .select(`
         id, posted_at, duration_hours, total_price, advertiser_id,
-        telegram_message_id, escrow_mnemonic_encrypted,
+        telegram_message_id, escrow_mnemonic_encrypted, channel_id,
         channel:channels(telegram_chat_id, title, username, owner_id)
       `)
       .eq("status", "in_progress")
@@ -389,6 +455,7 @@ Deno.serve(async (req) => {
           advertiser_id: deal.advertiser_id,
           telegram_message_id: deal.telegram_message_id,
           escrow_mnemonic_encrypted: deal.escrow_mnemonic_encrypted,
+          channel_id: deal.channel_id,
           channel: channel as Deal["channel"],
         });
       }

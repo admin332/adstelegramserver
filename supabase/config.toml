@@ -77,3 +77,6 @@ verify_jwt = false
 
 [functions.review-draft]
 verify_jwt = false
+
+[functions.telegram-webhook]
+verify_jwt = false
