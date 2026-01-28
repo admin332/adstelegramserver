@@ -19,9 +19,17 @@ export const PromoBannerCarousel = () => {
   const [current, setCurrent] = useState(0);
   const [loadedImages, setLoadedImages] = useState<Set<number>>(new Set());
   const [allImagesLoaded, setAllImagesLoaded] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState<number | null>(null);
 
   // Обработчик загрузки изображения
-  const handleImageLoad = (id: number) => {
+  const handleImageLoad = (id: number, event: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = event.currentTarget;
+    
+    // Сохраняем aspect ratio первого загруженного изображения
+    if (aspectRatio === null && img.naturalWidth && img.naturalHeight) {
+      setAspectRatio(img.naturalWidth / img.naturalHeight);
+    }
+    
     setLoadedImages(prev => {
       const newSet = new Set(prev);
       newSet.add(id);
@@ -61,7 +69,10 @@ export const PromoBannerCarousel = () => {
   if (!allImagesLoaded) {
     return (
       <div className="w-full">
-        <Skeleton className="w-full aspect-[16/7] rounded-lg" />
+        <Skeleton 
+          className="w-full rounded-lg" 
+          style={{ aspectRatio: aspectRatio || 16/7 }}
+        />
         {/* Скрытые изображения для предзагрузки */}
         <div className="hidden">
           {banners.map((banner) => (
@@ -69,7 +80,7 @@ export const PromoBannerCarousel = () => {
               key={banner.id}
               src={banner.src}
               alt=""
-              onLoad={() => handleImageLoad(banner.id)}
+              onLoad={(e) => handleImageLoad(banner.id, e)}
             />
           ))}
         </div>
