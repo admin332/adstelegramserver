@@ -350,6 +350,11 @@ Deno.serve(async (req) => {
 
     if (!deals || deals.length === 0) {
       console.log("No posted deals found");
+      
+      // Check if we should deactivate cron jobs (no more active deals)
+      const { data: cronResult } = await supabase.rpc('manage_cron_jobs', { action: 'check_and_deactivate' });
+      console.log("Cron jobs management:", cronResult);
+      
       return new Response(
         JSON.stringify({ success: true, message: "No deals to complete", processed: 0 }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -391,6 +396,11 @@ Deno.serve(async (req) => {
 
     if (dealsToComplete.length === 0) {
       console.log("No deals ready for completion yet");
+      
+      // Still check if we should deactivate cron jobs
+      const { data: cronResult } = await supabase.rpc('manage_cron_jobs', { action: 'check_and_deactivate' });
+      console.log("Cron jobs management:", cronResult);
+      
       return new Response(
         JSON.stringify({ success: true, message: "No deals ready for completion", processed: 0 }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
