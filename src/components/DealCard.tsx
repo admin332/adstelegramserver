@@ -336,13 +336,13 @@ export const DealCard = ({
             Оплатить
           </Button>
           {escrowAddress && (
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={handleViewBlockchain}
-            >
-              <ExternalLink className="w-4 h-4" />
-            </Button>
+          <Button 
+            variant="ghost" 
+            size="sm"
+            onClick={handleViewBlockchain}
+          >
+            <ExternalLink className="w-4 h-4" />
+          </Button>
           )}
         </div>
       )}
