@@ -1,64 +1,66 @@
 
-# Кликабельные карточки каналов
+# Изменение кнопки "Купить" → "Канал"
 
-## Текущая ситуация
+## Текущее поведение
 
-Карточка `ChannelCard` имеет класс `cursor-pointer`, но при клике на неё (вне кнопок) ничего не происходит. Открытие канала работает только через кнопку "Купить".
+Кнопка "Купить" открывает страницу канала в приложении (`/channel/${id}`).
 
-## Решение
+## Новое поведение
 
-Добавить `onClick` обработчик на главный контейнер карточки для навигации на страницу канала.
+Кнопка "Канал" будет открывать Telegram-канал напрямую по ссылке `https://t.me/${username}`.
 
 ## Изменения
 
 **Файл:** `src/components/ChannelCard.tsx`
 
-### Добавить функцию handleCardClick (после строки 62)
-
-```tsx
-const handleCardClick = () => {
-  navigate(`/channel/${id}`);
-};
-```
-
-### Добавить onClick на motion.div (строка 84)
+### 1. Изменить функцию handleBuyClick (строки 59-62)
 
 ```tsx
 // Было:
-<motion.div
-  className={cn(
-    'relative w-full h-48 rounded-3xl overflow-hidden cursor-pointer group'
-  )}
-  variants={cardVariants}
-  initial="hidden"
-  animate="visible"
->
+const handleBuyClick = (e: React.MouseEvent) => {
+  e.stopPropagation();
+  navigate(`/channel/${id}`);
+};
 
 // Станет:
-<motion.div
-  className={cn(
-    'relative w-full h-48 rounded-3xl overflow-hidden cursor-pointer group'
-  )}
-  variants={cardVariants}
-  initial="hidden"
-  animate="visible"
-  onClick={handleCardClick}
->
+const handleChannelClick = (e: React.MouseEvent) => {
+  e.stopPropagation();
+  window.open(`https://t.me/${username}`, '_blank');
+};
 ```
 
-## Поведение кликов
+### 2. Обновить кнопку (строки 204-210)
+
+```tsx
+// Было:
+<Button
+  size="sm"
+  className="h-9 px-4 text-xs font-semibold rounded-full"
+  onClick={handleBuyClick}
+>
+  Купить
+</Button>
+
+// Станет:
+<Button
+  size="sm"
+  className="h-9 px-4 text-xs font-semibold rounded-full"
+  onClick={handleChannelClick}
+>
+  Канал
+</Button>
+```
+
+## Поведение кликов после изменения
 
 | Область клика | Действие |
 |---------------|----------|
-| Вся карточка | Открывает `/channel/:id` |
-| Кнопка "Сердце" | Добавляет в избранное (stopPropagation) |
-| Кнопка "Купить" | Открывает `/channel/:id` (stopPropagation) |
+| Вся карточка | Открывает страницу `/channel/:id` в приложении |
+| Кнопка "Сердце" | Добавляет в избранное |
+| Кнопка "Канал" | Открывает `https://t.me/username` в новой вкладке |
 
-## Примечание
+## Технические детали
 
-`stopPropagation()` уже есть на кнопках `handleLikeClick` и `handleBuyClick`, поэтому клики на них не будут "всплывать" к родительскому обработчику.
-
-## Затронутые страницы
-
-- **Главная** (`/`) — карточки в "Популярные каналы"
-- **Каталог** (`/channels`) — все карточки каналов
+- Используется `window.open()` с `_blank` для открытия в новой вкладке/окне
+- `username` уже передаётся как prop в компонент
+- `stopPropagation()` сохранён для предотвращения срабатывания клика на карточку
