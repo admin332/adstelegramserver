@@ -14,7 +14,8 @@ import {
   Shield,
   Star,
   Crown,
-  Loader2
+  Loader2,
+  Wallet
 } from "lucide-react";
 
 const Profile = () => {
@@ -33,7 +34,7 @@ const Profile = () => {
   
   const demoStats = {
     completedDeals: 12,
-    avgRating: 4.8,
+    totalTurnover: 150,
   };
 
   const menuItems = [
@@ -136,7 +137,7 @@ const Profile = () => {
               <div className="flex items-center gap-1 mt-1">
                 <Star className="w-4 h-4 text-warning fill-warning" />
                 <span className="text-sm text-foreground">
-                  {statsLoading ? "..." : (isTestMode ? demoStats.avgRating : (advertiserStats?.avgRating ?? 0))}
+                  {statsLoading ? "..." : (advertiserStats?.avgRating ?? 0)}
                 </span>
                 {isAuthenticated && (
                   <span className="text-sm text-muted-foreground">• Проверен</span>
@@ -160,9 +161,9 @@ const Profile = () => {
             value={statsLoading ? "..." : String(isTestMode ? demoStats.completedDeals : (advertiserStats?.completedDeals ?? 0))}
           />
           <StatsCard
-            icon={<Star className="w-5 h-5" />}
-            label="Рейтинг"
-            value={statsLoading ? "..." : String(isTestMode ? demoStats.avgRating : (advertiserStats?.avgRating ?? 0))}
+            icon={<Wallet className="w-5 h-5" />}
+            label="Оборот"
+            value={statsLoading ? "..." : `${isTestMode ? demoStats.totalTurnover : (advertiserStats?.totalTurnover ?? 0)} TON`}
           />
         </div>
 
