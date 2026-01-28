@@ -98,10 +98,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       <div className="absolute inset-0 bg-gradient-to-b from-[hsl(217,91%,50%)] to-[hsl(224,76%,48%)]" />
       
       {/* Background Image - Right Side */}
-      <div 
-        className="absolute inset-0"
-        style={{ clipPath: 'polygon(50% 0, 100% 0, 100% 100%, 50% 100%)' }}
-      >
+      <div className="absolute top-0 bottom-0 right-0 w-1/2">
         <img
           src={avatar}
           alt={name}
