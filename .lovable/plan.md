@@ -1,57 +1,100 @@
 
-# Удаление переключателя из списка кампаний
+# Изменение дизайна всплывающих окон (Dialog/AlertDialog)
 
-## Проблема
+## Текущий дизайн
 
-В карточке кампании есть переключатель (Switch) для включения/выключения, но он избыточен — достаточно кнопки удаления.
+Сейчас диалоговые окна имеют:
+- **Overlay**: `bg-black/80` — только затемнение без размытия
+- **Content**: `border bg-background` — белый/тёмный фон с рамкой
 
-## Что нужно удалить
+## Новый дизайн
 
-**Файл:** `src/components/create/MyCampaignsList.tsx`
-
-### 1. Удалить импорты (строки 2, 18, 20)
-
-```tsx
-// Удалить:
-import { Switch } from "@/components/ui/switch";
-import { useToggleCampaignActive } from "@/hooks/useUserCampaigns";
-// UserCampaign больше не нужен для handleToggle
-```
-
-### 2. Удалить хук и функцию (строки 35, 38-43)
-
-```tsx
-// Удалить:
-const toggleActive = useToggleCampaignActive();
-
-const handleToggle = (campaign: UserCampaign) => {
-  toggleActive.mutate({
-    campaignId: campaign.id,
-    isActive: !campaign.is_active,
-  });
-};
-```
-
-### 3. Удалить Switch компонент (строки 110-114)
-
-```tsx
-// Удалить:
-<Switch
-  checked={campaign.is_active || false}
-  onCheckedChange={() => handleToggle(campaign)}
-  disabled={toggleActive.isPending}
-/>
-```
-
-## Результат
-
-Карточка кампании станет проще:
-- Заголовок кампании (без переключателя справа)
-- Текст описания
-- Нижняя панель с кнопкой удаления
+Требуется:
+- Убрать фон блока контента
+- Убрать рамку обводки
+- Добавить размытие заднего фона (blur) вместо просто затемнения
 
 ## Изменяемые файлы
 
-| Файл | Действие |
-|------|----------|
-| `src/components/create/MyCampaignsList.tsx` | Удалить Switch и связанный код |
+### 1. `src/components/ui/dialog.tsx`
+
+**DialogOverlay** (строки 18-27):
+```tsx
+// Было:
+"fixed inset-0 z-50 bg-black/80 ..."
+
+// Станет:
+"fixed inset-0 z-50 bg-black/40 backdrop-blur-xl ..."
+```
+
+**DialogContent** (строки 36-41):
+```tsx
+// Было:
+"... border bg-background p-6 shadow-lg ... sm:rounded-lg"
+
+// Станет:
+"... border-0 bg-transparent p-6 ... sm:rounded-lg"
+```
+
+### 2. `src/components/ui/alert-dialog.tsx`
+
+**AlertDialogOverlay** (строки 17-24):
+```tsx
+// Было:
+"fixed inset-0 z-50 bg-black/80 ..."
+
+// Станет:
+"fixed inset-0 z-50 bg-black/40 backdrop-blur-xl ..."
+```
+
+**AlertDialogContent** (строки 34-40):
+```tsx
+// Было:
+"... border bg-background p-6 shadow-lg ... sm:rounded-lg"
+
+// Станет:
+"... border-0 bg-transparent p-6 ... sm:rounded-lg"
+```
+
+## Визуальный результат
+
+```text
+┌─────────────────────────────────────────┐
+│                                         │
+│        ┌───────────────────┐            │
+│        │   Подтверждение   │            │
+│        │                   │  ← Прозрачный фон,
+│        │  Текст диалога    │    без рамки
+│        │                   │            │
+│        │  [Отмена] [OK]    │            │
+│        └───────────────────┘            │
+│                                         │
+│    ← Размытие всего фона (blur-xl)      │
+│      + лёгкое затемнение (40%)          │
+└─────────────────────────────────────────┘
+```
+
+## Технические детали
+
+| Параметр | Было | Станет |
+|----------|------|--------|
+| Overlay фон | `bg-black/80` | `bg-black/40` |
+| Overlay blur | Нет | `backdrop-blur-xl` |
+| Content фон | `bg-background` | `bg-transparent` |
+| Content рамка | `border` | `border-0` |
+| Content тень | `shadow-lg` | Убрать |
+
+## Затронутые компоненты
+
+Все диалоги в приложении автоматически получат новый стиль:
+- PaymentDialog
+- ScheduleEditDialog
+- DraftEditorDialog
+- DraftReviewDialog
+- OwnerActionsDialog
+- AlertDialog подтверждения удаления кампании
+- Другие диалоги
+
+## Примечание
+
+Размытие `backdrop-blur-xl` (24px) обеспечит хорошую видимость анимированного starfield фона через overlay, сохраняя фокус на содержимом диалога.
