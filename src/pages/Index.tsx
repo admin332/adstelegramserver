@@ -1,5 +1,6 @@
 import { BottomNav } from "@/components/BottomNav";
 import { ChannelCard } from "@/components/ChannelCard";
+import { ChannelCardSkeleton } from "@/components/ChannelCardSkeleton";
 import { CategoryFilters } from "@/components/CategoryFilters";
 import { SearchBar } from "@/components/SearchBar";
 import { StatsCard } from "@/components/StatsCard";
@@ -123,16 +124,31 @@ const Index = () => {
       <main className="px-4 py-4 space-y-6">
         {/* Quick Stats */}
         <div className="grid grid-cols-2 gap-3">
-          <StatsCard
-            icon={<Users className="w-5 h-5" />}
-            label="Каналов"
-            value={isLoading ? "..." : formatNumber(totalChannels)}
-          />
-          <StatsCard
-            icon={<TrendingUp className="w-5 h-5" />}
-            label="Подписчиков"
-            value={isLoading ? "..." : formatNumber(totalSubscribers)}
-          />
+          {isLoading ? (
+            <>
+              <div className="bg-secondary/50 rounded-2xl p-4">
+                <Skeleton className="h-4 w-20 mb-2" />
+                <Skeleton className="h-8 w-16" />
+              </div>
+              <div className="bg-secondary/50 rounded-2xl p-4">
+                <Skeleton className="h-4 w-24 mb-2" />
+                <Skeleton className="h-8 w-20" />
+              </div>
+            </>
+          ) : (
+            <>
+              <StatsCard
+                icon={<Users className="w-5 h-5" />}
+                label="Каналов"
+                value={formatNumber(totalChannels)}
+              />
+              <StatsCard
+                icon={<TrendingUp className="w-5 h-5" />}
+                label="Подписчиков"
+                value={formatNumber(totalSubscribers)}
+              />
+            </>
+          )}
         </div>
 
         {/* Promo Banners */}
@@ -157,20 +173,7 @@ const Index = () => {
           </div>
           <div className="space-y-3">
             {isLoading ? (
-              <>
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="bg-secondary/50 rounded-2xl p-4">
-                    <div className="flex items-center gap-3">
-                      <Skeleton className="w-12 h-12 rounded-full" />
-                      <div className="flex-1 space-y-2">
-                        <Skeleton className="h-4 w-32" />
-                        <Skeleton className="h-3 w-24" />
-                      </div>
-                      <Skeleton className="h-8 w-16" />
-                    </div>
-                  </div>
-                ))}
-              </>
+              [1, 2, 3].map((i) => <ChannelCardSkeleton key={i} />)
             ) : filteredChannels.length > 0 ? (
               filteredChannels.map((channel) => (
                 <ChannelCard 

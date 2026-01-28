@@ -1,5 +1,6 @@
 import { BottomNav } from "@/components/BottomNav";
 import { ChannelCard } from "@/components/ChannelCard";
+import { ChannelCardSkeleton } from "@/components/ChannelCardSkeleton";
 import { CategoryFilters } from "@/components/CategoryFilters";
 import { SearchBar } from "@/components/SearchBar";
 import { FilterChip } from "@/components/FilterChip";
@@ -109,25 +110,16 @@ const Channels = () => {
         <CategoryFilters onCategoryChange={setActiveCategory} />
         
         <div className="text-sm text-muted-foreground">
-          Найдено: {filteredChannels.length} каналов
+          {isLoading ? (
+            <Skeleton className="h-4 w-32" />
+          ) : (
+            `Найдено: ${filteredChannels.length} каналов`
+          )}
         </div>
 
         <div className="space-y-3">
           {isLoading ? (
-            <>
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="bg-secondary/50 rounded-2xl p-4">
-                  <div className="flex items-center gap-3">
-                    <Skeleton className="w-12 h-12 rounded-full" />
-                    <div className="flex-1 space-y-2">
-                      <Skeleton className="h-4 w-32" />
-                      <Skeleton className="h-3 w-24" />
-                    </div>
-                    <Skeleton className="h-8 w-16" />
-                  </div>
-                </div>
-              ))}
-            </>
+            [1, 2, 3, 4].map((i) => <ChannelCardSkeleton key={i} />)
           ) : filteredChannels.length > 0 ? (
             filteredChannels.map((channel) => (
               <ChannelCard 
