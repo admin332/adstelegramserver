@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -11,14 +12,18 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Plus, Trash2, ImageIcon, ArrowLeft, FileVideo } from "lucide-react";
+import { Plus, Trash2, ImageIcon, ArrowLeft, FileVideo, Pencil, Loader2 } from "lucide-react";
 import {
   useUserCampaigns,
   useDeleteCampaign,
+  useCheckCampaignDeals,
+  UserCampaign,
 } from "@/hooks/useUserCampaigns";
+import { toast } from "@/hooks/use-toast";
 
 interface MyCampaignsListProps {
   onAddCampaign: () => void;
+  onEditCampaign: (campaign: UserCampaign) => void;
   onBack: () => void;
 }
 
@@ -27,12 +32,41 @@ const isVideoUrl = (url: string) => {
   return videoExtensions.some(ext => url.toLowerCase().includes(ext));
 };
 
-export const MyCampaignsList = ({ onAddCampaign, onBack }: MyCampaignsListProps) => {
+export const MyCampaignsList = ({ onAddCampaign, onEditCampaign, onBack }: MyCampaignsListProps) => {
   const { data: campaigns, isLoading } = useUserCampaigns();
   const deleteCampaign = useDeleteCampaign();
+  const checkCampaignDeals = useCheckCampaignDeals();
+  const [checkingCampaignId, setCheckingCampaignId] = useState<string | null>(null);
 
   const handleDelete = (campaignId: string) => {
     deleteCampaign.mutate(campaignId);
+  };
+
+  const handleEdit = async (campaign: UserCampaign) => {
+    setCheckingCampaignId(campaign.id);
+    
+    try {
+      const result = await checkCampaignDeals.mutateAsync(campaign.id);
+      
+      if (result.hasActiveDeals) {
+        toast({
+          title: "Редактирование недоступно",
+          description: "Кампания используется в активных сделках и не может быть изменена",
+          variant: "destructive",
+        });
+      } else {
+        onEditCampaign(campaign);
+      }
+    } catch (error) {
+      console.error("Check deals error:", error);
+      toast({
+        title: "Ошибка",
+        description: "Не удалось проверить статус кампании",
+        variant: "destructive",
+      });
+    } finally {
+      setCheckingCampaignId(null);
+    }
   };
 
   if (isLoading) {
@@ -111,6 +145,23 @@ export const MyCampaignsList = ({ onAddCampaign, onBack }: MyCampaignsListProps)
                   </span>
                 )}
                 <div className="flex-1" />
+                
+                {/* Edit button */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleEdit(campaign)}
+                  disabled={checkingCampaignId === campaign.id}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  {checkingCampaignId === campaign.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Pencil className="w-4 h-4" />
+                  )}
+                </Button>
+                
+                {/* Delete button */}
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button
