@@ -1,81 +1,92 @@
 
+# Удаление скелетона у баннеров
 
-# Исправление размеров скелетона для баннеров
+## Обзор
 
-## Проблема
-
-Скелетон с фиксированным соотношением сторон `aspect-[16/7]` не соответствует реальным размерам баннеров, что приводит к скачку контента при загрузке.
-
-## Решение
-
-Использовать динамический расчёт размеров: сначала загружаем первое изображение в скрытом режиме, определяем его реальные размеры, и используем их для скелетона.
+Полностью убираем логику скелетона из компонента карусели баннеров. Карусель будет отображаться сразу без состояния загрузки.
 
 ## Изменения
 
 **Файл:** `src/components/PromoBannerCarousel.tsx`
 
-```tsx
-export const PromoBannerCarousel = () => {
-  const [api, setApi] = useState<CarouselApi>();
-  const [current, setCurrent] = useState(0);
-  const [loadedImages, setLoadedImages] = useState<Set<number>>(new Set());
-  const [allImagesLoaded, setAllImagesLoaded] = useState(false);
-  const [aspectRatio, setAspectRatio] = useState<number | null>(null);
+Удаляем:
+- Импорт `Skeleton`
+- Состояния `loadedImages`, `allImagesLoaded`, `aspectRatio`
+- Функцию `handleImageLoad`
+- Условный рендеринг скелетона
+- Скрытые изображения для предзагрузки
 
-  // Обработчик загрузки изображения
-  const handleImageLoad = (id: number, event: React.SyntheticEvent<HTMLImageElement>) => {
-    const img = event.currentTarget;
-    
-    // Сохраняем aspect ratio первого загруженного изображения
-    if (aspectRatio === null && img.naturalWidth && img.naturalHeight) {
-      setAspectRatio(img.naturalWidth / img.naturalHeight);
-    }
-    
-    setLoadedImages(prev => {
-      const newSet = new Set(prev);
-      newSet.add(id);
-      if (newSet.size === banners.length) {
-        setAllImagesLoaded(true);
-      }
-      return newSet;
-    });
-  };
-
-  // Показываем скелетон если изображения ещё не загружены
-  if (!allImagesLoaded) {
-    return (
-      <div className="w-full">
-        <Skeleton 
-          className="w-full rounded-lg" 
-          style={{ aspectRatio: aspectRatio || 16/7 }}
-        />
-        {/* Скрытые изображения для предзагрузки */}
-        <div className="hidden">
-          {banners.map((banner) => (
-            <img
-              key={banner.id}
-              src={banner.src}
-              alt=""
-              onLoad={(e) => handleImageLoad(banner.id, e)}
-            />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // ... остальной код без изменений
-};
-```
-
-## Как это работает
-
-1. При первой загрузке показываем скелетон с дефолтным ratio (16/7)
-2. Как только первый баннер загружается, получаем его реальные размеры через `naturalWidth` и `naturalHeight`
-3. Обновляем aspect ratio скелетона на реальный
-4. Когда все изображения загружены — показываем карусель
+Остаётся только базовая карусель с автопрокруткой.
 
 ## Результат
 
-Скелетон будет точно соответствовать размерам реальных баннеров, предотвращая скачки контента при загрузке.
+```tsx
+import { useEffect, useState } from "react";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  type CarouselApi,
+} from "@/components/ui/carousel";
+import banner1 from "@/assets/banners/banner1.png";
+import banner2 from "@/assets/banners/banner2.png";
 
+const banners = [
+  { id: 1, src: banner1, alt: "Промо баннер 1" },
+  { id: 2, src: banner2, alt: "Промо баннер 2" },
+];
+
+export const PromoBannerCarousel = () => {
+  const [api, setApi] = useState<CarouselApi>();
+  const [current, setCurrent] = useState(0);
+
+  useEffect(() => {
+    if (!api) return;
+    setCurrent(api.selectedScrollSnap());
+    api.on("select", () => {
+      setCurrent(api.selectedScrollSnap());
+    });
+  }, [api]);
+
+  // Автопрокрутка каждые 10 секунд
+  useEffect(() => {
+    if (!api) return;
+    const interval = setInterval(() => {
+      if (api.canScrollNext()) {
+        api.scrollNext();
+      } else {
+        api.scrollTo(0);
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [api]);
+
+  return (
+    <Carousel
+      setApi={setApi}
+      opts={{ align: "center", loop: true }}
+      className="w-full"
+    >
+      <CarouselContent className="-ml-0">
+        {banners.map((banner) => (
+          <CarouselItem key={banner.id} className="pl-0">
+            <div className="flex justify-center">
+              <img
+                src={banner.src}
+                alt={banner.alt}
+                className="w-full h-auto rounded-lg shadow-md"
+              />
+            </div>
+          </CarouselItem>
+        ))}
+      </CarouselContent>
+    </Carousel>
+  );
+};
+```
+
+## Файлы для изменения
+
+| Файл | Действие |
+|------|----------|
+| `src/components/PromoBannerCarousel.tsx` | Удалить всю логику скелетона |
