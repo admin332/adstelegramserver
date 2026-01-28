@@ -1,92 +1,137 @@
 
-# Удаление скелетона у баннеров
+
+# Добавление анимированного TGS стикера над первым каналом
 
 ## Обзор
 
-Полностью убираем логику скелетона из компонента карусели баннеров. Карусель будет отображаться сразу без состояния загрузки.
+Добавляем анимированный Telegram стикер (.tgs) над первой карточкой канала на главной странице. Стикер будет отображаться поверх контента (overlay) без отступа сверху от первой карточки.
 
-## Изменения
+## Техническое решение
 
-**Файл:** `src/components/PromoBannerCarousel.tsx`
-
-Удаляем:
-- Импорт `Skeleton`
-- Состояния `loadedImages`, `allImagesLoaded`, `aspectRatio`
-- Функцию `handleImageLoad`
-- Условный рендеринг скелетона
-- Скрытые изображения для предзагрузки
-
-Остаётся только базовая карусель с автопрокруткой.
-
-## Результат
-
-```tsx
-import { useEffect, useState } from "react";
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  type CarouselApi,
-} from "@/components/ui/carousel";
-import banner1 from "@/assets/banners/banner1.png";
-import banner2 from "@/assets/banners/banner2.png";
-
-const banners = [
-  { id: 1, src: banner1, alt: "Промо баннер 1" },
-  { id: 2, src: banner2, alt: "Промо баннер 2" },
-];
-
-export const PromoBannerCarousel = () => {
-  const [api, setApi] = useState<CarouselApi>();
-  const [current, setCurrent] = useState(0);
-
-  useEffect(() => {
-    if (!api) return;
-    setCurrent(api.selectedScrollSnap());
-    api.on("select", () => {
-      setCurrent(api.selectedScrollSnap());
-    });
-  }, [api]);
-
-  // Автопрокрутка каждые 10 секунд
-  useEffect(() => {
-    if (!api) return;
-    const interval = setInterval(() => {
-      if (api.canScrollNext()) {
-        api.scrollNext();
-      } else {
-        api.scrollTo(0);
-      }
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [api]);
-
-  return (
-    <Carousel
-      setApi={setApi}
-      opts={{ align: "center", loop: true }}
-      className="w-full"
-    >
-      <CarouselContent className="-ml-0">
-        {banners.map((banner) => (
-          <CarouselItem key={banner.id} className="pl-0">
-            <div className="flex justify-center">
-              <img
-                src={banner.src}
-                alt={banner.alt}
-                className="w-full h-auto rounded-lg shadow-md"
-              />
-            </div>
-          </CarouselItem>
-        ))}
-      </CarouselContent>
-    </Carousel>
-  );
-};
-```
+TGS файлы — это gzip-сжатые Lottie JSON анимации. Для их рендеринга нужно:
+1. Распаковать gzip с помощью библиотеки `pako`
+2. Отрендерить Lottie анимацию с помощью `lottie-react`
+3. Позиционировать стикер абсолютно поверх контента
 
 ## Файлы для изменения
 
 | Файл | Действие |
 |------|----------|
-| `src/components/PromoBannerCarousel.tsx` | Удалить всю логику скелетона |
+| `package.json` | Добавить `pako` и `lottie-react` |
+| `src/assets/stickers/` | Создать папку и скопировать стикер |
+| `src/components/TgsSticker.tsx` | Новый компонент для рендеринга TGS |
+| `src/pages/Index.tsx` | Добавить стикер над первым каналом |
+
+## Детали реализации
+
+### 1. Установка зависимостей
+
+```json
+{
+  "dependencies": {
+    "pako": "^2.1.0",
+    "lottie-react": "^2.4.0"
+  }
+}
+```
+
+### 2. Копирование стикера
+
+Копируем загруженный файл в `src/assets/stickers/animated-sticker.tgs`
+
+### 3. Компонент TgsSticker
+
+```tsx
+import { useState, useEffect } from 'react';
+import Lottie from 'lottie-react';
+import pako from 'pako';
+
+interface TgsStickerProps {
+  src: string;
+  className?: string;
+  loop?: boolean;
+  autoplay?: boolean;
+  style?: React.CSSProperties;
+}
+
+export const TgsSticker = ({ 
+  src, 
+  className, 
+  loop = true, 
+  autoplay = true,
+  style 
+}: TgsStickerProps) => {
+  const [animationData, setAnimationData] = useState<object | null>(null);
+
+  useEffect(() => {
+    const loadTgs = async () => {
+      const response = await fetch(src);
+      const buffer = await response.arrayBuffer();
+      const decompressed = pako.ungzip(new Uint8Array(buffer), { to: 'string' });
+      const json = JSON.parse(decompressed);
+      setAnimationData(json);
+    };
+    
+    loadTgs();
+  }, [src]);
+
+  if (!animationData) return null;
+
+  return (
+    <Lottie
+      animationData={animationData}
+      loop={loop}
+      autoPlay={autoplay}
+      className={className}
+      style={style}
+    />
+  );
+};
+```
+
+### 4. Интеграция в Index.tsx
+
+```tsx
+// В секции каналов (строки 174-191)
+<div className="space-y-3">
+  {isLoading ? (
+    [1, 2, 3].map((i) => <ChannelCardSkeleton key={i} />)
+  ) : filteredChannels.length > 0 ? (
+    filteredChannels.map((channel, index) => (
+      <div key={channel.id} className="relative">
+        {/* Стикер только над первой карточкой */}
+        {index === 0 && (
+          <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+            <TgsSticker 
+              src="/stickers/animated-sticker.tgs"
+              className="w-24 h-24"
+            />
+          </div>
+        )}
+        <ChannelCard 
+          {...channel} 
+          isLiked={isFavorite(channel.id)}
+          onLikeToggle={toggleFavorite}
+        />
+      </div>
+    ))
+  ) : (
+    <div className="text-center py-8 text-muted-foreground">
+      {showFavoritesOnly ? "Нет избранных каналов" : "Каналы не найдены"}
+    </div>
+  )}
+</div>
+```
+
+## Позиционирование стикера
+
+- `absolute` — абсолютное позиционирование относительно родителя
+- `-top-12` — смещение вверх (выходит за пределы карточки)
+- `left-1/2 -translate-x-1/2` — центрирование по горизонтали
+- `z-10` — отображение поверх контента
+- `pointer-events-none` — клики проходят сквозь стикер
+
+## Результат
+
+Анимированный стикер будет плавно воспроизводиться над первой карточкой канала, не сдвигая другие элементы и отображаясь поверх них.
+
