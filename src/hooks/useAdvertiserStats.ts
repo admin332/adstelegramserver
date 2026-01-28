@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 interface AdvertiserStats {
   completedDeals: number;
   avgRating: number;
+  totalTurnover: number;
 }
 
 export function useAdvertiserStats() {
@@ -18,7 +19,7 @@ export function useAdvertiserStats() {
         
         if (!initData) {
           // No Telegram context - return zeros
-          setStats({ completedDeals: 0, avgRating: 0 });
+          setStats({ completedDeals: 0, avgRating: 0, totalTurnover: 0 });
           setIsLoading(false);
           return;
         }
@@ -37,11 +38,12 @@ export function useAdvertiserStats() {
         setStats({
           completedDeals: data?.completed_deals ?? 0,
           avgRating: data?.avg_rating ?? 0,
+          totalTurnover: data?.total_turnover ?? 0,
         });
       } catch (err) {
         console.error("Failed to fetch advertiser stats:", err);
         setError(err instanceof Error ? err.message : "Unknown error");
-        setStats({ completedDeals: 0, avgRating: 0 });
+        setStats({ completedDeals: 0, avgRating: 0, totalTurnover: 0 });
       } finally {
         setIsLoading(false);
       }

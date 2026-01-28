@@ -96,10 +96,23 @@ Deno.serve(async (req) => {
       avgRating = Math.round((sum / reviews.length) * 10) / 10;
     }
 
+    // Get total turnover from completed deals
+    const { data: dealsData } = await supabase
+      .from("deals")
+      .select("total_price")
+      .eq("advertiser_id", user.id)
+      .eq("status", "completed");
+
+    let totalTurnover = 0;
+    if (dealsData && dealsData.length > 0) {
+      totalTurnover = dealsData.reduce((acc, d) => acc + (Number(d.total_price) || 0), 0);
+    }
+
     return new Response(
       JSON.stringify({
         completed_deals: completedDeals || 0,
         avg_rating: avgRating,
+        total_turnover: totalTurnover,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
