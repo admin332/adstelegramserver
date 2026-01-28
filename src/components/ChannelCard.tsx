@@ -56,9 +56,9 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
     onLikeToggle?.(id);
   };
 
-  const handleBuyClick = (e: React.MouseEvent) => {
+  const handleChannelClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigate(`/channel/${id}`);
+    window.open(`https://t.me/${username}`, '_blank');
   };
 
   const handleCardClick = () => {
@@ -204,9 +204,9 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
             <Button
               size="sm"
               className="h-9 px-4 text-xs font-semibold rounded-full"
-              onClick={handleBuyClick}
+              onClick={handleChannelClick}
             >
-              Купить
+              Канал
             </Button>
           </div>
         </div>
