@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { StatsCard } from "@/components/StatsCard";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppSettings } from "@/hooks/useAppSettings";
+import { useAdvertiserStats } from "@/hooks/useAdvertiserStats";
 import WalletSection from "@/components/profile/WalletSection";
 import { 
   User, 
@@ -19,6 +20,7 @@ import {
 const Profile = () => {
   const { user, isLoading, isAuthenticated, isTelegram, telegramUser, error } = useAuth();
   const { testModeEnabled, isLoading: settingsLoading } = useAppSettings();
+  const { stats: advertiserStats, isLoading: statsLoading } = useAdvertiserStats();
 
   // Демо-данные для тестового режима
   const demoUser = {
@@ -27,6 +29,11 @@ const Profile = () => {
     username: "test_user",
     photo_url: null as string | null,
     is_premium: true,
+  };
+  
+  const demoStats = {
+    completedDeals: 12,
+    avgRating: 4.8,
   };
 
   const menuItems = [
@@ -148,13 +155,12 @@ const Profile = () => {
           <StatsCard
             icon={<Star className="w-5 h-5" />}
             label="Сделок"
-            value="24"
-            trend={15}
+            value={statsLoading ? "..." : String(isTestMode ? demoStats.completedDeals : (advertiserStats?.completedDeals ?? 0))}
           />
           <StatsCard
             icon={<Star className="w-5 h-5" />}
             label="Рейтинг"
-            value="4.9"
+            value={statsLoading ? "..." : String(isTestMode ? demoStats.avgRating : (advertiserStats?.avgRating ?? 0))}
           />
         </div>
 
