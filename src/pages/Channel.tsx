@@ -1,16 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Star, TrendingUp, Tag, BadgeCheck } from 'lucide-react';
+import { Star, Tag, BadgeCheck } from 'lucide-react';
 import { mockChannels } from '@/data/mockChannels';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChannelHero from '@/components/channel/ChannelHero';
 import ChannelStats from '@/components/channel/ChannelStats';
 import ChannelAnalytics from '@/components/channel/ChannelAnalytics';
+import ChannelReviews from '@/components/channel/ChannelReviews';
 import OrderDrawer from '@/components/channel/OrderDrawer';
 import { getTelegramWebApp, isTelegramMiniApp } from '@/lib/telegram';
 import { useChannel } from '@/hooks/useChannels';
+import { useChannelReviews } from '@/hooks/useChannelReviews';
 import { getCategoryById } from '@/data/channelCategories';
 
 const Channel: React.FC = () => {
@@ -19,6 +21,7 @@ const Channel: React.FC = () => {
   const [isOrderDrawerOpen, setIsOrderDrawerOpen] = useState(false);
   
   const { data: dbChannel, isLoading, error } = useChannel(id);
+  const { data: reviews } = useChannelReviews(id);
   
   // Fallback to mock if not found in DB
   const mockChannel = mockChannels.find((c) => c.id === id);
@@ -187,6 +190,9 @@ const Channel: React.FC = () => {
           premiumPercentage={channel.premiumPercentage}
         />
       </motion.div>
+
+      {/* Reviews Section */}
+      <ChannelReviews reviews={reviews || []} />
 
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-background via-background to-transparent">
         <motion.div
