@@ -181,8 +181,8 @@ serve(async (req) => {
       );
     }
 
-    // Create deal with 20-minute expiration
-    const expiresAt = new Date(Date.now() + 20 * 60 * 1000); // +20 minutes
+    // Create deal with 1-hour expiration
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // +60 minutes (1 hour)
 
     const { data: deal, error: dealError } = await supabase
       .from("deals")
