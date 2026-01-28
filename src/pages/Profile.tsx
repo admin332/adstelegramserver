@@ -179,11 +179,6 @@ const Profile = () => {
           })}
         </div>
 
-        {/* Logout */}
-        <Button variant="destructive" className="w-full">
-          <LogOut className="w-5 h-5" />
-          Выйти
-        </Button>
       </main>
 
       <BottomNav />
