@@ -246,10 +246,9 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="name">Название *</Label>
             <Input
               id="name"
-              placeholder="Например: Продвижение приложения"
+              placeholder="Например: Реклама сайта"
               value={campaignData.name}
               onChange={(e) => setCampaignData({ ...campaignData, name: e.target.value })}
               className="bg-card border-0"
