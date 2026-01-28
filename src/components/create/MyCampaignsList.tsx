@@ -102,6 +102,9 @@ export const MyCampaignsList = ({ onAddCampaign, onBack }: MyCampaignsListProps)
               </div>
 
               <div className="flex items-center gap-2 pt-2 border-t border-secondary">
+                <span className="text-xs text-muted-foreground bg-secondary px-2 py-1 rounded-full">
+                  {campaign.campaign_type === 'prompt' ? 'Промпт' : 'Готовый пост'}
+                </span>
                 {campaign.button_text && (
                   <span className="text-xs text-muted-foreground bg-secondary px-2 py-1 rounded-full">
                     Кнопка: {campaign.button_text}

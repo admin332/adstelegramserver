@@ -14,6 +14,7 @@ export interface UserCampaign {
   media_urls: string[] | null;
   is_active: boolean | null;
   created_at: string | null;
+  campaign_type: string;
 }
 
 export function useUserCampaigns() {
