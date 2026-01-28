@@ -1,33 +1,100 @@
 
-# Удаление кнопки "Я оплатил вручную"
+
+# Добавление скелетона для баннеров
 
 ## Обзор
 
-Убираем кнопку "Я оплатил вручную" из окна оплаты при создании сделки, оставляя только основную кнопку "Оплатить" через кошелёк.
+Добавляем состояние загрузки для карусели промо-баннеров, чтобы пользователь видел плавный скелетон вместо пустого места пока изображения загружаются.
 
-## Изменение
+## Текущий вид (при загрузке)
 
-**Файл:** `src/components/channel/PaymentStep.tsx`
-
-Удаляем строки 183-190:
-
-```tsx
-{/* Кнопка "Я оплатил" как запасной вариант */}
-<Button 
-  onClick={onPaymentComplete} 
-  variant="outline"
-  className="w-full h-12 text-base"
->
-  Я оплатил вручную
-</Button>
+```
+┌─────────────────────────────────────────────┐
+│                                             │
+│              (пустое место)                 │
+│                                             │
+└─────────────────────────────────────────────┘
 ```
 
-## Результат
+## Новый вид (при загрузке)
 
-Окно оплаты будет содержать только:
-- Сумму к оплате в TON
-- Эскроу-адрес с кнопками копирования и просмотра в эксплорере
-- Предупреждение о заморозке средств
-- Кнопку "Оплатить" через кошелёк
+```
+┌─────────────────────────────────────────────┐
+│ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ │
+│ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ │
+│ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ │
+└─────────────────────────────────────────────┘
+```
 
-Пользователи смогут оплатить только через подключённый TON-кошелёк.
+## Изменения
+
+### 1. Обновление компонента PromoBannerCarousel
+
+**Файл:** `src/components/PromoBannerCarousel.tsx`
+
+Добавляем состояние загрузки изображений:
+
+```tsx
+import { Skeleton } from "@/components/ui/skeleton";
+
+export const PromoBannerCarousel = () => {
+  const [api, setApi] = useState<CarouselApi>();
+  const [current, setCurrent] = useState(0);
+  const [loadedImages, setLoadedImages] = useState<Set<number>>(new Set());
+  const [allImagesLoaded, setAllImagesLoaded] = useState(false);
+
+  // Обработчик загрузки изображения
+  const handleImageLoad = (id: number) => {
+    setLoadedImages(prev => {
+      const newSet = new Set(prev);
+      newSet.add(id);
+      if (newSet.size === banners.length) {
+        setAllImagesLoaded(true);
+      }
+      return newSet;
+    });
+  };
+
+  // Показываем скелетон если изображения ещё не загружены
+  if (!allImagesLoaded) {
+    return (
+      <div className="w-full">
+        <Skeleton className="w-full aspect-[16/7] rounded-lg" />
+      </div>
+    );
+  }
+
+  return (
+    <Carousel ...>
+      {/* Существующий код карусели */}
+      <img
+        src={banner.src}
+        alt={banner.alt}
+        onLoad={() => handleImageLoad(banner.id)}
+        className="w-full h-auto rounded-lg shadow-md"
+      />
+    </Carousel>
+  );
+};
+```
+
+### 2. Интеграция с главной страницей
+
+**Файл:** `src/pages/Index.tsx`
+
+Компонент `PromoBannerCarousel` уже используется на странице и будет автоматически показывать скелетон во время загрузки.
+
+## Визуальные характеристики скелетона
+
+| Параметр | Значение |
+|----------|----------|
+| Соотношение сторон | 16:7 (как у баннеров) |
+| Скругление | rounded-lg |
+| Анимация | animate-pulse (стандартная) |
+
+## Файлы для изменения
+
+| Файл | Действие |
+|------|----------|
+| `src/components/PromoBannerCarousel.tsx` | Добавить состояние загрузки и скелетон |
+
