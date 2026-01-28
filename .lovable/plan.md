@@ -1,91 +1,161 @@
 
-# Отображение типа кампании в списке "Мои кампании"
+# Добавление редактирования кампаний
 
-## Текущий вид карточки
+## Обзор
 
-```
-[Картинка]  Название кампании
-            Текст кампании...
-
-─────────────────────────────────
-Кнопка: Подробнее              🗑️
-```
-
-## Новый вид карточки
-
-```
-[Картинка]  Название кампании
-            Текст кампании...
-
-─────────────────────────────────
-Готовый пост   Кнопка: Подробнее   🗑️
-```
-
-или
-
-```
-[Картинка]  Название кампании
-            Текст кампании...
-
-─────────────────────────────────
-Промпт   Кнопка: Подробнее         🗑️
-```
+Добавляем иконку редактирования (карандаш) рядом с иконкой удаления в списке "Мои кампании". При нажатии:
+- Проверяется, есть ли активные сделки по этой кампании
+- Если есть — показываем сообщение об ошибке
+- Если нет — открываем форму создания с предзаполненными данными
 
 ## Изменения
 
-### 1. Файл: `src/hooks/useUserCampaigns.ts`
+### 1. Создание хука для проверки активных сделок
 
-Добавить поле `campaign_type` в интерфейс:
+**Новый файл:** `src/hooks/useCampaignActiveDeals.ts`
 
 ```tsx
-export interface UserCampaign {
-  id: string;
-  name: string;
-  text: string;
-  button_text: string | null;
-  button_url: string | null;
-  image_url: string | null;
-  media_urls: string[] | null;
-  is_active: boolean | null;
-  created_at: string | null;
-  campaign_type: string;  // ← ДОБАВИТЬ
+export function useCampaignActiveDeals() {
+  return useMutation({
+    mutationFn: async (campaignId: string) => {
+      // Вызов edge function для проверки активных сделок
+      // Возвращает { hasActiveDeals: boolean }
+    }
+  });
 }
 ```
 
-### 2. Файл: `src/components/create/MyCampaignsList.tsx`
+### 2. Создание Edge Function для проверки сделок
 
-Добавить отображение типа кампании в нижней части карточки (строка 105-109):
+**Новый файл:** `supabase/functions/check-campaign-deals/index.ts`
+
+Проверяет наличие сделок со статусами `pending`, `escrow`, `in_progress` для указанной кампании.
+
+### 3. Создание Edge Function для обновления кампании
+
+**Новый файл:** `supabase/functions/update-campaign/index.ts`
+
+Обновляет данные кампании (название, текст, медиа, кнопку) с проверкой владельца через initData.
+
+### 4. Модификация MyCampaignsList
+
+**Файл:** `src/components/create/MyCampaignsList.tsx`
+
+Добавляем:
+- Импорт иконки `Pencil`
+- Кнопку редактирования рядом с кнопкой удаления
+- Обработчик `handleEdit` с проверкой активных сделок
+- Вызов `onEditCampaign` при успешной проверке
 
 ```tsx
+// Новая структура футера карточки:
 <div className="flex items-center gap-2 pt-2 border-t border-secondary">
-  {/* Тип кампании - НОВЫЙ ЭЛЕМЕНТ */}
-  <span className="text-xs text-muted-foreground bg-secondary px-2 py-1 rounded-full">
-    {campaign.campaign_type === 'prompt' ? 'Промпт' : 'Готовый пост'}
-  </span>
-  
-  {/* Существующая кнопка */}
-  {campaign.button_text && (
-    <span className="text-xs text-muted-foreground bg-secondary px-2 py-1 rounded-full">
-      Кнопка: {campaign.button_text}
-    </span>
-  )}
+  <span>Готовый пост</span>
+  {campaign.button_text && <span>Кнопка: ...</span>}
   <div className="flex-1" />
-  {/* ... delete button ... */}
+  
+  {/* Кнопка редактирования */}
+  <Button variant="ghost" size="sm" onClick={() => handleEdit(campaign)}>
+    <Pencil className="w-4 h-4" />
+  </Button>
+  
+  {/* Кнопка удаления */}
+  <AlertDialog>...</AlertDialog>
 </div>
 ```
 
-## Стилизация
+### 5. Модификация интерфейса MyCampaignsList
 
-Тип кампании будет отображаться точно так же, как "Кнопка: ..." — серый бейдж с закруглёнными краями:
-- `text-xs` — мелкий текст
-- `text-muted-foreground` — приглушённый цвет
-- `bg-secondary` — фон
-- `px-2 py-1` — отступы
-- `rounded-full` — полностью закруглённые углы
+**Файл:** `src/components/create/MyCampaignsList.tsx`
 
-## Значения типов
+```tsx
+interface MyCampaignsListProps {
+  onAddCampaign: () => void;
+  onEditCampaign: (campaign: UserCampaign) => void;  // НОВЫЙ ПРОП
+  onBack: () => void;
+}
+```
 
-| В базе данных | Отображение |
-|---------------|-------------|
-| `ready_post`  | Готовый пост |
-| `prompt`      | Промпт |
+### 6. Модификация CreateCampaignForm для режима редактирования
+
+**Файл:** `src/components/create/CreateCampaignForm.tsx`
+
+Добавляем:
+- Опциональный проп `editingCampaign?: UserCampaign`
+- Предзаполнение формы данными кампании при редактировании
+- Изменение текста кнопки: "Сохранить" вместо "Создать"
+- Вызов `update-campaign` вместо `create-campaign` при редактировании
+
+```tsx
+interface CreateCampaignFormProps {
+  onBack: () => void;
+  onComplete: () => void;
+  editingCampaign?: UserCampaign;  // НОВЫЙ ПРОП
+}
+```
+
+### 7. Модификация Create.tsx
+
+**Файл:** `src/pages/Create.tsx`
+
+Добавляем:
+- Состояние `editingCampaign`
+- Обработчик `handleEditCampaign` 
+- Передача кампании в `CreateCampaignForm`
+
+```tsx
+const [editingCampaign, setEditingCampaign] = useState<UserCampaign | null>(null);
+
+const handleEditCampaign = (campaign: UserCampaign) => {
+  setEditingCampaign(campaign);
+  setCurrentStep("form");
+};
+```
+
+### 8. Добавление хука для обновления кампании
+
+**Файл:** `src/hooks/useUserCampaigns.ts`
+
+```tsx
+export function useUpdateCampaign() {
+  return useMutation({
+    mutationFn: async (data: UpdateCampaignData) => {
+      // Вызов update-campaign edge function
+    }
+  });
+}
+```
+
+## Логика проверки активных сделок
+
+Статусы сделок, блокирующие редактирование:
+- `pending` — ожидает оплаты
+- `escrow` — деньги в эскроу
+- `in_progress` — выполняется
+
+При попытке редактирования показываем toast:
+> "Кампания используется в активных сделках и не может быть изменена"
+
+## UI/UX
+
+```
+┌──────────────────────────────────────────────────┐
+│ [📷]  Название кампании                          │
+│       Текст кампании...                          │
+├──────────────────────────────────────────────────┤
+│ Готовый пост   Кнопка: Подробнее   ✏️   🗑️       │
+└──────────────────────────────────────────────────┘
+                                      ↑     ↑
+                               Редактировать  Удалить
+```
+
+## Файлы для изменения
+
+| Файл | Действие |
+|------|----------|
+| `src/components/create/MyCampaignsList.tsx` | Добавить кнопку редактирования |
+| `src/components/create/CreateCampaignForm.tsx` | Поддержка режима редактирования |
+| `src/pages/Create.tsx` | Состояние редактируемой кампании |
+| `src/hooks/useUserCampaigns.ts` | Хуки для проверки и обновления |
+| `supabase/functions/check-campaign-deals/index.ts` | Новая edge function |
+| `supabase/functions/update-campaign/index.ts` | Новая edge function |
