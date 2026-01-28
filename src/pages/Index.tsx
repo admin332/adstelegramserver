@@ -13,7 +13,7 @@ import { useChannels } from "@/hooks/useChannels";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TrendingUp, Users, Heart, DollarSign, ArrowUpDown } from "lucide-react";
 import animatedSticker from "@/assets/stickers/animated-sticker.tgs";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 type SortOption = "subscribers" | "price" | "engagement" | "rating";
@@ -27,6 +27,7 @@ const Index = () => {
   const [sortBy, setSortBy] = useState<SortOption>("subscribers");
   const { favorites, toggleFavorite, isFavorite } = useFavorites();
   const { data: dbChannels, isLoading } = useChannels();
+  const [stickerReady, setStickerReady] = useState(false);
   
   // Use real channels if available, fallback to mock
   const channels = dbChannels && dbChannels.length > 0 ? dbChannels : mockChannels;
@@ -70,6 +71,18 @@ const Index = () => {
         }
       });
   }, [channels, searchQuery, activeCategory, showFavoritesOnly, favorites, sortBy]);
+
+  // Сбрасываем стикер при смене фильтров и запускаем анимацию после загрузки карточки
+  useEffect(() => {
+    setStickerReady(false);
+    
+    if (!isLoading && filteredChannels.length > 0) {
+      const timer = setTimeout(() => {
+        setStickerReady(true);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [filteredChannels, isLoading, activeCategory, searchQuery, showFavoritesOnly, sortBy]);
 
   return (
     <div className="min-h-screen bg-transparent safe-bottom">
@@ -180,7 +193,11 @@ const Index = () => {
               filteredChannels.map((channel, index) => (
                 <div key={channel.id} className="relative">
                   {index === 0 && (
-                    <div className="absolute -top-20 left-1/2 translate-x-8 z-0 pointer-events-none">
+                    <div 
+                      className={`absolute -top-20 left-1/2 translate-x-8 z-0 pointer-events-none 
+                        transition-all duration-500 ease-out
+                        ${stickerReady ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}
+                    >
                       <TgsSticker 
                         src={animatedSticker}
                         className="w-24 h-24"
