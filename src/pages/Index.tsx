@@ -180,7 +180,7 @@ const Index = () => {
               filteredChannels.map((channel, index) => (
                 <div key={channel.id} className="relative">
                   {index === 0 && (
-                    <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+                    <div className="absolute -top-16 left-1/2 translate-x-4 z-10 pointer-events-none">
                       <TgsSticker 
                         src={animatedSticker}
                         className="w-24 h-24"
