@@ -6,11 +6,13 @@ import { SearchBar } from "@/components/SearchBar";
 import { StatsCard } from "@/components/StatsCard";
 import { FilterChip } from "@/components/FilterChip";
 import { PromoBannerCarousel } from "@/components/PromoBannerCarousel";
+import { TgsSticker } from "@/components/TgsSticker";
 import { mockChannels } from "@/data/mockChannels";
 import { useFavorites } from "@/hooks/useFavorites";
 import { useChannels } from "@/hooks/useChannels";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TrendingUp, Users, Heart, DollarSign, ArrowUpDown } from "lucide-react";
+import animatedSticker from "@/assets/stickers/animated-sticker.tgs";
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -175,13 +177,22 @@ const Index = () => {
             {isLoading ? (
               [1, 2, 3].map((i) => <ChannelCardSkeleton key={i} />)
             ) : filteredChannels.length > 0 ? (
-              filteredChannels.map((channel) => (
-                <ChannelCard 
-                  key={channel.id} 
-                  {...channel} 
-                  isLiked={isFavorite(channel.id)}
-                  onLikeToggle={toggleFavorite}
-                />
+              filteredChannels.map((channel, index) => (
+                <div key={channel.id} className="relative">
+                  {index === 0 && (
+                    <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+                      <TgsSticker 
+                        src={animatedSticker}
+                        className="w-24 h-24"
+                      />
+                    </div>
+                  )}
+                  <ChannelCard 
+                    {...channel} 
+                    isLiked={isFavorite(channel.id)}
+                    onLikeToggle={toggleFavorite}
+                  />
+                </div>
               ))
             ) : (
               <div className="text-center py-8 text-muted-foreground">
