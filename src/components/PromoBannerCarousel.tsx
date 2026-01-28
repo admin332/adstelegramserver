@@ -5,6 +5,7 @@ import {
   CarouselItem,
   type CarouselApi,
 } from "@/components/ui/carousel";
+import { Skeleton } from "@/components/ui/skeleton";
 import banner1 from "@/assets/banners/banner1.png";
 import banner2 from "@/assets/banners/banner2.png";
 
@@ -16,6 +17,20 @@ const banners = [
 export const PromoBannerCarousel = () => {
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
+  const [loadedImages, setLoadedImages] = useState<Set<number>>(new Set());
+  const [allImagesLoaded, setAllImagesLoaded] = useState(false);
+
+  // Обработчик загрузки изображения
+  const handleImageLoad = (id: number) => {
+    setLoadedImages(prev => {
+      const newSet = new Set(prev);
+      newSet.add(id);
+      if (newSet.size === banners.length) {
+        setAllImagesLoaded(true);
+      }
+      return newSet;
+    });
+  };
 
   useEffect(() => {
     if (!api) return;
@@ -41,6 +56,26 @@ export const PromoBannerCarousel = () => {
 
     return () => clearInterval(interval);
   }, [api]);
+
+  // Показываем скелетон если изображения ещё не загружены
+  if (!allImagesLoaded) {
+    return (
+      <div className="w-full">
+        <Skeleton className="w-full aspect-[16/7] rounded-lg" />
+        {/* Скрытые изображения для предзагрузки */}
+        <div className="hidden">
+          {banners.map((banner) => (
+            <img
+              key={banner.id}
+              src={banner.src}
+              alt=""
+              onLoad={() => handleImageLoad(banner.id)}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Carousel
