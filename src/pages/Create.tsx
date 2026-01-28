@@ -9,7 +9,7 @@ import { CreateCampaignForm } from "@/components/create/CreateCampaignForm";
 import { MyChannelsList } from "@/components/create/MyChannelsList";
 import { MyCampaignsList } from "@/components/create/MyCampaignsList";
 import { useUserChannels } from "@/hooks/useUserChannels";
-import { useUserCampaigns } from "@/hooks/useUserCampaigns";
+import { useUserCampaigns, UserCampaign } from "@/hooks/useUserCampaigns";
 import { useAuth } from "@/contexts/AuthContext";
 
 type UserRole = "advertiser" | "channel_owner" | null;
@@ -21,6 +21,7 @@ const Create = () => {
   const [selectedRole, setSelectedRole] = useState<UserRole>(null);
   const [currentStep, setCurrentStep] = useState<Step>("role");
   const [initialized, setInitialized] = useState(false);
+  const [editingCampaign, setEditingCampaign] = useState<UserCampaign | null>(null);
   
   const { data: channels, isLoading: channelsLoading, refetch: refetchChannels } = useUserChannels();
   const { data: campaigns, isLoading: campaignsLoading, refetch: refetchCampaigns } = useUserCampaigns();
@@ -108,6 +109,12 @@ const Create = () => {
   };
 
   const handleAddNew = () => {
+    setEditingCampaign(null);
+    setCurrentStep("form");
+  };
+
+  const handleEditCampaign = (campaign: UserCampaign) => {
+    setEditingCampaign(campaign);
     setCurrentStep("form");
   };
 
@@ -229,7 +236,7 @@ const Create = () => {
         )}
 
         {currentStep === "list" && selectedRole === "advertiser" && (
-          <MyCampaignsList onAddCampaign={handleAddNew} onBack={handleBack} />
+          <MyCampaignsList onAddCampaign={handleAddNew} onEditCampaign={handleEditCampaign} onBack={handleBack} />
         )}
 
         {currentStep === "form" && selectedRole === "channel_owner" && (
@@ -237,7 +244,11 @@ const Create = () => {
         )}
 
         {currentStep === "form" && selectedRole === "advertiser" && (
-          <CreateCampaignForm onBack={handleBack} onComplete={handleComplete} />
+          <CreateCampaignForm 
+            onBack={handleBack} 
+            onComplete={handleComplete} 
+            editingCampaign={editingCampaign}
+          />
         )}
       </main>
 

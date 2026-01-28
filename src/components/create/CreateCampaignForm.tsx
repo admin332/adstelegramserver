@@ -19,6 +19,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { getTelegramInitData } from "@/lib/telegram";
 import { CampaignTypeSelector, type CampaignType } from "./CampaignTypeSelector";
+import { useUpdateCampaign, UserCampaign } from "@/hooks/useUserCampaigns";
 
 interface CampaignData {
   name: string;
@@ -31,13 +32,14 @@ interface CampaignData {
 interface CreateCampaignFormProps {
   onBack: () => void;
   onComplete: () => void;
+  editingCampaign?: UserCampaign | null;
 }
 
 const MAX_MEDIA_FILES = 10;
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 МБ
 const TOTAL_STEPS = 4;
 
-export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormProps) => {
+export const CreateCampaignForm = ({ onBack, onComplete, editingCampaign }: CreateCampaignFormProps) => {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -45,13 +47,35 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mediaFiles, setMediaFiles] = useState<File[]>([]);
+  const [existingMediaUrls, setExistingMediaUrls] = useState<string[]>([]);
+  const updateCampaign = useUpdateCampaign();
   
-  const [campaignData, setCampaignData] = useState<CampaignData>({
-    name: "",
-    campaign_type: "prompt",
-    text: "",
-    button_text: "",
-    button_url: "",
+  const isEditMode = !!editingCampaign;
+  
+  const [campaignData, setCampaignData] = useState<CampaignData>(() => {
+    if (editingCampaign) {
+      return {
+        name: editingCampaign.name,
+        campaign_type: (editingCampaign.campaign_type as CampaignType) || "prompt",
+        text: editingCampaign.text,
+        button_text: editingCampaign.button_text || "",
+        button_url: editingCampaign.button_url || "",
+      };
+    }
+    return {
+      name: "",
+      campaign_type: "prompt",
+      text: "",
+      button_text: "",
+      button_url: "",
+    };
+  });
+
+  // Initialize existing media URLs when editing
+  useState(() => {
+    if (editingCampaign?.media_urls) {
+      setExistingMediaUrls(editingCampaign.media_urls);
+    }
   });
 
   const progress = (step / TOTAL_STEPS) * 100;
@@ -59,8 +83,9 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
   const handleMediaSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     
-    const remainingSlots = MAX_MEDIA_FILES - mediaFiles.length;
-    const filesToAdd = files.slice(0, remainingSlots);
+    const currentTotalMedia = existingMediaUrls.length + mediaFiles.length;
+    const slotsAvailable = MAX_MEDIA_FILES - currentTotalMedia;
+    const filesToAdd = files.slice(0, slotsAvailable);
     
     const validFiles = filesToAdd.filter(file => {
       if (file.size > MAX_FILE_SIZE) {
@@ -83,6 +108,10 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
 
   const removeMedia = (index: number) => {
     setMediaFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const removeExistingMedia = (index: number) => {
+    setExistingMediaUrls(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async () => {
@@ -112,9 +141,10 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
     setIsSubmitting(true);
 
     try {
-      const mediaUrls: string[] = [];
+      // Start with existing media URLs
+      const mediaUrls: string[] = [...existingMediaUrls];
 
-      // Upload media only for ready_post mode
+      // Upload new media only for ready_post mode
       if (!isPromptMode) {
         for (const file of mediaFiles) {
           const formData = new FormData();
@@ -142,83 +172,102 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
         }
       }
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-campaign`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-          body: JSON.stringify({
-            initData,
-            name: campaignData.name,
-            campaign_type: campaignData.campaign_type,
-            text: campaignData.text,
-            button_text: campaignData.button_text || null,
-            button_url: campaignData.button_url || null,
-            media_urls: mediaUrls,
-          }),
-        }
-      );
+      if (isEditMode && editingCampaign) {
+        // Update existing campaign
+        await updateCampaign.mutateAsync({
+          campaign_id: editingCampaign.id,
+          name: campaignData.name,
+          campaign_type: campaignData.campaign_type,
+          text: campaignData.text,
+          button_text: campaignData.button_text || null,
+          button_url: campaignData.button_url || null,
+          media_urls: mediaUrls,
+        });
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || "Ошибка создания кампании");
-      }
-
-      // Send preview only for ready_post mode
-      if (!isPromptMode && user?.telegram_id) {
-        try {
-          await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-campaign-preview`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-              },
-              body: JSON.stringify({
-                telegram_id: user.telegram_id,
-                text: campaignData.text,
-                media_urls: mediaUrls,
-                button_text: campaignData.button_text || undefined,
-                button_url: campaignData.button_url || undefined,
-              }),
-            }
-          );
-        } catch (previewError) {
-          console.error("Failed to send preview:", previewError);
-        }
-      }
-
-      toast({
-        title: "Кампания создана!",
-        description: isPromptMode
-          ? "Автор канала напишет пост по вашему брифу"
-          : user?.telegram_id 
-            ? "Превью отправлено вам в Telegram" 
-            : "Теперь вы можете выбрать каналы для размещения",
-      });
-      
-      const returnTo = searchParams.get('returnTo');
-      if (returnTo) {
-        navigate(returnTo);
-      } else {
         onComplete();
+      } else {
+        // Create new campaign
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-campaign`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            },
+            body: JSON.stringify({
+              initData,
+              name: campaignData.name,
+              campaign_type: campaignData.campaign_type,
+              text: campaignData.text,
+              button_text: campaignData.button_text || null,
+              button_url: campaignData.button_url || null,
+              media_urls: mediaUrls,
+            }),
+          }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || "Ошибка создания кампании");
+        }
+
+        // Send preview only for ready_post mode
+        if (!isPromptMode && user?.telegram_id) {
+          try {
+            await fetch(
+              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-campaign-preview`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+                },
+                body: JSON.stringify({
+                  telegram_id: user.telegram_id,
+                  text: campaignData.text,
+                  media_urls: mediaUrls,
+                  button_text: campaignData.button_text || undefined,
+                  button_url: campaignData.button_url || undefined,
+                }),
+              }
+            );
+          } catch (previewError) {
+            console.error("Failed to send preview:", previewError);
+          }
+        }
+
+        toast({
+          title: "Кампания создана!",
+          description: isPromptMode
+            ? "Автор канала напишет пост по вашему брифу"
+            : user?.telegram_id 
+              ? "Превью отправлено вам в Telegram" 
+              : "Теперь вы можете выбрать каналы для размещения",
+        });
+        
+        const returnTo = searchParams.get('returnTo');
+        if (returnTo) {
+          navigate(returnTo);
+        } else {
+          onComplete();
+        }
       }
     } catch (error) {
-      console.error("Create campaign error:", error);
+      console.error("Campaign error:", error);
       toast({
         title: "Ошибка",
-        description: error instanceof Error ? error.message : "Не удалось создать кампанию",
+        description: error instanceof Error ? error.message : "Не удалось сохранить кампанию",
         variant: "destructive",
       });
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const totalMediaCount = existingMediaUrls.length + mediaFiles.length;
+  const remainingSlots = MAX_MEDIA_FILES - totalMediaCount;
 
   const canProceedStep1 = campaignData.name.trim().length > 0;
   const canSubmit = campaignData.text.trim().length > 0;
@@ -356,10 +405,37 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
                 className="hidden"
               />
 
-              {mediaFiles.length > 0 && (
+              {totalMediaCount > 0 && (
                 <div className="grid grid-cols-3 gap-2">
+                  {/* Existing media URLs (from editing) */}
+                  {existingMediaUrls.map((url, index) => {
+                    const isVideo = url.toLowerCase().includes('.mp4') || url.toLowerCase().includes('.mov') || url.toLowerCase().includes('.webm');
+                    return (
+                      <div key={`existing-${index}`} className="relative aspect-square rounded-xl overflow-hidden bg-secondary">
+                        {isVideo ? (
+                          <div className="w-full h-full flex items-center justify-center bg-card">
+                            <FileVideo className="w-8 h-8 text-primary" />
+                          </div>
+                        ) : (
+                          <img
+                            src={url}
+                            alt={`Media ${index + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                        )}
+                        <button
+                          onClick={() => removeExistingMedia(index)}
+                          className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center"
+                        >
+                          <X className="w-4 h-4 text-white" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  
+                  {/* New media files (just selected) */}
                   {mediaFiles.map((file, index) => (
-                    <div key={index} className="relative aspect-square rounded-xl overflow-hidden bg-secondary">
+                    <div key={`new-${index}`} className="relative aspect-square rounded-xl overflow-hidden bg-secondary">
                       {file.type.startsWith('video/') ? (
                         <div className="w-full h-full flex items-center justify-center bg-card">
                           <FileVideo className="w-8 h-8 text-primary" />
@@ -367,7 +443,7 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
                       ) : (
                         <img
                           src={URL.createObjectURL(file)}
-                          alt={`Media ${index + 1}`}
+                          alt={`Media ${existingMediaUrls.length + index + 1}`}
                           className="w-full h-full object-cover"
                         />
                       )}
@@ -383,21 +459,21 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
                     </div>
                   ))}
                   
-                  {mediaFiles.length < MAX_MEDIA_FILES && (
+                  {remainingSlots > 0 && (
                     <button
                       onClick={() => fileInputRef.current?.click()}
                       className="aspect-square rounded-xl border-2 border-dashed border-secondary bg-card flex flex-col items-center justify-center gap-1 hover:border-primary/50 transition-colors"
                     >
                       <Plus className="w-6 h-6 text-muted-foreground" />
                       <span className="text-xs text-muted-foreground">
-                        {mediaFiles.length}/{MAX_MEDIA_FILES}
+                        {totalMediaCount}/{MAX_MEDIA_FILES}
                       </span>
                     </button>
                   )}
                 </div>
               )}
 
-              {mediaFiles.length === 0 && (
+              {totalMediaCount === 0 && (
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   className="w-full h-32 rounded-xl border-2 border-dashed border-secondary bg-card flex flex-col items-center justify-center gap-2 hover:border-primary/50 transition-colors"
@@ -490,10 +566,10 @@ export const CreateCampaignForm = ({ onBack, onComplete }: CreateCampaignFormPro
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Создание...
+                  {isEditMode ? "Сохранение..." : "Создание..."}
                 </>
               ) : (
-                "Создать кампанию"
+                isEditMode ? "Сохранить" : "Создать кампанию"
               )}
             </Button>
           </div>

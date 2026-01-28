@@ -123,3 +123,96 @@ export function useDeleteCampaign() {
     },
   });
 }
+
+export function useCheckCampaignDeals() {
+  return useMutation({
+    mutationFn: async (campaignId: string): Promise<{ hasActiveDeals: boolean }> => {
+      const initData = getTelegramInitData();
+      
+      if (!initData) {
+        throw new Error("Требуется авторизация через Telegram");
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-campaign-deals`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({
+            campaign_id: campaignId,
+            initData,
+          }),
+        }
+      );
+
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || "Ошибка проверки");
+      }
+
+      return { hasActiveDeals: data.hasActiveDeals };
+    },
+  });
+}
+
+export interface UpdateCampaignData {
+  campaign_id: string;
+  name: string;
+  campaign_type: string;
+  text: string;
+  button_text: string | null;
+  button_url: string | null;
+  media_urls: string[];
+}
+
+export function useUpdateCampaign() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: UpdateCampaignData) => {
+      const initData = getTelegramInitData();
+      
+      if (!initData) {
+        throw new Error("Требуется авторизация через Telegram");
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-campaign`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({
+            ...data,
+            initData,
+          }),
+        }
+      );
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || "Ошибка обновления");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user-campaigns"] });
+      toast({
+        title: "Кампания обновлена",
+        description: "Изменения сохранены",
+      });
+    },
+    onError: (error) => {
+      console.error("Update campaign error:", error);
+      toast({
+        title: "Ошибка",
+        description: error instanceof Error ? error.message : "Не удалось обновить кампанию",
+        variant: "destructive",
+      });
+    },
+  });
+}
