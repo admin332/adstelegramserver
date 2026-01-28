@@ -1,100 +1,64 @@
 
-# Изменение дизайна всплывающих окон (Dialog/AlertDialog)
+# Кликабельные карточки каналов
 
-## Текущий дизайн
+## Текущая ситуация
 
-Сейчас диалоговые окна имеют:
-- **Overlay**: `bg-black/80` — только затемнение без размытия
-- **Content**: `border bg-background` — белый/тёмный фон с рамкой
+Карточка `ChannelCard` имеет класс `cursor-pointer`, но при клике на неё (вне кнопок) ничего не происходит. Открытие канала работает только через кнопку "Купить".
 
-## Новый дизайн
+## Решение
 
-Требуется:
-- Убрать фон блока контента
-- Убрать рамку обводки
-- Добавить размытие заднего фона (blur) вместо просто затемнения
+Добавить `onClick` обработчик на главный контейнер карточки для навигации на страницу канала.
 
-## Изменяемые файлы
+## Изменения
 
-### 1. `src/components/ui/dialog.tsx`
+**Файл:** `src/components/ChannelCard.tsx`
 
-**DialogOverlay** (строки 18-27):
+### Добавить функцию handleCardClick (после строки 62)
+
+```tsx
+const handleCardClick = () => {
+  navigate(`/channel/${id}`);
+};
+```
+
+### Добавить onClick на motion.div (строка 84)
+
 ```tsx
 // Было:
-"fixed inset-0 z-50 bg-black/80 ..."
+<motion.div
+  className={cn(
+    'relative w-full h-48 rounded-3xl overflow-hidden cursor-pointer group'
+  )}
+  variants={cardVariants}
+  initial="hidden"
+  animate="visible"
+>
 
 // Станет:
-"fixed inset-0 z-50 bg-black/40 backdrop-blur-xl ..."
+<motion.div
+  className={cn(
+    'relative w-full h-48 rounded-3xl overflow-hidden cursor-pointer group'
+  )}
+  variants={cardVariants}
+  initial="hidden"
+  animate="visible"
+  onClick={handleCardClick}
+>
 ```
 
-**DialogContent** (строки 36-41):
-```tsx
-// Было:
-"... border bg-background p-6 shadow-lg ... sm:rounded-lg"
+## Поведение кликов
 
-// Станет:
-"... border-0 bg-transparent p-6 ... sm:rounded-lg"
-```
-
-### 2. `src/components/ui/alert-dialog.tsx`
-
-**AlertDialogOverlay** (строки 17-24):
-```tsx
-// Было:
-"fixed inset-0 z-50 bg-black/80 ..."
-
-// Станет:
-"fixed inset-0 z-50 bg-black/40 backdrop-blur-xl ..."
-```
-
-**AlertDialogContent** (строки 34-40):
-```tsx
-// Было:
-"... border bg-background p-6 shadow-lg ... sm:rounded-lg"
-
-// Станет:
-"... border-0 bg-transparent p-6 ... sm:rounded-lg"
-```
-
-## Визуальный результат
-
-```text
-┌─────────────────────────────────────────┐
-│                                         │
-│        ┌───────────────────┐            │
-│        │   Подтверждение   │            │
-│        │                   │  ← Прозрачный фон,
-│        │  Текст диалога    │    без рамки
-│        │                   │            │
-│        │  [Отмена] [OK]    │            │
-│        └───────────────────┘            │
-│                                         │
-│    ← Размытие всего фона (blur-xl)      │
-│      + лёгкое затемнение (40%)          │
-└─────────────────────────────────────────┘
-```
-
-## Технические детали
-
-| Параметр | Было | Станет |
-|----------|------|--------|
-| Overlay фон | `bg-black/80` | `bg-black/40` |
-| Overlay blur | Нет | `backdrop-blur-xl` |
-| Content фон | `bg-background` | `bg-transparent` |
-| Content рамка | `border` | `border-0` |
-| Content тень | `shadow-lg` | Убрать |
-
-## Затронутые компоненты
-
-Все диалоги в приложении автоматически получат новый стиль:
-- PaymentDialog
-- ScheduleEditDialog
-- DraftEditorDialog
-- DraftReviewDialog
-- OwnerActionsDialog
-- AlertDialog подтверждения удаления кампании
-- Другие диалоги
+| Область клика | Действие |
+|---------------|----------|
+| Вся карточка | Открывает `/channel/:id` |
+| Кнопка "Сердце" | Добавляет в избранное (stopPropagation) |
+| Кнопка "Купить" | Открывает `/channel/:id` (stopPropagation) |
 
 ## Примечание
 
-Размытие `backdrop-blur-xl` (24px) обеспечит хорошую видимость анимированного starfield фона через overlay, сохраняя фокус на содержимом диалога.
+`stopPropagation()` уже есть на кнопках `handleLikeClick` и `handleBuyClick`, поэтому клики на них не будут "всплывать" к родительскому обработчику.
+
+## Затронутые страницы
+
+- **Главная** (`/`) — карточки в "Популярные каналы"
+- **Каталог** (`/channels`) — все карточки каналов
