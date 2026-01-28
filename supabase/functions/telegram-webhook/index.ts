@@ -168,14 +168,44 @@ Deno.serve(async (req) => {
           return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders });
         }
 
-        // For now, just acknowledge - advertiser rating table doesn't exist yet
+        // Check if review already exists
+        const { data: existingReview } = await supabase
+          .from("advertiser_reviews")
+          .select("id")
+          .eq("deal_id", dealId)
+          .maybeSingle();
+
+        if (existingReview) {
+          await answerCallbackQuery(callbackQueryId, "Вы уже оставили отзыв");
+          if (message) {
+            await editMessageReplyMarkup(message.chat.id, message.message_id);
+          }
+          return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders });
+        }
+
+        // Insert advertiser review
+        const { error: insertError } = await supabase
+          .from("advertiser_reviews")
+          .insert({
+            deal_id: dealId,
+            advertiser_id: deal.advertiser_id,
+            reviewer_id: owner.id,
+            rating,
+          });
+
+        if (insertError) {
+          console.error("Failed to insert advertiser review:", insertError);
+          await answerCallbackQuery(callbackQueryId, "Ошибка при сохранении отзыва");
+          return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders });
+        }
+
         // Remove buttons from message
         if (message) {
           await editMessageReplyMarkup(message.chat.id, message.message_id);
         }
 
         await answerCallbackQuery(callbackQueryId, `Спасибо за оценку ${rating} ⭐`);
-        console.log(`Advertiser rating acknowledged: deal=${dealId}, rating=${rating}`);
+        console.log(`Advertiser review saved: deal=${dealId}, rating=${rating}, reviewer=${owner.id}`);
       } else {
         await answerCallbackQuery(callbackQueryId, "Неизвестное действие");
       }

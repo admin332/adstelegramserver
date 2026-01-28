@@ -14,6 +14,55 @@ export type Database = {
   }
   public: {
     Tables: {
+      advertiser_reviews: {
+        Row: {
+          advertiser_id: string
+          created_at: string
+          deal_id: string
+          id: string
+          rating: number
+          reviewer_id: string
+        }
+        Insert: {
+          advertiser_id: string
+          created_at?: string
+          deal_id: string
+          id?: string
+          rating: number
+          reviewer_id: string
+        }
+        Update: {
+          advertiser_id?: string
+          created_at?: string
+          deal_id?: string
+          id?: string
+          rating?: number
+          reviewer_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "advertiser_reviews_advertiser_id_fkey"
+            columns: ["advertiser_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "advertiser_reviews_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: true
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "advertiser_reviews_reviewer_id_fkey"
+            columns: ["reviewer_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       app_settings: {
         Row: {
           created_at: string | null
