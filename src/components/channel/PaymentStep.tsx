@@ -180,14 +180,6 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
         Оплатить
       </Button>
 
-      {/* Кнопка "Я оплатил" как запасной вариант */}
-      <Button 
-        onClick={onPaymentComplete} 
-        variant="outline"
-        className="w-full h-12 text-base"
-      >
-        Я оплатил вручную
-      </Button>
     </div>
   );
 };
