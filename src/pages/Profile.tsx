@@ -135,7 +135,9 @@ const Profile = () => {
               )}
               <div className="flex items-center gap-1 mt-1">
                 <Star className="w-4 h-4 text-warning fill-warning" />
-                <span className="text-sm text-foreground">4.9</span>
+                <span className="text-sm text-foreground">
+                  {statsLoading ? "..." : (isTestMode ? demoStats.avgRating : (advertiserStats?.avgRating ?? 0))}
+                </span>
                 {isAuthenticated && (
                   <span className="text-sm text-muted-foreground">• Проверен</span>
                 )}
