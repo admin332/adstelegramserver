@@ -1,6 +1,6 @@
 import React from 'react';
 import { TonConnectButton } from '@tonconnect/ui-react';
-import { Wallet, CheckCircle } from 'lucide-react';
+import { CheckCircle } from 'lucide-react';
 import { useTonWallet } from '@/hooks/useTonWallet';
 import tonIcon from '@/assets/ton-icon.svg';
 
@@ -26,13 +26,6 @@ const WalletSection: React.FC = () => {
 
       {isConnected ? (
         <div className="space-y-3">
-          <div className="bg-secondary/50 rounded-xl p-3">
-            <p className="text-xs text-muted-foreground mb-1">Адрес кошелька</p>
-            <p className="font-mono text-sm text-foreground truncate">
-              {address}
-            </p>
-          </div>
-          
           <div className="flex justify-center">
             <TonConnectButton />
           </div>
