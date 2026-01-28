@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertDialog,
@@ -15,9 +14,7 @@ import {
 import { Plus, Trash2, ImageIcon, ArrowLeft, FileVideo } from "lucide-react";
 import {
   useUserCampaigns,
-  useToggleCampaignActive,
   useDeleteCampaign,
-  UserCampaign,
 } from "@/hooks/useUserCampaigns";
 
 interface MyCampaignsListProps {
@@ -32,15 +29,7 @@ const isVideoUrl = (url: string) => {
 
 export const MyCampaignsList = ({ onAddCampaign, onBack }: MyCampaignsListProps) => {
   const { data: campaigns, isLoading } = useUserCampaigns();
-  const toggleActive = useToggleCampaignActive();
   const deleteCampaign = useDeleteCampaign();
-
-  const handleToggle = (campaign: UserCampaign) => {
-    toggleActive.mutate({
-      campaignId: campaign.id,
-      isActive: !campaign.is_active,
-    });
-  };
 
   const handleDelete = (campaignId: string) => {
     deleteCampaign.mutate(campaignId);
@@ -103,16 +92,9 @@ export const MyCampaignsList = ({ onAddCampaign, onBack }: MyCampaignsListProps)
                 })()}
 
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="font-semibold text-foreground truncate">
-                      {campaign.name}
-                    </h3>
-                    <Switch
-                      checked={campaign.is_active || false}
-                      onCheckedChange={() => handleToggle(campaign)}
-                      disabled={toggleActive.isPending}
-                    />
-                  </div>
+                  <h3 className="font-semibold text-foreground truncate">
+                    {campaign.name}
+                  </h3>
                   <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
                     {campaign.text}
                   </p>
