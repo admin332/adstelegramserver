@@ -1,177 +1,77 @@
 
+# План: Увеличение таймаута оплаты до 1 часа и снижение частоты cron до 5 минут
 
-## Автоматическое управление Cron Jobs
+## Обзор изменений
 
-### Идея
+Изменение лимита времени на оплату с 20 минут до 1 часа и снижение частоты проверки платежей с каждой минуты до каждых 5 минут.
 
-Cron jobs будут автоматически:
-- **Включаться** при создании новой сделки
-- **Отключаться** когда все сделки завершены/отменены
+## Шаги реализации
 
----
+### 1. Изменить cron job `check-escrow-payments`
 
-## Архитектура решения
+Текущий schedule: `* * * * *` (каждую минуту)
+Новый schedule: `*/5 * * * *` (каждые 5 минут)
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                    СОЗДАНИЕ СДЕЛКИ                           │
-│                    (create-deal)                             │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-                      ▼
-┌─────────────────────────────────────────────────────────────┐
-│  SQL: SELECT manage_cron_jobs('activate')                   │
-│                                                              │
-│  Проверяет: есть ли активные deals?                         │
-│  Если jobs отключены → включает все                         │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│                 ЗАВЕРШЕНИЕ/ОТМЕНА СДЕЛКИ                     │
-│  (complete-posted-deals, auto-refund-expired-deals)         │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-                      ▼
-┌─────────────────────────────────────────────────────────────┐
-│  SQL: SELECT manage_cron_jobs('check_and_deactivate')       │
-│                                                              │
-│  Проверяет: остались ли активные deals?                     │
-│  Если нет активных → отключает все jobs                     │
-└─────────────────────────────────────────────────────────────┘
+SQL запрос для обновления:
+UPDATE cron.job 
+SET schedule = '*/5 * * * *' 
+WHERE jobid = 1;
 ```
 
----
+### 2. Изменить таймаут оплаты в Edge Function
 
-## Изменения в базе данных
+**Файл:** `supabase/functions/create-deal/index.ts`
 
-### 1. Создать функцию управления cron jobs
+Изменить строку 185:
+```typescript
+// Было:
+const expiresAt = new Date(Date.now() + 20 * 60 * 1000); // +20 minutes
 
-```sql
-CREATE OR REPLACE FUNCTION manage_cron_jobs(action text)
-RETURNS json
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-  has_active_deals boolean;
-  result json;
-BEGIN
-  -- Проверяем есть ли активные сделки
-  SELECT EXISTS (
-    SELECT 1 FROM deals 
-    WHERE status IN ('pending', 'escrow', 'in_progress')
-  ) INTO has_active_deals;
-
-  IF action = 'activate' THEN
-    -- Включаем все jobs
-    UPDATE cron.job SET active = true 
-    WHERE jobid IN (1, 3, 4, 5, 6);
-    
-    result := json_build_object(
-      'action', 'activated',
-      'jobs_affected', 5
-    );
-    
-  ELSIF action = 'check_and_deactivate' THEN
-    -- Отключаем только если нет активных сделок
-    IF NOT has_active_deals THEN
-      UPDATE cron.job SET active = false 
-      WHERE jobid IN (1, 3, 4, 5, 6);
-      
-      result := json_build_object(
-        'action', 'deactivated',
-        'reason', 'no_active_deals'
-      );
-    ELSE
-      result := json_build_object(
-        'action', 'kept_active',
-        'reason', 'has_active_deals'
-      );
-    END IF;
-    
-  ELSE
-    result := json_build_object('error', 'unknown_action');
-  END IF;
-  
-  RETURN result;
-END;
-$$;
+// Станет:
+const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // +60 minutes (1 hour)
 ```
 
----
+### 3. Обновить формат таймера для часового отсчёта
 
-## Изменения в Edge Functions
+**Файл:** `src/components/deals/ExpirationTimer.tsx`
 
-### 1. create-deal/index.ts
-
-После успешного создания сделки:
+Текущий формат показывает только минуты и секунды (`мм:сс`). Для часового таймера нужно добавить часы:
 
 ```typescript
-// После создания deal
-await supabase.rpc('manage_cron_jobs', { action: 'activate' });
-console.log("Cron jobs activated");
+// Было:
+const mins = Math.floor(diff / 60000);
+const secs = Math.floor((diff % 60000) / 1000);
+setTimeLeft(`${mins}:${secs.toString().padStart(2, '0')}`);
+
+// Станет:
+const hours = Math.floor(diff / 3600000);
+const mins = Math.floor((diff % 3600000) / 60000);
+const secs = Math.floor((diff % 60000) / 1000);
+
+if (hours > 0) {
+  setTimeLeft(`${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`);
+} else {
+  setTimeLeft(`${mins}:${secs.toString().padStart(2, '0')}`);
+}
 ```
 
-### 2. complete-posted-deals/index.ts
+## Влияние на систему
 
-После обработки всех завершённых сделок:
+| Параметр | Было | Станет |
+|----------|------|--------|
+| Частота проверки оплат | 1 мин | 5 мин |
+| Время на оплату | 20 мин | 60 мин |
+| Формат таймера | `мм:сс` | `чч:мм:сс` / `мм:сс` |
 
-```typescript
-// В конце функции
-await supabase.rpc('manage_cron_jobs', { action: 'check_and_deactivate' });
-console.log("Checked and updated cron jobs status");
-```
+## Технические детали
 
-### 3. auto-refund-expired-deals/index.ts
+### Изменяемые файлы:
+1. **База данных** — SQL запрос для обновления schedule cron.job
+2. **`supabase/functions/create-deal/index.ts`** — константа таймаута
+3. **`src/components/deals/ExpirationTimer.tsx`** — логика форматирования времени
 
-После обработки всех возвратов:
-
-```typescript
-// В конце функции
-await supabase.rpc('manage_cron_jobs', { action: 'check_and_deactivate' });
-```
-
----
-
-## Как это работает
-
-| Событие | Действие |
-|---------|----------|
-| Новая сделка создана | `manage_cron_jobs('activate')` → все jobs включаются |
-| Сделка завершена | `manage_cron_jobs('check_and_deactivate')` → если нет активных, jobs отключаются |
-| Сделка отменена/возврат | `manage_cron_jobs('check_and_deactivate')` → аналогично |
-| Новая сделка после простоя | `manage_cron_jobs('activate')` → jobs снова включаются |
-
----
-
-## Преимущества
-
-1. **Нулевые холостые вызовы** — когда нет сделок, функции не вызываются вообще
-2. **Автоматика** — не нужно вручную включать/выключать
-3. **Мгновенная реакция** — при создании сделки jobs сразу активны
-4. **Экономия ресурсов** — особенно для `check-escrow-payments` (60 вызовов/час)
-
----
-
-## Файлы для изменения
-
-| Файл | Изменение |
-|------|-----------|
-| **База данных** | Создать функцию `manage_cron_jobs` |
-| `supabase/functions/create-deal/index.ts` | Добавить вызов `rpc('manage_cron_jobs', {action: 'activate'})` |
-| `supabase/functions/complete-posted-deals/index.ts` | Добавить вызов `rpc('manage_cron_jobs', {action: 'check_and_deactivate'})` |
-| `supabase/functions/auto-refund-expired-deals/index.ts` | Добавить вызов `rpc('manage_cron_jobs', {action: 'check_and_deactivate'})` |
-
----
-
-## Дополнительно: Текущее состояние
-
-Сейчас можно сразу отключить jobs вручную, так как нет активных сделок:
-
-```sql
-UPDATE cron.job SET active = false WHERE jobid IN (1, 3, 4, 5, 6);
-```
-
-Они автоматически включатся при создании первой новой сделки.
-
+### Важные замечания:
+- Максимальная задержка обнаружения платежа увеличится с 1 до 5 минут
+- Существующие сделки со старым 20-минутным таймаутом продолжат работать по старой логике до истечения
+- Новые сделки будут создаваться с часовым лимитом сразу после деплоя
