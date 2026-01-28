@@ -407,6 +407,10 @@ Deno.serve(async (req) => {
 
     console.log(`Completed: ${successful}, Failed: ${failed}`);
 
+    // Check if we should deactivate cron jobs (no more active deals)
+    const { data: cronResult } = await supabase.rpc('manage_cron_jobs', { action: 'check_and_deactivate' });
+    console.log("Cron jobs management:", cronResult);
+
     return new Response(
       JSON.stringify({
         success: true,
