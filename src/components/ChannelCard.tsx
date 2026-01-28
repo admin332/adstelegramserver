@@ -61,6 +61,10 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
     navigate(`/channel/${id}`);
   };
 
+  const handleCardClick = () => {
+    navigate(`/channel/${id}`);
+  };
+
   const cardVariants = {
     hidden: { opacity: 0, y: 20 },
     visible: {
@@ -88,6 +92,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       variants={cardVariants}
       initial="hidden"
       animate="visible"
+      onClick={handleCardClick}
     >
       {/* Blue Background - Left Side */}
       <div className="absolute inset-0 bg-gradient-to-b from-[hsl(217,91%,50%)] to-[hsl(224,76%,48%)]" />
