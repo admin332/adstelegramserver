@@ -280,6 +280,10 @@ serve(async (req) => {
     
     console.log(`Completed: ${processed} processed, ${failed} failed`);
     
+    // Check if we should deactivate cron jobs (no more active deals)
+    const { data: cronResult } = await supabase.rpc('manage_cron_jobs', { action: 'check_and_deactivate' });
+    console.log("Cron jobs management:", cronResult);
+    
     return new Response(
       JSON.stringify({ success: true, processed, failed }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

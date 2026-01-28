@@ -488,6 +488,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      manage_cron_jobs: { Args: { action: string }; Returns: Json }
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"

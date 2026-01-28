@@ -211,6 +211,10 @@ serve(async (req) => {
       );
     }
 
+    // Activate cron jobs when a new deal is created
+    const { data: cronResult } = await supabase.rpc('manage_cron_jobs', { action: 'activate' });
+    console.log("Cron jobs management:", cronResult);
+
     return new Response(
       JSON.stringify({ 
         success: true, 
