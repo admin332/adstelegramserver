@@ -1,131 +1,171 @@
 
-# Замена "Рейтинг" на "Оборот" в профиле
+# Улучшение скелетонов карточек каналов
 
 ## Обзор
 
-Заменяем второй блок статистики "Рейтинг" на "Оборот" — сумму всех завершённых сделок пользователя в TON.
+Текущие скелетоны не соответствуют реальной структуре карточки канала. Нужно создать реалистичный скелетон, повторяющий дизайн `ChannelCard`.
 
-## Текущий вид
-
-```
-┌─────────────────┐  ┌─────────────────┐
-│ ★ Сделок        │  │ ★ Рейтинг       │
-│ 12              │  │ 4.8             │
-└─────────────────┘  └─────────────────┘
-```
-
-## Новый вид
+## Текущий скелетон (примитивный)
 
 ```
-┌─────────────────┐  ┌─────────────────┐
-│ ★ Сделок        │  │ 💰 Оборот       │
-│ 12              │  │ 150 TON         │
-└─────────────────┘  └─────────────────┘
+┌─────────────────────────────────────────────┐
+│ ⚪  ████████                    ████        │
+│     ██████                                  │
+└─────────────────────────────────────────────┘
+```
+
+## Новый скелетон (реалистичный)
+
+```
+┌─────────────────────────────────────────────┐
+│ ▓▓▓▓  ▓▓▓▓                           ▓▓▓   │  <- badges + price
+│                                       ▓▓   │
+│ ▓▓▓▓▓▓▓▓▓▓                                 │  <- subscribers
+│                                             │
+│ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓                  ⚪  ████   │  <- name + buttons
+│ ▓▓▓▓▓▓▓▓▓                                  │  <- username
+└─────────────────────────────────────────────┘
 ```
 
 ## Изменения
 
-### 1. Edge Function: user-advertiser-stats
+### 1. Создание компонента ChannelCardSkeleton
 
-**Файл:** `supabase/functions/user-advertiser-stats/index.ts`
+**Новый файл:** `src/components/ChannelCardSkeleton.tsx`
 
-Добавить расчёт оборота — суммы `total_price` всех завершённых сделок:
+Компонент будет повторять структуру `ChannelCard`:
+- Высота 192px (h-48)
+- Закруглённые углы (rounded-3xl)
+- Градиентный фон слева (от синего к тёмному)
+- Скелетон изображения справа
+- Скелетоны для:
+  - Бейджей просмотров и категории (слева вверху)
+  - Цены в TON (справа вверху)
+  - Количества подписчиков (по центру слева)
+  - Названия и username (внизу слева)
+  - Кнопок лайка и действия (внизу справа)
 
-```typescript
-// Получаем сумму total_price для завершённых сделок
-const { data: dealsData } = await supabase
-  .from("deals")
-  .select("total_price")
-  .eq("advertiser_id", user.id)
-  .eq("status", "completed");
-
-let totalTurnover = 0;
-if (dealsData && dealsData.length > 0) {
-  totalTurnover = dealsData.reduce((acc, d) => acc + (Number(d.total_price) || 0), 0);
-}
-
-return new Response(
-  JSON.stringify({
-    completed_deals: completedDeals || 0,
-    avg_rating: avgRating,
-    total_turnover: totalTurnover,  // ← НОВОЕ ПОЛЕ
-  }),
-  ...
-);
-```
-
-### 2. Хук: useAdvertiserStats
-
-**Файл:** `src/hooks/useAdvertiserStats.ts`
-
-Добавить поле `totalTurnover` в интерфейс и парсинг:
-
-```typescript
-interface AdvertiserStats {
-  completedDeals: number;
-  avgRating: number;
-  totalTurnover: number;  // ← НОВОЕ ПОЛЕ
-}
-
-// В setStats:
-setStats({
-  completedDeals: data?.completed_deals ?? 0,
-  avgRating: data?.avg_rating ?? 0,
-  totalTurnover: data?.total_turnover ?? 0,  // ← НОВОЕ
-});
-```
-
-### 3. Страница профиля
-
-**Файл:** `src/pages/Profile.tsx`
-
-#### 3.1 Обновить демо-данные:
-
-```typescript
-const demoStats = {
-  completedDeals: 12,
-  totalTurnover: 150,  // ← Заменить avgRating
+```tsx
+export const ChannelCardSkeleton = () => {
+  return (
+    <div className="relative w-full h-48 rounded-3xl overflow-hidden bg-gradient-to-b from-[hsl(217,91%,50%)] to-[hsl(224,76%,48%)]">
+      {/* Right side - image placeholder */}
+      <div 
+        className="absolute inset-0 bg-secondary/30"
+        style={{ clipPath: 'polygon(50% 0, 100% 0, 100% 100%, 50% 100%)' }}
+      />
+      
+      {/* Top left - badges */}
+      <div className="absolute top-3 left-3 flex items-center gap-2">
+        <Skeleton className="h-6 w-14 rounded-full bg-white/20" />
+        <Skeleton className="h-6 w-20 rounded-full bg-white/20" />
+      </div>
+      
+      {/* Top right - price */}
+      <div className="absolute top-3 right-3">
+        <Skeleton className="h-7 w-16 rounded-md bg-white/20" />
+        <Skeleton className="h-3 w-14 mt-1 rounded-md bg-white/20" />
+      </div>
+      
+      {/* Center left - subscribers */}
+      <div className="absolute left-4 top-1/2 -translate-y-1/2">
+        <Skeleton className="h-8 w-24 rounded-md bg-white/20" />
+      </div>
+      
+      {/* Bottom content */}
+      <div className="absolute inset-x-0 bottom-0 p-4">
+        <div className="flex items-end justify-between">
+          <div className="flex-1">
+            <Skeleton className="h-5 w-32 rounded-md bg-white/20" />
+            <Skeleton className="h-4 w-24 mt-1 rounded-md bg-white/20" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Skeleton className="w-9 h-9 rounded-full bg-white/20" />
+            <Skeleton className="w-16 h-9 rounded-full bg-white/20" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 ```
 
-#### 3.2 Добавить импорт иконки:
+### 2. Обновление главной страницы (Index.tsx)
 
-```typescript
-import { Wallet } from "lucide-react";
-```
+**Файл:** `src/pages/Index.tsx`
 
-#### 3.3 Заменить блок статистики "Рейтинг":
+- Импортировать `ChannelCardSkeleton`
+- Добавить скелетоны для StatsCard при загрузке
+- Заменить примитивные скелетоны на `ChannelCardSkeleton`
 
 ```tsx
-// Было:
-<StatsCard
-  icon={<Star className="w-5 h-5" />}
-  label="Рейтинг"
-  value={statsLoading ? "..." : String(isTestMode ? demoStats.avgRating : (advertiserStats?.avgRating ?? 0))}
-/>
+// Скелетоны статистики
+<div className="grid grid-cols-2 gap-3">
+  {isLoading ? (
+    <>
+      <div className="bg-secondary rounded-2xl p-4">
+        <Skeleton className="h-4 w-20 mb-2" />
+        <Skeleton className="h-8 w-16" />
+      </div>
+      <div className="bg-secondary rounded-2xl p-4">
+        <Skeleton className="h-4 w-24 mb-2" />
+        <Skeleton className="h-8 w-20" />
+      </div>
+    </>
+  ) : (
+    <>
+      <StatsCard ... />
+      <StatsCard ... />
+    </>
+  )}
+</div>
 
-// Станет:
-<StatsCard
-  icon={<Wallet className="w-5 h-5" />}
-  label="Оборот"
-  value={statsLoading ? "..." : `${isTestMode ? demoStats.totalTurnover : (advertiserStats?.totalTurnover ?? 0)} TON`}
-/>
+// Скелетоны карточек каналов
+{isLoading ? (
+  [1, 2, 3].map((i) => <ChannelCardSkeleton key={i} />)
+) : ...}
 ```
 
-## Технические детали
+### 3. Обновление страницы каталога (Channels.tsx)
 
-| Поле | Источник | Описание |
-|------|----------|----------|
-| `total_turnover` | `SUM(deals.total_price)` | Сумма всех `completed` сделок пользователя |
+**Файл:** `src/pages/Channels.tsx`
+
+- Импортировать `ChannelCardSkeleton`
+- Добавить скелетон для счётчика "Найдено: X каналов"
+- Заменить примитивные скелетоны на `ChannelCardSkeleton`
+
+```tsx
+// Счётчик каналов
+<div className="text-sm text-muted-foreground">
+  {isLoading ? (
+    <Skeleton className="h-4 w-32" />
+  ) : (
+    `Найдено: ${filteredChannels.length} каналов`
+  )}
+</div>
+
+// Карточки каналов
+{isLoading ? (
+  [1, 2, 3, 4].map((i) => <ChannelCardSkeleton key={i} />)
+) : ...}
+```
+
+## Визуальные особенности скелетона
+
+| Элемент | Класс скелетона |
+|---------|-----------------|
+| Бейджи | `bg-white/20 rounded-full` |
+| Цена | `bg-white/20 rounded-md` |
+| Подписчики | `bg-white/20 rounded-md` |
+| Название | `bg-white/20 rounded-md` |
+| Кнопки | `bg-white/20 rounded-full` |
+
+Скелетоны используют полупрозрачный белый цвет (`bg-white/20`) на градиентном фоне карточки, чтобы сохранить общий стиль и цветовую схему.
 
 ## Файлы для изменения
 
-| Файл | Изменение |
-|------|-----------|
-| `supabase/functions/user-advertiser-stats/index.ts` | Добавить расчёт `total_turnover` |
-| `src/hooks/useAdvertiserStats.ts` | Добавить поле `totalTurnover` в интерфейс |
-| `src/pages/Profile.tsx` | Заменить "Рейтинг" на "Оборот" в StatsCard |
-
-## Примечание
-
-Рейтинг пользователя (звёздочка с числом) останется в карточке пользователя выше — в строке с именем и статусом "Проверен".
+| Файл | Действие |
+|------|----------|
+| `src/components/ChannelCardSkeleton.tsx` | Создать новый компонент |
+| `src/pages/Index.tsx` | Заменить скелетоны на новые |
+| `src/pages/Channels.tsx` | Заменить скелетоны на новые |
