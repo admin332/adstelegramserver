@@ -1,138 +1,111 @@
 
 
-# Отмена сделки из админ-панели с возвратом средств
+# Исправление расшифровки мнемоники для перевода средств
 
-## Задача
+## Проблема
 
-Когда админ вручную меняет статус сделки на "Отменено" (cancelled):
-1. Если сделка была оплачена (статус `escrow` или `in_progress`) — вернуть средства рекламодателю
-2. Отправить уведомления обеим сторонам
-3. Обновить статус на `cancelled` с причиной `admin_cancelled`
+Функции `admin-complete-deal` и `complete-posted-deals` используют неправильный алгоритм расшифровки мнемоники. 
+
+**Формат хранения** (в `create-deal`):
+```
+iv_hex:authTag_hex:encrypted_hex
+```
+
+**Что ожидает расшифровка** (сейчас):
+```
+base64(iv + ciphertext + authTag)
+```
+
+Из-за этого `atob()` падает с ошибкой `Failed to decode base64`.
 
 ## Решение
 
-Создать новую Edge Function `admin-cancel-deal` для принудительной отмены с возвратом, аналогично `admin-complete-deal`.
+Переписать функцию `decryptMnemonic` с правильной логикой:
+
+1. Разделить строку по `:`
+2. Декодировать IV, authTag и encrypted из hex
+3. Использовать `SubtleCrypto.decrypt()` с AES-256-GCM
+4. Вернуть массив слов мнемоники
 
 ## Изменения
 
-### 1. Новая Edge Function: `admin-cancel-deal/index.ts`
-
-Логика:
-- Проверка что вызывающий — админ (через `has_role`)
-- Получение данных сделки, рекламодателя и канала
-- Если есть `escrow_mnemonic_encrypted` и кошелёк рекламодателя → возврат средств
-- Обновление статуса сделки на `cancelled` с причиной `admin_cancelled`
-- Отправка уведомлений в Telegram обеим сторонам
+### 1. Исправить `decryptMnemonic` в обеих Edge Functions
 
 ```typescript
-// Основная логика (упрощённо)
-async function adminCancelDeal(dealId: string): Promise<Result> {
-  // 1. Получить сделку с данными
-  const deal = await getDealWithRelations(dealId);
-  
-  // 2. Получить кошелёк рекламодателя
-  const advertiser = await getAdvertiser(deal.advertiser_id);
-  
-  // 3. Вернуть средства если есть эскроу
-  let refundSuccess = false;
-  if (advertiser.wallet_address && deal.escrow_mnemonic_encrypted) {
-    refundSuccess = await sendRefund(
-      deal.escrow_mnemonic_encrypted,
-      advertiser.wallet_address
-    );
-  }
-  
-  // 4. Обновить статус
-  await supabase.from("deals").update({
-    status: "cancelled",
-    cancellation_reason: "admin_cancelled",
-    updated_at: new Date().toISOString()
-  }).eq("id", dealId);
-  
-  // 5. Отправить уведомления
-  await notifyParties(deal, advertiser, owner);
-  
-  return { success: true, refundSuccess };
-}
-```
-
-### 2. Обновить `AdminDealsTable.tsx`
-
-При смене статуса на `cancelled` вызывать новую Edge Function:
-
-```typescript
-const updateStatus = async (dealId: string, newStatus: DealStatus) => {
-  if (newStatus === 'completed') {
-    // Существующая логика - admin-complete-deal
-  } else if (newStatus === 'cancelled') {
-    // Новая логика - отмена с возвратом
-    const { data, error } = await supabase.functions.invoke('admin-cancel-deal', {
-      body: { dealId }
-    });
+async function decryptMnemonic(encryptedData: string): Promise<string[]> {
+  try {
+    const ENCRYPTION_KEY = Deno.env.get("ENCRYPTION_KEY")!;
     
-    toast({
-      title: 'Сделка отменена',
-      description: data.refundSuccess 
-        ? 'Средства возвращены рекламодателю' 
-        : 'Статус обновлён',
-    });
-  } else if (newStatus === 'escrow') {
-    // Существующая логика - уведомление владельца
-  } else {
-    // Простое обновление статуса
-  }
-};
-```
-
-### 3. Конфигурация
-
-Добавить в `supabase/config.toml`:
-```toml
-[functions.admin-cancel-deal]
-verify_jwt = false
-```
-
-Создать `supabase/functions/admin-cancel-deal/deno.json`:
-```json
-{
-  "imports": {
-    "@ton/crypto": "npm:@ton/crypto@3",
-    "@ton/ton": "npm:@ton/ton@15"
+    // Формат: iv:authTag:encrypted (все в hex)
+    const parts = encryptedData.split(":");
+    if (parts.length !== 3) {
+      console.error("Invalid encrypted format - expected 3 parts separated by ':'");
+      return [];
+    }
+    
+    const [ivHex, authTagHex, encryptedHex] = parts;
+    
+    // Декодируем из hex
+    const iv = new Uint8Array(ivHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const authTag = new Uint8Array(authTagHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const encrypted = new Uint8Array(encryptedHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    
+    // Собираем ciphertext + authTag для SubtleCrypto
+    const ciphertextWithTag = new Uint8Array(encrypted.length + authTag.length);
+    ciphertextWithTag.set(encrypted);
+    ciphertextWithTag.set(authTag, encrypted.length);
+    
+    // Импортируем ключ
+    const keyBuffer = new Uint8Array(ENCRYPTION_KEY.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      keyBuffer,
+      { name: "AES-GCM" },
+      false,
+      ["decrypt"]
+    );
+    
+    // Расшифровываем
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv },
+      cryptoKey,
+      ciphertextWithTag
+    );
+    
+    const mnemonicString = new TextDecoder().decode(decrypted);
+    return mnemonicString.split(" ");
+  } catch (error) {
+    console.error("Decryption error:", error);
+    return [];
   }
 }
 ```
 
-## Файлы к созданию/изменению
+### 2. Обновить вызовы функции
+
+Сделать функцию `async` и добавить `await`:
+
+```typescript
+// Было
+const mnemonicWords = decryptMnemonic(encryptedMnemonic);
+
+// Станет
+const mnemonicWords = await decryptMnemonic(encryptedMnemonic);
+```
+
+## Файлы к изменению
 
 | Файл | Изменение |
 |------|-----------|
-| `supabase/functions/admin-cancel-deal/index.ts` | Новая функция отмены с возвратом |
-| `supabase/functions/admin-cancel-deal/deno.json` | Зависимости TON |
-| `supabase/config.toml` | Добавить конфигурацию функции |
-| `src/components/admin/AdminDealsTable.tsx` | Вызов функции при смене на `cancelled` |
-
-## Уведомления
-
-**Рекламодателю:**
-```
-❌ Сделка отменена администратором
-
-Размещение в канале {channel_title} было отменено.
-💰 Возврат: {total_price} TON отправлен на ваш кошелёк.
-```
-
-**Владельцу канала:**
-```
-❌ Сделка отменена администратором
-
-Размещение в канале {channel_title} было отменено платформой.
-Средства возвращены рекламодателю.
-```
+| `supabase/functions/admin-complete-deal/index.ts` | Исправить `decryptMnemonic` |
+| `supabase/functions/admin-cancel-deal/index.ts` | Исправить `decryptMnemonic` |
+| `supabase/functions/complete-posted-deals/index.ts` | Исправить `decryptMnemonic` |
+| `supabase/functions/auto-refund-expired-deals/index.ts` | Исправить `decryptMnemonic` (если есть) |
 
 ## Результат
 
-- Админ выбирает "Отменено" в селекте
-- Если сделка была оплачена → TON возвращается рекламодателю
-- Обе стороны получают уведомления в Telegram
-- Сделка помечается как отменённая с причиной `admin_cancelled`
+После исправления:
+- Админ меняет статус на "Завершено" → средства сразу переводятся владельцу
+- Автоматическое завершение сделок работает корректно
+- Рефанды при отмене работают корректно
 
