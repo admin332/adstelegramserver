@@ -207,7 +207,7 @@ function formatDate(dateStr: string | null): string {
   const hour = parts.find(p => p.type === 'hour')?.value;
   const minute = parts.find(p => p.type === 'minute')?.value;
   
-  return `${day}.${month}.${year} в ${hour}:${minute}`;
+  return `${day}.${month}.${year} в ${hour}:${minute} (МСК)`;
 }
 
 // Send payment notification to CHANNEL OWNER with approve/reject buttons
