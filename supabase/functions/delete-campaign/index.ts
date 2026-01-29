@@ -182,6 +182,28 @@ Deno.serve(async (req) => {
       );
     }
 
+    // 4. Check for active deals before deletion
+    const { count: activeDeals, error: countError } = await supabase
+      .from("deals")
+      .select("*", { count: "exact", head: true })
+      .eq("campaign_id", campaign_id)
+      .in("status", ["pending", "escrow", "in_progress"]);
+
+    if (countError) {
+      console.error("Count deals error:", countError);
+      return new Response(
+        JSON.stringify({ success: false, error: "Ошибка проверки сделок" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (activeDeals && activeDeals > 0) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Нельзя удалить кампанию с активными сделками" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // 4. Delete campaign
     const { error: deleteError } = await supabase
       .from("campaigns")
