@@ -1,89 +1,62 @@
 
+# Добавление переключателя анимированного стикера в админ-панель
 
-# Исправление статистики профиля: учёт обеих ролей пользователя
+## Что будет сделано
 
-## Проблема
+Добавим возможность включать/выключать анимированный TGS-стикер на главной странице через админ-панель в разделе "Настройки".
 
-Текущая функция `user-advertiser-stats` считает статистику **только для рекламодателей** — она ищет сделки, где `advertiser_id = user.id`. 
+## Изменения
 
-Но один человек может выступать в двух ролях:
-1. **Рекламодатель** — покупает рекламу (траты)
-2. **Владелец канала** — продаёт рекламу (доход)
+### 1. База данных
+Добавить новую запись в таблицу `app_settings`:
+- `key`: `animated_sticker`
+- `value`: `{ "enabled": true }` (включен по умолчанию)
 
-Сейчас владельцы каналов видят `0 сделок` и `0 TON оборота`, хотя участвовали в сделках.
-
-## Решение
-
-Расширить Edge Function `user-advertiser-stats` для подсчёта:
-1. Сделок, где пользователь — **рекламодатель** (`advertiser_id`)
-2. Сделок, где пользователь — **владелец канала** (через `channel_admins` или `channels.owner_id`)
-
-Суммировать оба типа сделок в общий оборот и количество.
-
-## Техническое изменение
-
-### Файл: `supabase/functions/user-advertiser-stats/index.ts`
-
-**Новая логика:**
+### 2. Хук useAppSettings.ts
+Расширить для работы с настройкой стикера:
+- Добавить состояние `stickerEnabled` 
+- Добавить функцию `updateStickerEnabled`
+- Загружать обе настройки одним запросом
 
 ```typescript
-// 1. Получаем список каналов пользователя
-const { data: channelAdmins } = await supabase
-  .from("channel_admins")
-  .select("channel_id")
-  .eq("user_id", user.id);
+// Новые поля в хуке
+const [stickerEnabled, setStickerEnabled] = useState(true);
 
-const userChannelIds = channelAdmins?.map((ca) => ca.channel_id) || [];
-
-// 2. Считаем сделки как рекламодатель
-const { count: advertiserDeals } = await supabase
-  .from("deals")
-  .select("*", { count: "exact", head: true })
-  .eq("advertiser_id", user.id)
-  .eq("status", "completed");
-
-// 3. Считаем сделки как владелец канала
-let ownerDeals = 0;
-if (userChannelIds.length > 0) {
-  const { count } = await supabase
-    .from("deals")
-    .select("*", { count: "exact", head: true })
-    .in("channel_id", userChannelIds)
-    .neq("advertiser_id", user.id) // Исключаем дубли
-    .eq("status", "completed");
-  ownerDeals = count || 0;
-}
-
-// 4. Суммируем
-const completedDeals = (advertiserDeals || 0) + ownerDeals;
-
-// 5. Аналогично для оборота
-// - Траты (как рекламодатель)
-// - Доход (как владелец канала)
-// - Общий оборот = сумма
+const updateStickerEnabled = async (enabled: boolean) => {
+  // Обновление в app_settings
+};
 ```
 
-### Также учитываем рейтинг
+### 3. AdminSettings.tsx
+Добавить новый переключатель в раздел "Режим разработки":
 
-Добавляем средний рейтинг из отзывов на каналы (таблица `reviews`), объединяя с рейтингом как рекламодателя.
+| Настройка | Описание |
+|-----------|----------|
+| Анимированный стикер | Показывать TGS-анимацию над первой карточкой канала на главной странице |
 
-## Что изменится в UI
+### 4. Index.tsx
+Использовать настройку для условного отображения стикера:
 
-На странице профиля:
-- **Сделок** — будет показывать сумму сделок в обеих ролях
-- **Оборот** — будет показывать общий оборот (траты + доходы)
+```tsx
+const { stickerEnabled } = useAppSettings();
 
-## Переименование
-
-Так как статистика теперь не только для рекламодателей, предлагаю:
-- Переименовать хук: `useAdvertiserStats` → `useUserStats`
-- Переименовать функцию: `user-advertiser-stats` → `user-stats`
-
-Или оставить как есть для обратной совместимости.
+// В JSX
+{index === 0 && stickerEnabled && (
+  <TgsSticker ... />
+)}
+```
 
 ## Изменяемые файлы
 
-1. **`supabase/functions/user-advertiser-stats/index.ts`** — расширить логику подсчёта для обеих ролей
-2. **`src/hooks/useAdvertiserStats.ts`** — без изменений (интерфейс остаётся тот же)
-3. **`src/pages/Profile.tsx`** — без изменений (данные уже отображаются)
+| Файл | Изменение |
+|------|-----------|
+| `src/hooks/useAppSettings.ts` | Добавить `stickerEnabled` и `updateStickerEnabled` |
+| `src/components/admin/AdminSettings.tsx` | Добавить Switch для стикера |
+| `src/pages/Index.tsx` | Условное отображение стикера |
 
+## Миграция БД
+```sql
+INSERT INTO app_settings (key, value)
+VALUES ('animated_sticker', '{"enabled": true}')
+ON CONFLICT (key) DO NOTHING;
+```
