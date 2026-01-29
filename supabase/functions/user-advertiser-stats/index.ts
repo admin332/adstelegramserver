@@ -77,40 +77,97 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Count completed deals where user is advertiser
-    const { count: completedDeals } = await supabase
+    // 1. Get user's channels (as owner or manager)
+    const { data: channelAdmins } = await supabase
+      .from("channel_admins")
+      .select("channel_id")
+      .eq("user_id", user.id);
+
+    const userChannelIds = channelAdmins?.map((ca) => ca.channel_id) || [];
+
+    // 2. Count completed deals as ADVERTISER
+    const { count: advertiserDeals } = await supabase
       .from("deals")
       .select("*", { count: "exact", head: true })
       .eq("advertiser_id", user.id)
       .eq("status", "completed");
 
-    // Get average rating from advertiser_reviews
-    const { data: reviews } = await supabase
-      .from("advertiser_reviews")
-      .select("rating")
-      .eq("advertiser_id", user.id);
-
-    let avgRating = 0;
-    if (reviews && reviews.length > 0) {
-      const sum = reviews.reduce((acc, r) => acc + r.rating, 0);
-      avgRating = Math.round((sum / reviews.length) * 10) / 10;
+    // 3. Count completed deals as CHANNEL OWNER (exclude duplicates where user is also advertiser)
+    let ownerDeals = 0;
+    if (userChannelIds.length > 0) {
+      const { count } = await supabase
+        .from("deals")
+        .select("*", { count: "exact", head: true })
+        .in("channel_id", userChannelIds)
+        .neq("advertiser_id", user.id)
+        .eq("status", "completed");
+      ownerDeals = count || 0;
     }
 
-    // Get total turnover from completed deals
-    const { data: dealsData } = await supabase
+    // 4. Total deals = advertiser + owner
+    const completedDeals = (advertiserDeals || 0) + ownerDeals;
+
+    // 5. Get turnover as ADVERTISER (expenses)
+    const { data: advertiserDealsData } = await supabase
       .from("deals")
       .select("total_price")
       .eq("advertiser_id", user.id)
       .eq("status", "completed");
 
-    let totalTurnover = 0;
-    if (dealsData && dealsData.length > 0) {
-      totalTurnover = dealsData.reduce((acc, d) => acc + (Number(d.total_price) || 0), 0);
+    let advertiserTurnover = 0;
+    if (advertiserDealsData && advertiserDealsData.length > 0) {
+      advertiserTurnover = advertiserDealsData.reduce((acc, d) => acc + (Number(d.total_price) || 0), 0);
+    }
+
+    // 6. Get turnover as CHANNEL OWNER (income)
+    let ownerTurnover = 0;
+    if (userChannelIds.length > 0) {
+      const { data: ownerDealsData } = await supabase
+        .from("deals")
+        .select("total_price")
+        .in("channel_id", userChannelIds)
+        .neq("advertiser_id", user.id)
+        .eq("status", "completed");
+
+      if (ownerDealsData && ownerDealsData.length > 0) {
+        ownerTurnover = ownerDealsData.reduce((acc, d) => acc + (Number(d.total_price) || 0), 0);
+      }
+    }
+
+    // 7. Total turnover = expenses + income
+    const totalTurnover = advertiserTurnover + ownerTurnover;
+
+    // 8. Get average rating from advertiser_reviews
+    const { data: advertiserReviews } = await supabase
+      .from("advertiser_reviews")
+      .select("rating")
+      .eq("advertiser_id", user.id);
+
+    // 9. Get average rating from channel reviews (for user's channels)
+    let channelReviews: { rating: number }[] = [];
+    if (userChannelIds.length > 0) {
+      const { data: reviews } = await supabase
+        .from("reviews")
+        .select("rating")
+        .in("channel_id", userChannelIds);
+      channelReviews = reviews || [];
+    }
+
+    // 10. Combine ratings from both roles
+    const allRatings = [
+      ...(advertiserReviews || []).map(r => r.rating),
+      ...channelReviews.map(r => r.rating)
+    ];
+
+    let avgRating = 0;
+    if (allRatings.length > 0) {
+      const sum = allRatings.reduce((acc, r) => acc + r, 0);
+      avgRating = Math.round((sum / allRatings.length) * 10) / 10;
     }
 
     return new Response(
       JSON.stringify({
-        completed_deals: completedDeals || 0,
+        completed_deals: completedDeals,
         avg_rating: avgRating,
         total_turnover: totalTurnover,
       }),
