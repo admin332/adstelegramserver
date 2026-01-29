@@ -19,6 +19,12 @@ interface UserState {
   advertiserTelegramId?: number;
 }
 
+// Media item with file_id for permanent Telegram storage
+interface MediaItem {
+  type: 'photo' | 'video' | 'document';
+  file_id: string;
+}
+
 // In-memory state (will reset on function restart, but that's OK for this use case)
 const userStates: Map<number, UserState> = new Map();
 
@@ -103,55 +109,33 @@ async function editMessageReplyMarkup(chatId: number, messageId: number, replyMa
   }
 }
 
-// Check if URL is video
-function isVideoUrl(url: string): boolean {
-  const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
-  return videoExtensions.some(ext => url.toLowerCase().includes(ext));
-}
-
-// Get file URL from Telegram
-async function getFileUrl(fileId: string): Promise<string | null> {
-  try {
-    const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
-    const data = await response.json();
-    if (data.ok && data.result.file_path) {
-      return `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${data.result.file_path}`;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-// Extract media URLs from message
-async function extractMediaUrls(message: Record<string, unknown>): Promise<string[]> {
-  const urls: string[] = [];
+// Extract media with file_id (permanent Telegram storage)
+function extractMedia(message: Record<string, unknown>): MediaItem[] {
+  const media: MediaItem[] = [];
   
-  // Photo
+  // Photo - get largest size
   if (message.photo && Array.isArray(message.photo)) {
-    // Get largest photo
     const largestPhoto = message.photo[message.photo.length - 1] as { file_id: string };
-    const url = await getFileUrl(largestPhoto.file_id);
-    if (url) urls.push(url);
+    media.push({ type: 'photo', file_id: largestPhoto.file_id });
   }
   
   // Video
   if (message.video) {
     const video = message.video as { file_id: string };
-    const url = await getFileUrl(video.file_id);
-    if (url) urls.push(url);
+    media.push({ type: 'video', file_id: video.file_id });
   }
   
   // Document (for images/videos sent as files)
   if (message.document) {
     const doc = message.document as { file_id: string; mime_type?: string };
-    if (doc.mime_type?.startsWith('image/') || doc.mime_type?.startsWith('video/')) {
-      const url = await getFileUrl(doc.file_id);
-      if (url) urls.push(url);
+    if (doc.mime_type?.startsWith('image/')) {
+      media.push({ type: 'photo', file_id: doc.file_id });
+    } else if (doc.mime_type?.startsWith('video/')) {
+      media.push({ type: 'video', file_id: doc.file_id });
     }
   }
   
-  return urls;
+  return media;
 }
 
 // Handle incoming message from channel owner (draft submission)
@@ -210,21 +194,24 @@ async function handleDraftMessage(telegramUserId: number, message: Record<string
   // Take the first pending deal
   const deal = promptDeals[0];
 
-  // Extract message content
+  // Extract message content with native Telegram data
   const text = (message.text || message.caption || "") as string;
-  const mediaUrls = await extractMediaUrls(message);
+  const entities = (message.entities || message.caption_entities || []) as object[];
+  const media = extractMedia(message);
 
-  if (!text && mediaUrls.length === 0) {
+  if (!text && media.length === 0) {
     await sendTelegramMessage(telegramUserId, "❌ Отправьте текст поста или медиа-файлы.");
     return;
   }
 
-  // Save draft to database
+  // Save draft to database with file_id and entities
   const { error: updateError } = await supabase
     .from("deals")
     .update({
       author_draft: text || null,
-      author_draft_media_urls: mediaUrls.length > 0 ? mediaUrls : [],
+      author_draft_entities: entities,
+      author_draft_media: media,
+      author_draft_media_urls: [], // Clear legacy field
       is_draft_approved: null, // Waiting for review
     })
     .eq("id", deal.id);
@@ -265,7 +252,7 @@ async function handleDraftMessage(telegramUserId: number, message: Record<string
 
   await new Promise(resolve => setTimeout(resolve, 300));
 
-  // Copy the original message to advertiser
+  // Copy the original message to advertiser (preserves formatting and premium emoji)
   const messageId = (message.message_id as number);
   const chatId = (message.chat as { id: number }).id;
   
@@ -293,7 +280,7 @@ async function handleDraftMessage(telegramUserId: number, message: Record<string
     "✅ <b>Черновик отправлен рекламодателю!</b>\n\nОжидайте проверки. Вы получите уведомление о результате."
   );
 
-  console.log(`Draft submitted for deal ${deal.id}, forwarded to advertiser ${advertiser.telegram_id}`);
+  console.log(`Draft submitted for deal ${deal.id} with ${media.length} media items and ${entities.length} entities`);
 }
 
 // Handle callback query for draft approval
@@ -474,13 +461,15 @@ async function handleRevisionComment(telegramUserId: number, text: string) {
     return true;
   }
 
-  // Update deal
+  // Update deal - clear all draft fields including new ones
   const { error: updateError } = await supabase
     .from("deals")
     .update({
       is_draft_approved: false,
-      author_draft: null, // Clear draft for resubmission
-      author_draft_media_urls: [],
+      author_draft: null,
+      author_draft_entities: [],
+      author_draft_media: [],
+      author_draft_media_urls: [], // Clear legacy field
       revision_count: (deal.revision_count || 0) + 1,
     })
     .eq("id", dealId);
