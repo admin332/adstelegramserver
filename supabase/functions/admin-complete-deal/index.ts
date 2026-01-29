@@ -88,19 +88,47 @@ async function sendRatingRequest(
   }
 }
 
-function decryptMnemonic(encryptedData: string): string[] {
+async function decryptMnemonic(encryptedData: string): Promise<string[]> {
   try {
-    const key = new TextEncoder().encode(ENCRYPTION_KEY.slice(0, 32).padEnd(32, "0"));
-    const data = Uint8Array.from(atob(encryptedData), (c) => c.charCodeAt(0));
+    // Format: iv:authTag:encrypted (all in hex)
+    const parts = encryptedData.split(":");
+    if (parts.length !== 3) {
+      console.error("Invalid encrypted format - expected 3 parts separated by ':'");
+      return [];
+    }
     
-    const iv = data.slice(0, 12);
-    const ciphertext = data.slice(12, -16);
-    const authTag = data.slice(-16);
+    const [ivHex, authTagHex, encryptedHex] = parts;
     
-    console.log("Decryption params:", { ivLen: iv.length, cipherLen: ciphertext.length, tagLen: authTag.length });
+    // Decode from hex
+    const iv = new Uint8Array(ivHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const authTag = new Uint8Array(authTagHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const encrypted = new Uint8Array(encryptedHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
     
-    // Note: Proper async decryption should be implemented
-    return [];
+    // Combine ciphertext + authTag for SubtleCrypto
+    const ciphertextWithTag = new Uint8Array(encrypted.length + authTag.length);
+    ciphertextWithTag.set(encrypted);
+    ciphertextWithTag.set(authTag, encrypted.length);
+    
+    // Import key from hex
+    const keyBuffer = new Uint8Array(ENCRYPTION_KEY.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      keyBuffer,
+      { name: "AES-GCM" },
+      false,
+      ["decrypt"]
+    );
+    
+    // Decrypt
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv },
+      cryptoKey,
+      ciphertextWithTag
+    );
+    
+    const mnemonicString = new TextDecoder().decode(decrypted);
+    console.log("Mnemonic decrypted successfully");
+    return mnemonicString.split(" ");
   } catch (error) {
     console.error("Decryption error:", error);
     return [];
@@ -115,7 +143,7 @@ async function transferToOwner(
   try {
     console.log(`Initiating transfer of ${amount} TON to ${ownerWalletAddress}`);
     
-    const mnemonicWords = decryptMnemonic(encryptedMnemonic);
+    const mnemonicWords = await decryptMnemonic(encryptedMnemonic);
     
     if (mnemonicWords.length === 0) {
       console.error("Could not decrypt mnemonic - manual transfer required");
