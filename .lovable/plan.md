@@ -1,22 +1,17 @@
+# MTProto в Edge Functions — Технические ограничения
 
+## Проблема
 
-# MTProto в Deno Edge Function с использованием mtcute
+Библиотеки MTProto (mtcute, gramjs, grm) требуют:
+- **node:sqlite** — для хранения сессий и ключей
+- **node:crypto** — для криптографии MTProto
+- **TCP сокеты** — для постоянного соединения с DC
 
-## Обзор
+Deno Edge Functions не поддерживают эти модули.
 
-Реализую получение статистики каналов через MTProto **напрямую в Edge Function** используя библиотеку `mtcute` — современный TypeScript клиент для Telegram, который поддерживает Deno.
+## Решение: VPS Микросервис
 
-## Почему mtcute вместо grm?
-
-| Аспект | grm | mtcute |
-|--------|-----|--------|
-| Поддержка | Заброшен (v0.1.4) | Активная разработка (v0.27+) |
-| JSR | Нет | Да (`jsr:@mtcute/deno`) |
-| Deno совместимость | Частичная | Полная |
-| Конвертация сессий | Нет | Есть `@mtcute/convert` |
-| MemoryStorage | Нужен workaround | Встроенный |
-
-## Архитектура
+Простой Node.js сервис для получения статистики:
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
@@ -27,124 +22,162 @@
 ┌─────────────────────────────────────────────────────────────┐
 │           mtproto-channel-stats (Edge Function)             │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  mtcute TelegramClient                               │   │
-│  │  - MemoryStorage (без файловой системы)              │   │
-│  │  - importSession() из GramJS формата                 │   │
-│  │  - tg.call({ _: 'channels.getFullChannel' })        │   │
-│  │  - tg.call({ _: 'stats.getBroadcastStats' })        │   │
+│  │  Proxy to VPS if MTPROTO_VPS_URL configured         │   │
+│  │  Otherwise returns setupRequired: true               │   │
 │  └─────────────────────────────────────────────────────┘   │
 └────────────────────────┬────────────────────────────────────┘
-                         │ MTProto (encrypted)
+                         │ HTTPS
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              VPS Microservice (Railway/Render)              │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  Node.js + GramJS                                   │   │
+│  │  - StringSession authentication                      │   │
+│  │  - stats.GetBroadcastStats                          │   │
+│  │  - channels.GetFullChannel                          │   │
+│  └─────────────────────────────────────────────────────┘   │
+└────────────────────────┬────────────────────────────────────┘
+                         │ MTProto
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                   Telegram DC Servers                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Данные из MTProto API
+## Быстрый деплой на Railway
 
-| Метод | Данные |
-|-------|--------|
-| `channels.getFullChannel` | subscribers_count, about, linked_chat, stats_dc |
-| `stats.getBroadcastStats` | languages_graph, growth_graph, top_hours_graph, enabled_notifications, views_per_post |
+### 1. Создать проект
 
-## Реализация
+```bash
+mkdir mtproto-service && cd mtproto-service
+npm init -y
+npm install telegram gramjs express
+```
 
-### 1. Обновить `supabase/functions/mtproto-channel-stats/deno.json`
+### 2. Создать index.js
 
-```json
-{
-  "imports": {
-    "@mtcute/deno": "jsr:@mtcute/deno@^0.27.0",
-    "@mtcute/convert": "jsr:@mtcute/convert@^0.27.0",
-    "@mtcute/core": "jsr:@mtcute/core@^0.27.0"
+```javascript
+const express = require('express');
+const { TelegramClient, Api } = require('telegram');
+const { StringSession } = require('telegram/sessions');
+
+const app = express();
+const API_KEY = process.env.MTPROTO_VPS_SECRET;
+const client = new TelegramClient(
+  new StringSession(process.env.MTPROTO_SESSION),
+  parseInt(process.env.MTPROTO_API_ID),
+  process.env.MTPROTO_API_HASH,
+  { connectionRetries: 5 }
+);
+
+// Auth middleware
+app.use((req, res, next) => {
+  if (req.headers['x-api-key'] !== API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
+  next();
+});
+
+// Health check
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
+// Get channel stats
+app.get('/stats/:username', async (req, res) => {
+  try {
+    const { username } = req.params;
+    
+    const entity = await client.getEntity(username);
+    const fullChannel = await client.invoke(
+      new Api.channels.GetFullChannel({ channel: entity })
+    );
+    
+    let stats = null;
+    try {
+      stats = await client.invoke(
+        new Api.stats.GetBroadcastStats({ channel: entity, dark: false })
+      );
+    } catch (e) {
+      console.log('Stats not available:', e.message);
+    }
+    
+    res.json({
+      success: true,
+      channel: {
+        participantsCount: fullChannel.fullChat.participantsCount,
+        about: fullChannel.fullChat.about,
+        statsDc: fullChannel.fullChat.statsDc,
+      },
+      stats: stats ? parseStats(stats) : null,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+function parseStats(stats) {
+  return {
+    languageStats: parseGraph(stats.languagesGraph),
+    topHours: parseGraph(stats.topHoursGraph),
+    growthRate: stats.followers?.current 
+      ? ((stats.followers.current - stats.followers.previous) / stats.followers.previous * 100).toFixed(1)
+      : null,
+    notificationsEnabled: stats.enabledNotifications?.part 
+      ? (stats.enabledNotifications.part * 100).toFixed(1) 
+      : null,
+  };
 }
-```
 
-### 2. Полностью переписать `supabase/functions/mtproto-channel-stats/index.ts`
+function parseGraph(graph) {
+  if (!graph?.json?.data) return [];
+  try {
+    const data = JSON.parse(graph.json.data);
+    // Parse chart data...
+    return data.columns?.slice(1).map(col => ({
+      label: data.names?.[col[0]] || col[0],
+      value: col.slice(1).reduce((a, b) => a + b, 0),
+    })) || [];
+  } catch { return []; }
+}
 
-Основные изменения:
-- Импорт `TelegramClient` из `@mtcute/deno`
-- Импорт `convertFromGramjsSession` для конвертации текущей сессии
-- Использование `MemoryStorage` для serverless окружения
-- Импорт сессии через `tg.importSession()`
-- Вызов `tg.call({ _: 'channels.getFullChannel', channel: username })`
-- Вызов `tg.call({ _: 'stats.getBroadcastStats', channel: ..., dark: false })`
-- Обработка ошибки `STATS_MIGRATE` для переключения DC
-- Парсинг графиков (languages, top_hours, growth)
-
-```typescript
-// Пример структуры кода
-import { TelegramClient, MemoryStorage } from "jsr:@mtcute/deno@^0.27.0";
-import { convertFromGramjsSession } from "jsr:@mtcute/convert@^0.27.0";
-
-const tg = new TelegramClient({
-  apiId: parseInt(Deno.env.get("MTPROTO_API_ID")!),
-  apiHash: Deno.env.get("MTPROTO_API_HASH")!,
-  storage: new MemoryStorage(),
-});
-
-// Конвертируем и импортируем GramJS сессию
-const gramjsSession = Deno.env.get("MTPROTO_SESSION")!;
-await tg.importSession(convertFromGramjsSession(gramjsSession));
-
-// Получаем полную информацию о канале
-const fullChannel = await tg.call({
-  _: "channels.getFullChannel",
-  channel: { _: "inputChannel", channelId: ..., accessHash: ... },
-});
-
-// Получаем статистику (для каналов 500+)
-const stats = await tg.call({
-  _: "stats.getBroadcastStats",
-  channel: ...,
-  dark: false,
+// Start server
+const PORT = process.env.PORT || 3000;
+client.connect().then(() => {
+  console.log('Connected to Telegram');
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 });
 ```
 
-### 3. Обработка STATS_MIGRATE
+### 3. Переменные окружения на Railway
 
-Telegram может вернуть ошибку `STATS_MIGRATE_X`, требующую подключения к другому DC. mtcute автоматически обрабатывает миграцию DC.
+| Переменная | Значение |
+|------------|----------|
+| `MTPROTO_API_ID` | 32035706 |
+| `MTPROTO_API_HASH` | 6036cd3cb12e15ff119e92cb62f4c3b5 |
+| `MTPROTO_SESSION` | [Строка сессии из Lovable secrets] |
+| `MTPROTO_VPS_SECRET` | [Сгенерированный API ключ] |
 
-### 4. Парсинг графиков
+### 4. Добавить секреты в Lovable
 
-Создам функции для парсинга:
-- `parseLanguagesGraph()` — языки аудитории
-- `parseTopHoursGraph()` — активность по часам
-- `parseFollowersGraph()` — прирост подписчиков
+После деплоя добавьте в Lovable Cloud:
 
-## Ограничения и решения
+| Секрет | Значение |
+|--------|----------|
+| `MTPROTO_VPS_URL` | https://your-app.railway.app |
+| `MTPROTO_VPS_SECRET` | [Тот же ключ что на Railway] |
 
-| Проблема | Решение |
-|----------|---------|
-| Cold start (загрузка mtcute) | 3-5 секунд первый запрос |
-| Edge Function timeout | 60 сек достаточно |
-| Статистика недоступна (<500 подписчиков) | Возвращаем null, используем fallback |
-| Session expiration | Обработка ошибок, переавторизация |
+## Альтернатива: Render.com
 
-## Файлы к изменению
+1. Создать Web Service
+2. Подключить GitHub репозиторий с кодом выше
+3. Добавить переменные окружения
+4. Получить URL: https://your-service.onrender.com
 
-| Файл | Действие |
-|------|----------|
-| `supabase/functions/mtproto-channel-stats/deno.json` | Обновить — mtcute зависимости |
-| `supabase/functions/mtproto-channel-stats/index.ts` | Переписать — mtcute клиент |
+## После настройки
 
-## Секреты
+Edge Function `mtproto-channel-stats` автоматически начнёт проксировать запросы на VPS и возвращать реальные данные:
+- Языки аудитории
+- Прирост подписчиков  
+- % включенных уведомлений
+- Активность по часам
 
-Уже добавлены:
-- `MTPROTO_API_ID` — 32035706
-- `MTPROTO_API_HASH` — 6036cd3cb12e15ff119e92cb62f4c3b5  
-- `MTPROTO_SESSION` — GramJS StringSession
-
-## Результат
-
-После реализации Edge Function будет:
-1. Подключаться к Telegram через MTProto
-2. Резолвить канал по username
-3. Получать полную информацию (`channels.getFullChannel`)
-4. Получать статистику (`stats.getBroadcastStats`) для каналов 500+
-5. Возвращать парсенные данные: языки, top hours, growth rate, notifications enabled
-
-`ChannelAnalytics` будет отображать **реальные данные** вместо "Примерно".
-
+`refresh-channel-stats` уже настроен на вызов MTProto функции для каналов 500+.
