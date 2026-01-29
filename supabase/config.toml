@@ -83,3 +83,6 @@ verify_jwt = false
 
 [functions.user-advertiser-stats]
 verify_jwt = false
+
+[functions.admin-complete-deal]
+verify_jwt = false
