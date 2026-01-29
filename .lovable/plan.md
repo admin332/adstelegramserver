@@ -1,208 +1,121 @@
 
+# Принудительное завершение сделки из админ-панели с выплатой
 
-# Переход на хранение file_id + entities для prompt-черновиков
+## Задача
 
-## Проблема
-
-Сейчас при получении черновика от автора:
-1. Система получает `file_id` медиа
-2. Конвертирует в временный URL через `getFile` API
-3. Сохраняет URL в базу
-4. Через час URL истекает → публикация падает с ошибкой
-
-Также теряется форматирование текста (bold, italic, premium emoji) потому что сохраняется только `text`, но не `entities`.
+Когда админ вручную меняет статус сделки на "Завершено", нужно:
+1. Пропустить проверку наличия поста
+2. Выполнить перевод средств владельцу канала
+3. Отправить уведомления обеим сторонам
+4. Обновить статус на `completed`
 
 ## Решение
 
-Хранить нативные данные Telegram:
-- **Текст**: `text` + `entities` (для сохранения форматирования и premium emoji)
-- **Медиа**: `file_id` + `type` (бессрочное хранение в Telegram)
+Создать новую Edge Function `admin-complete-deal` для принудительного завершения сделки, и вызывать её из админ-панели при смене статуса на `completed`.
 
-## Изменения в БД
+## Изменения
 
-Добавить новые колонки в таблицу `deals`:
+### 1. Новая Edge Function: `admin-complete-deal/index.ts`
 
-```sql
-ALTER TABLE deals ADD COLUMN author_draft_entities JSONB DEFAULT '[]';
-ALTER TABLE deals ADD COLUMN author_draft_media JSONB DEFAULT '[]';
-```
-
-Структура `author_draft_media`:
-```json
-[
-  { "type": "photo", "file_id": "AgACAgIAAxkBAA..." },
-  { "type": "video", "file_id": "BAACAgIAAxkBAA..." }
-]
-```
-
-## Изменения в telegram-webhook/index.ts
-
-### 1. Новая функция извлечения медиа (вместо extractMediaUrls)
+Логика:
+- Проверка что вызывающий — админ (через `has_role`)
+- Получение данных сделки, канала и владельца
+- Перевод средств на кошелёк владельца (без проверки поста)
+- Обновление статуса сделки на `completed`
+- Отправка уведомлений в Telegram
 
 ```typescript
-interface MediaItem {
-  type: 'photo' | 'video' | 'document';
-  file_id: string;
+// Основная логика
+async function forceCompleteDeal(dealId: string): Promise<Result> {
+  // 1. Получить сделку с данными канала и владельца
+  const deal = await getDealWithRelations(dealId);
+  
+  // 2. Получить кошелёк владельца канала
+  const owner = await getOwner(deal.channel.owner_id);
+  
+  // 3. Перевести средства (без проверки поста)
+  if (owner.wallet_address && deal.escrow_mnemonic_encrypted) {
+    await transferToOwner(
+      deal.escrow_mnemonic_encrypted,
+      owner.wallet_address,
+      deal.total_price
+    );
+  }
+  
+  // 4. Обновить статус
+  await supabase.from("deals").update({
+    status: "completed",
+    completed_at: new Date().toISOString()
+  }).eq("id", dealId);
+  
+  // 5. Увеличить счётчик успешных реклам
+  await incrementSuccessfulAds(deal.channel_id);
+  
+  // 6. Отправить уведомления
+  await notifyParties(deal, owner, advertiser);
+  
+  return { success: true };
 }
+```
 
-function extractMedia(message: Record<string, unknown>): MediaItem[] {
-  const media: MediaItem[] = [];
-  
-  if (message.photo && Array.isArray(message.photo)) {
-    const largestPhoto = message.photo[message.photo.length - 1];
-    media.push({ type: 'photo', file_id: largestPhoto.file_id });
-  }
-  
-  if (message.video) {
-    media.push({ type: 'video', file_id: message.video.file_id });
-  }
-  
-  if (message.document) {
-    const doc = message.document as { file_id: string; mime_type?: string };
-    if (doc.mime_type?.startsWith('image/') || doc.mime_type?.startsWith('video/')) {
-      const type = doc.mime_type.startsWith('video/') ? 'video' : 'photo';
-      media.push({ type, file_id: doc.file_id });
+### 2. Обновить `AdminDealsTable.tsx`
+
+При смене статуса на `completed` вызывать новую Edge Function вместо простого обновления базы:
+
+```typescript
+const updateStatus = async (dealId: string, newStatus: DealStatus) => {
+  setUpdatingDealId(dealId);
+  try {
+    if (newStatus === 'completed') {
+      // Вызвать функцию завершения с выплатой
+      const { data, error } = await supabase.functions.invoke('admin-complete-deal', {
+        body: { dealId }
+      });
+      
+      if (error) throw error;
+      
+      toast({
+        title: 'Сделка завершена',
+        description: data.transferSuccess 
+          ? 'Средства переведены владельцу канала' 
+          : 'Статус обновлён, но перевод не выполнен',
+      });
+    } else if (newStatus === 'escrow') {
+      // Существующая логика уведомления
+      // ...
+    } else {
+      // Простое обновление статуса
+      const { error } = await supabase
+        .from('deals')
+        .update({ status: newStatus })
+        .eq('id', dealId);
+      if (error) throw error;
     }
-  }
-  
-  return media;
-}
-```
-
-### 2. Обновить handleDraftMessage
-
-```typescript
-// Извлечение данных
-const text = (message.text || message.caption || "") as string;
-const entities = (message.entities || message.caption_entities || []) as object[];
-const media = extractMedia(message);
-
-// Сохранение в БД
-await supabase.from("deals").update({
-  author_draft: text || null,
-  author_draft_entities: entities,
-  author_draft_media: media,
-  is_draft_approved: null,
-}).eq("id", deal.id);
-```
-
-### 3. Обновить handleRevisionComment
-
-При запросе доработки очищать новые поля:
-```typescript
-await supabase.from("deals").update({
-  author_draft: null,
-  author_draft_entities: [],
-  author_draft_media: [],
-  author_draft_media_urls: [], // оставить для совместимости
-  is_draft_approved: false,
-  revision_count: (deal.revision_count || 0) + 1,
-}).eq("id", deal.id);
-```
-
-## Изменения в publish-scheduled-posts/index.ts
-
-### Новая функция публикации с file_id и entities
-
-```typescript
-interface MediaItem {
-  type: 'photo' | 'video';
-  file_id: string;
-}
-
-async function publishDraftToChannel(
-  chatId: number, 
-  text: string,
-  entities: object[],
-  media: MediaItem[],
-  buttonText?: string,
-  buttonUrl?: string
-): Promise<number> {
-  const replyMarkup = buttonText && buttonUrl
-    ? { inline_keyboard: [[{ text: buttonText, url: buttonUrl }]] }
-    : undefined;
-
-  // Без медиа — только текст с entities
-  if (!media || media.length === 0) {
-    const result = await sendTelegramRequest("sendMessage", {
-      chat_id: chatId,
-      text,
-      entities, // ← Сохраняет форматирование!
-      reply_markup: replyMarkup,
-    });
-    return result.result.message_id;
-  }
-
-  // Одно медиа
-  if (media.length === 1) {
-    const item = media[0];
-    const method = item.type === 'video' ? 'sendVideo' : 'sendPhoto';
-    const mediaKey = item.type === 'video' ? 'video' : 'photo';
     
-    const result = await sendTelegramRequest(method, {
-      chat_id: chatId,
-      [mediaKey]: item.file_id, // ← file_id вместо URL!
-      caption: text,
-      caption_entities: entities, // ← Сохраняет форматирование!
-      reply_markup: replyMarkup,
-    });
-    return result.result.message_id;
+    queryClient.invalidateQueries({ queryKey: ['admin-deals'] });
+  } catch (err) {
+    // ...
   }
-
-  // Несколько медиа
-  const mediaGroup = media.map((item, index) => ({
-    type: item.type,
-    media: item.file_id,
-    ...(index === 0 ? { caption: text, caption_entities: entities } : {}),
-  }));
-
-  const result = await sendTelegramRequest("sendMediaGroup", {
-    chat_id: chatId,
-    media: mediaGroup,
-  });
-
-  if (replyMarkup) {
-    await sendTelegramRequest("sendMessage", {
-      chat_id: chatId,
-      text: "👆",
-      reply_markup: replyMarkup,
-    });
-  }
-
-  return result.result[0].message_id;
-}
-```
-
-### Обновить processDeal
-
-```typescript
-// Для prompt-кампаний использовать новые поля
-if (isPromptCampaign && deal.author_draft) {
-  const messageId = await publishDraftToChannel(
-    channel.telegram_chat_id,
-    deal.author_draft,
-    deal.author_draft_entities || [],
-    deal.author_draft_media || [],
-    null, // prompt-кампании не используют кнопки
-    null
-  );
-  // ...
-}
+};
 ```
 
 ## Файлы к изменению
 
 | Файл | Изменение |
 |------|-----------|
-| Миграция БД | Добавить `author_draft_entities` и `author_draft_media` |
-| `telegram-webhook/index.ts` | Сохранять `file_id` + `entities` вместо URL |
-| `publish-scheduled-posts/index.ts` | Публиковать с `file_id` + `entities` |
+| `supabase/functions/admin-complete-deal/index.ts` | Новая функция завершения с выплатой |
+| `src/components/admin/AdminDealsTable.tsx` | Вызов функции при смене на `completed` |
+
+## Безопасность
+
+- Edge Function проверяет что вызывающий имеет роль `admin`
+- Используется `SUPABASE_SERVICE_ROLE_KEY` для доступа к зашифрованной мнемонике
+- Транзакция TON происходит только на сервере
 
 ## Результат
 
-- ✅ Premium emoji сохраняются 1 в 1
-- ✅ Форматирование (bold, italic, ссылки) не теряется
-- ✅ Медиа публикуется всегда (file_id бессрочный)
-- ✅ Видео и альбомы работают корректно
-- ✅ Не нужно хранить файлы в Storage
-
+- Админ выбирает "Завершено" в селекте
+- Система переводит TON владельцу канала
+- Увеличивается счётчик `successful_ads`
+- Обе стороны получают уведомления в Telegram
+- Сделка отмечается как завершённая
