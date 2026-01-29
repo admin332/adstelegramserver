@@ -263,12 +263,20 @@ async function sendOwnerNotification(deal: Deal) {
     // Send brief as separate message
     await new Promise(resolve => setTimeout(resolve, 300));
     
-    const briefText = `📋 <b>Бриф от рекламодателя:</b>
+    let briefText = `📋 <b>Бриф от рекламодателя:</b>
 
-${deal.campaign?.text || "Бриф не указан"}${deal.campaign?.button_text && deal.campaign?.button_url ? `
+${deal.campaign?.text || "Бриф не указан"}`;
 
-🔗 Кнопка: <b>${deal.campaign.button_text}</b>
-Ссылка: ${deal.campaign.button_url}` : ""}`;
+    // Для prompt кампаний - показываем ссылку на товар (Product Link)
+    if (deal.campaign?.button_url) {
+      if (deal.campaign?.button_text) {
+        // Есть и текст кнопки и ссылка (ready_post)
+        briefText += `\n\n🔗 Кнопка: <b>${deal.campaign.button_text}</b>\nСсылка: ${deal.campaign.button_url}`;
+      } else {
+        // Только ссылка (prompt кампания - Product Link)
+        briefText += `\n\n🔗 <b>Ссылка на товар:</b> ${deal.campaign.button_url}`;
+      }
+    }
 
     await sendTelegramRequest("sendMessage", {
       chat_id: ownerTelegramId,
@@ -345,16 +353,22 @@ async function sendAdvertiserConfirmation(deal: Deal) {
     // Send brief reminder
     await new Promise(resolve => setTimeout(resolve, 300));
     
-    const briefText = `📋 <b>Ваш бриф:</b>
+    let advertiserBriefText = `📋 <b>Ваш бриф:</b>
 
-${deal.campaign?.text || "Бриф не указан"}${deal.campaign?.button_text && deal.campaign?.button_url ? `
+${deal.campaign?.text || "Бриф не указан"}`;
 
-🔗 Кнопка: <b>${deal.campaign.button_text}</b>
-Ссылка: ${deal.campaign.button_url}` : ""}`;
+    // Для prompt кампаний - показываем ссылку на товар
+    if (deal.campaign?.button_url) {
+      if (deal.campaign?.button_text) {
+        advertiserBriefText += `\n\n🔗 Кнопка: <b>${deal.campaign.button_text}</b>\nСсылка: ${deal.campaign.button_url}`;
+      } else {
+        advertiserBriefText += `\n\n🔗 <b>Ссылка на товар:</b> ${deal.campaign.button_url}`;
+      }
+    }
 
     await sendTelegramRequest("sendMessage", {
       chat_id: advertiserTelegramId,
-      text: briefText,
+      text: advertiserBriefText,
       parse_mode: "HTML",
     });
 
