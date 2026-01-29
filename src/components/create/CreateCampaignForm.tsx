@@ -12,8 +12,7 @@ import {
   Loader2,
   X,
   FileVideo,
-  Plus,
-  Lightbulb
+  Plus
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
@@ -352,38 +351,29 @@ export const CreateCampaignForm = ({ onBack, onComplete, editingCampaign }: Crea
       {step === 3 && (
         <div className="space-y-6">
           {isPromptMode ? (
-            // Prompt mode - references
+            // Prompt mode - product link
             <>
               <div className="text-center space-y-2">
-                <h2 className="text-xl font-semibold text-foreground">Референсы</h2>
+                <h2 className="text-xl font-semibold text-foreground">Ссылка на продукт</h2>
                 <p className="text-muted-foreground text-sm">
-                  Добавьте ссылки на примеры или материалы для автора (опционально)
+                  Добавьте ссылку, которую автор вставит в пост
                 </p>
               </div>
 
               <div className="space-y-4">
-                <div className="bg-secondary/30 rounded-xl p-4 text-sm text-muted-foreground">
-                  <p className="flex items-center gap-1.5">
-                    <Lightbulb className="w-4 h-4" />
-                    Вы можете добавить ссылки на:
-                  </p>
-                  <ul className="list-disc list-inside mt-2 space-y-1">
-                    <li>Примеры постов, которые вам нравятся</li>
-                    <li>Ваш сайт или лендинг</li>
-                    <li>Документы с брендбуком</li>
-                  </ul>
-                </div>
-
                 <div className="space-y-2">
-                  <Label>Ссылки</Label>
-                  <Input
-                    placeholder="https://example.com"
-                    value={campaignData.button_url}
-                    onChange={(e) => setCampaignData({ ...campaignData, button_url: e.target.value })}
-                    className="bg-card border-0"
-                  />
+                  <Label>Ссылка</Label>
+                  <div className="relative">
+                    <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      placeholder="https://example.com"
+                      value={campaignData.button_url}
+                      onChange={(e) => setCampaignData({ ...campaignData, button_url: e.target.value })}
+                      className="bg-card border-0 pl-9"
+                    />
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    Можно пропустить этот шаг
+                    Автор добавит эту ссылку в текст поста
                   </p>
                 </div>
               </div>
@@ -533,26 +523,29 @@ export const CreateCampaignForm = ({ onBack, onComplete, editingCampaign }: Crea
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Кнопка (опционально)</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  placeholder="Текст кнопки"
-                  value={campaignData.button_text}
-                  onChange={(e) => setCampaignData({ ...campaignData, button_text: e.target.value })}
-                  className="bg-card border-0"
-                />
-                <div className="relative">
-                  <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            {/* Button only for ready_post mode */}
+            {!isPromptMode && (
+              <div className="space-y-2">
+                <Label>Кнопка (опционально)</Label>
+                <div className="grid grid-cols-2 gap-2">
                   <Input
-                    placeholder="https://..."
-                    value={campaignData.button_url}
-                    onChange={(e) => setCampaignData({ ...campaignData, button_url: e.target.value })}
-                    className="bg-card border-0 pl-9"
+                    placeholder="Текст кнопки"
+                    value={campaignData.button_text}
+                    onChange={(e) => setCampaignData({ ...campaignData, button_text: e.target.value })}
+                    className="bg-card border-0"
                   />
+                  <div className="relative">
+                    <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      placeholder="https://..."
+                      value={campaignData.button_url}
+                      onChange={(e) => setCampaignData({ ...campaignData, button_url: e.target.value })}
+                      className="bg-card border-0 pl-9"
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           <div className="flex gap-3">
