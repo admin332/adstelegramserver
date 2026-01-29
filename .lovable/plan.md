@@ -1,80 +1,69 @@
 
-# Исправление удаления кампаний с историческими сделками
+# Исправление bounce-проблемы с неинициализированным эскроу-кошельком
 
 ## Проблема
 
-При попытке удалить кампанию возникает ошибка базы данных:
-```
-foreign key constraint "deals_campaign_id_fkey" on table "deals"
-```
-
-Кампания связана с таблицей `deals` через внешний ключ. Даже если сделки завершены (`completed`) или истекли (`expired`), удаление невозможно — FK constraint блокирует операцию.
-
-## Текущая ситуация
-
-С кампанией `c72b1239-8863-47e1-a42b-b75fd6412e64` связаны сделки:
-| Статус | Количество |
-|--------|------------|
-| expired | 3 |
-| completed | 1 |
-
-Все сделки **неактивные**, но история сохраняется.
+При оплате на эскроу-адрес транзакция возвращается (bounce) потому что:
+- Адрес кошелька вычислен, но контракт ещё не развёрнут в блокчейне
+- По умолчанию TonConnect использует `bounce: true`
+- TON сеть возвращает средства, если получатель "пустой"
 
 ## Решение
 
-Изменить поведение внешнего ключа на **ON DELETE SET NULL** — при удалении кампании поле `campaign_id` в сделках станет `NULL`, сохраняя историю сделок.
+Применяем **оба способа** для максимальной надёжности:
 
-### Вариант 1: Изменить FK constraint (рекомендуется)
+### 1. Frontend: добавить `bounce: false` в транзакцию
 
-```sql
-ALTER TABLE deals DROP CONSTRAINT deals_campaign_id_fkey;
-ALTER TABLE deals ADD CONSTRAINT deals_campaign_id_fkey 
-  FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE SET NULL;
-```
-
-**Плюсы:**
-- История сделок сохраняется
-- Удаление кампании работает всегда
-- Можно видеть что сделка была "с удалённой кампанией"
-
-### Вариант 2: Добавить проверку активных сделок
-
-Запретить удаление если есть активные сделки (`pending`, `escrow`, `in_progress`), но разрешить если все завершены.
-
-**Минусы:**
-- Нужна дополнительная логика в Edge Function
-- Всё равно нужно решать что делать с FK
-
-## Рекомендуемое решение
-
-1. **Миграция БД**: Изменить FK на `ON DELETE SET NULL`
-2. **Edge Function**: Добавить проверку активных сделок перед удалением
+В компонентах `PaymentStep.tsx` и `PaymentDialog.tsx` добавить флаг:
 
 ```typescript
-// В delete-campaign/index.ts
-const { count: activeDeals } = await supabase
-  .from("deals")
-  .select("*", { count: "exact", head: true })
-  .eq("campaign_id", campaign_id)
-  .in("status", ["pending", "escrow", "in_progress"]);
-
-if (activeDeals && activeDeals > 0) {
-  return Response.json({ 
-    success: false, 
-    error: "Нельзя удалить кампанию с активными сделками" 
-  });
-}
+const transaction = {
+  validUntil: Math.floor(Date.now() / 1000) + 600,
+  messages: [
+    {
+      address: escrowAddress,
+      amount: amountNano,
+      bounce: false  // <-- Разрешить отправку на неинициализированный адрес
+    }
+  ]
+};
 ```
+
+### 2. Backend: генерировать Non-bounceable адрес (UQ...)
+
+В `create-deal/index.ts` изменить формат адреса:
+
+```typescript
+// Было:
+const address = wallet.address.toString({
+  bounceable: true,  // EQ...
+  testOnly: false,
+});
+
+// Станет:
+const address = wallet.address.toString({
+  bounceable: false,  // UQ...
+  testOnly: false,
+});
+```
+
+Адреса `UQ...` автоматически сигнализируют кошелькам, что нужно использовать `bounce: false`.
 
 ## Изменяемые файлы
 
 | Файл | Изменение |
 |------|-----------|
-| Миграция SQL | Изменить FK constraint |
-| `supabase/functions/delete-campaign/index.ts` | Добавить проверку активных сделок |
+| `src/components/channel/PaymentStep.tsx` | Добавить `bounce: false` в сообщение транзакции |
+| `src/components/deals/PaymentDialog.tsx` | Добавить `bounce: false` в сообщение транзакции |
+| `supabase/functions/create-deal/index.ts` | Генерировать адрес с `bounceable: false` (формат UQ) |
+
+## Важный нюанс
+
+Существующие сделки с адресами `EQ...` продолжат работать благодаря `bounce: false` на фронтенде. Новые сделки будут создаваться с адресами `UQ...` для дополнительной совместимости.
 
 ## Результат
 
-- Удаление кампаний с историческими сделками будет работать
-- Нельзя удалить кампанию если есть активные сделки
-- История сделок сохраняется (campaign_id становится NULL)
+После исправления:
+- Транзакции не будут возвращаться
+- Средства останутся на эскроу-кошельке
+- Система проверки оплаты (`check-escrow-payments`) обнаружит баланс и переведёт сделку в статус `escrow`
