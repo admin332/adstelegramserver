@@ -108,15 +108,30 @@ export function AdminDealsTable() {
   const updateStatus = async (dealId: string, newStatus: DealStatus) => {
     setUpdatingDealId(dealId);
     try {
-      const { error } = await supabase
-        .from('deals')
-        .update({ status: newStatus })
-        .eq('id', dealId);
+      if (newStatus === 'completed') {
+        // Force-complete with payout via Edge Function
+        const { data, error } = await supabase.functions.invoke('admin-complete-deal', {
+          body: { dealId }
+        });
 
-      if (error) throw error;
+        if (error) throw error;
 
-      // If status changed to 'escrow', send notification to channel owner
-      if (newStatus === 'escrow') {
+        toast({
+          title: 'Сделка завершена',
+          description: data?.transferSuccess 
+            ? 'Средства переведены владельцу канала' 
+            : 'Статус обновлён. Средства будут переведены позже.',
+        });
+      } else if (newStatus === 'escrow') {
+        // Update status first
+        const { error } = await supabase
+          .from('deals')
+          .update({ status: newStatus })
+          .eq('id', dealId);
+
+        if (error) throw error;
+
+        // Send notification to channel owner
         const { error: notifyError } = await supabase.functions.invoke('notify-deal-payment', {
           body: { dealId }
         });
@@ -135,6 +150,14 @@ export function AdminDealsTable() {
           });
         }
       } else {
+        // Simple status update
+        const { error } = await supabase
+          .from('deals')
+          .update({ status: newStatus })
+          .eq('id', dealId);
+
+        if (error) throw error;
+
         toast({
           title: 'Статус обновлён',
           description: `Сделка переведена в статус "${STATUS_CONFIG[newStatus].label}"`,
