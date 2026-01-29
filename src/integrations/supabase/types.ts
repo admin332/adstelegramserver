@@ -302,6 +302,8 @@ export type Database = {
         Row: {
           advertiser_id: string
           author_draft: string | null
+          author_draft_entities: Json | null
+          author_draft_media: Json | null
           author_draft_media_urls: Json | null
           campaign_id: string | null
           cancellation_reason: string | null
@@ -330,6 +332,8 @@ export type Database = {
         Insert: {
           advertiser_id: string
           author_draft?: string | null
+          author_draft_entities?: Json | null
+          author_draft_media?: Json | null
           author_draft_media_urls?: Json | null
           campaign_id?: string | null
           cancellation_reason?: string | null
@@ -358,6 +362,8 @@ export type Database = {
         Update: {
           advertiser_id?: string
           author_draft?: string | null
+          author_draft_entities?: Json | null
+          author_draft_media?: Json | null
           author_draft_media_urls?: Json | null
           campaign_id?: string | null
           cancellation_reason?: string | null

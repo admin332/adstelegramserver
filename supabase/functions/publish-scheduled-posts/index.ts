@@ -17,6 +17,10 @@ interface Deal {
   channel_id: string;
   advertiser_id: string;
   scheduled_at: string;
+  author_draft?: string;
+  author_draft_entities?: object[];
+  author_draft_media?: MediaItem[];
+  author_draft_media_urls?: string[];
 }
 
 interface Campaign {
@@ -36,6 +40,11 @@ interface Channel {
 interface Advertiser {
   telegram_id: number;
   first_name: string;
+}
+
+interface MediaItem {
+  type: 'photo' | 'video';
+  file_id: string;
 }
 
 async function sendTelegramRequest(method: string, body: Record<string, unknown>) {
@@ -61,6 +70,76 @@ function isVideo(url: string): boolean {
   return videoExtensions.some(ext => lowerUrl.includes(ext));
 }
 
+// Publish prompt campaign draft using file_id and entities (preserves formatting and premium emoji)
+async function publishDraftToChannel(
+  chatId: number,
+  text: string,
+  entities: object[],
+  media: MediaItem[],
+  buttonText?: string | null,
+  buttonUrl?: string | null
+): Promise<number> {
+  const replyMarkup = buttonText && buttonUrl
+    ? { inline_keyboard: [[{ text: buttonText, url: buttonUrl }]] }
+    : undefined;
+
+  // No media - just send text with entities
+  if (!media || media.length === 0) {
+    const result = await sendTelegramRequest("sendMessage", {
+      chat_id: chatId,
+      text,
+      entities: entities.length > 0 ? entities : undefined,
+      reply_markup: replyMarkup,
+    });
+    return result.result.message_id;
+  }
+
+  // Single media - use file_id
+  if (media.length === 1) {
+    const item = media[0];
+    const method = item.type === 'video' ? 'sendVideo' : 'sendPhoto';
+    const mediaKey = item.type === 'video' ? 'video' : 'photo';
+    
+    const result = await sendTelegramRequest(method, {
+      chat_id: chatId,
+      [mediaKey]: item.file_id,
+      caption: text || undefined,
+      caption_entities: entities.length > 0 ? entities : undefined,
+      reply_markup: replyMarkup,
+    });
+    return result.result.message_id;
+  }
+
+  // Multiple media - use sendMediaGroup with file_id
+  const mediaGroup = media.map((item, index) => ({
+    type: item.type,
+    media: item.file_id,
+    ...(index === 0 && text ? { 
+      caption: text, 
+      caption_entities: entities.length > 0 ? entities : undefined 
+    } : {}),
+  }));
+
+  const result = await sendTelegramRequest("sendMediaGroup", {
+    chat_id: chatId,
+    media: mediaGroup,
+  });
+  
+  const firstMessageId = result.result[0].message_id;
+
+  // Send button separately if exists (can't attach to media group)
+  if (replyMarkup) {
+    await sendTelegramRequest("sendMessage", {
+      chat_id: chatId,
+      text: "👆",
+      reply_markup: replyMarkup,
+    });
+  }
+  
+  return firstMessageId;
+}
+
+// Publish ready_post campaign using URLs (legacy method)
 async function publishToChannel(chatId: number, campaign: Campaign): Promise<number> {
   const { text, media_urls, button_text, button_url } = campaign;
   
@@ -172,7 +251,7 @@ async function notifyAdvertiser(
   }
 }
 
-async function processDeal(deal: Deal & { author_draft?: string; author_draft_media_urls?: string[] }): Promise<{ success: boolean; error?: string }> {
+async function processDeal(deal: Deal): Promise<{ success: boolean; error?: string }> {
   console.log(`Processing deal ${deal.id}...`);
 
   try {
@@ -209,25 +288,27 @@ async function processDeal(deal: Deal & { author_draft?: string; author_draft_me
       console.error("Failed to get advertiser:", advertiserError);
     }
 
-    // For prompt campaigns, use author's draft; otherwise use campaign content
+    let messageId: number;
     const isPromptCampaign = campaign.campaign_type === "prompt";
-    const textToPost = isPromptCampaign && deal.author_draft 
-      ? deal.author_draft 
-      : campaign.text;
-    const mediaToPost = isPromptCampaign && deal.author_draft_media_urls?.length 
-      ? deal.author_draft_media_urls 
-      : campaign.media_urls;
 
-    const publishContent: Campaign = {
-      text: textToPost,
-      media_urls: mediaToPost || null,
-      button_text: campaign.button_text,
-      button_url: campaign.button_url,
-      campaign_type: campaign.campaign_type,
-    };
-
-    // Publish to channel and get message ID
-    const messageId = await publishToChannel(channel.telegram_chat_id, publishContent);
+    // For prompt campaigns, use author's draft with file_id and entities
+    if (isPromptCampaign && deal.author_draft) {
+      console.log(`Publishing prompt campaign draft for deal ${deal.id} with file_id and entities`);
+      
+      messageId = await publishDraftToChannel(
+        channel.telegram_chat_id,
+        deal.author_draft,
+        deal.author_draft_entities || [],
+        deal.author_draft_media || [],
+        null, // Prompt campaigns don't use buttons (link is embedded in text)
+        null
+      );
+    } else {
+      // For ready_post campaigns, use campaign content with URLs
+      console.log(`Publishing ready_post campaign for deal ${deal.id}`);
+      
+      messageId = await publishToChannel(channel.telegram_chat_id, campaign);
+    }
 
     // Update deal - keep in_progress, set posted_at and telegram_message_id
     const { error: updateError } = await supabase
@@ -252,7 +333,7 @@ async function processDeal(deal: Deal & { author_draft?: string; author_draft_me
       );
     }
 
-    console.log(`Deal ${deal.id} published successfully`);
+    console.log(`Deal ${deal.id} published successfully with message_id ${messageId}`);
     return { success: true };
   } catch (error) {
     console.error(`Error processing deal ${deal.id}:`, error);
@@ -271,7 +352,7 @@ Deno.serve(async (req) => {
     // Get all in_progress deals where scheduled_at has passed
     const { data: deals, error: dealsError } = await supabase
       .from("deals")
-      .select("id, campaign_id, channel_id, advertiser_id, scheduled_at, author_draft, author_draft_media_urls")
+      .select("id, campaign_id, channel_id, advertiser_id, scheduled_at, author_draft, author_draft_entities, author_draft_media, author_draft_media_urls")
       .eq("status", "in_progress")
       .is("posted_at", null)
       .not("scheduled_at", "is", null)
