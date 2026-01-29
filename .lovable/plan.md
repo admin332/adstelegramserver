@@ -1,69 +1,74 @@
 
-# Исправление bounce-проблемы с неинициализированным эскроу-кошельком
+# Исправление ошибки TonConnect SDK при оплате
 
 ## Проблема
 
-При оплате на эскроу-адрес транзакция возвращается (bounce) потому что:
-- Адрес кошелька вычислен, но контракт ещё не развёрнут в блокчейне
-- По умолчанию TonConnect использует `bounce: true`
-- TON сеть возвращает средства, если получатель "пустой"
+После добавления `bounce: false` в объект сообщения транзакции, TonConnect SDK выбрасывает ошибку `BadRequestError`. Это происходит потому что параметр `bounce` **не входит в официальный интерфейс** `SendTransactionRequest`.
+
+Согласно типам SDK, сообщение поддерживает только:
+- `address` — адрес получателя
+- `amount` — сумма в nanoTon
+- `stateInit` — данные контракта
+- `payload` — полезная нагрузка
+- `extraCurrency` — дополнительные валюты
+
+## Как TonConnect определяет bounce-флаг
+
+Кошельки (Tonkeeper, MyTonWallet и др.) автоматически определяют bounce на основе **формата адреса**:
+
+| Формат | Префикс | Bounce |
+|--------|---------|--------|
+| Bounceable | `EQ...` | `true` |
+| Non-bounceable | `UQ...` | `false` |
+
+Мы уже генерируем адреса в формате `UQ...` на бэкенде — этого достаточно!
 
 ## Решение
 
-Применяем **оба способа** для максимальной надёжности:
+Убрать параметр `bounce: false` из объекта сообщения транзакции на фронтенде. Кошелёк автоматически определит `bounce: false` по адресу `UQ...`.
 
-### 1. Frontend: добавить `bounce: false` в транзакцию
+### Изменения в файлах
 
-В компонентах `PaymentStep.tsx` и `PaymentDialog.tsx` добавить флаг:
-
-```typescript
-const transaction = {
-  validUntil: Math.floor(Date.now() / 1000) + 600,
-  messages: [
-    {
-      address: escrowAddress,
-      amount: amountNano,
-      bounce: false  // <-- Разрешить отправку на неинициализированный адрес
-    }
-  ]
-};
-```
-
-### 2. Backend: генерировать Non-bounceable адрес (UQ...)
-
-В `create-deal/index.ts` изменить формат адреса:
-
+**src/components/channel/PaymentStep.tsx**
 ```typescript
 // Было:
-const address = wallet.address.toString({
-  bounceable: true,  // EQ...
-  testOnly: false,
-});
+{
+  address: escrowAddress,
+  amount: amountNano,
+  bounce: false, // Разрешить отправку на неинициализированный эскроу-адрес
+} as any,
 
 // Станет:
-const address = wallet.address.toString({
-  bounceable: false,  // UQ...
-  testOnly: false,
-});
+{
+  address: escrowAddress,
+  amount: amountNano,
+},
 ```
 
-Адреса `UQ...` автоматически сигнализируют кошелькам, что нужно использовать `bounce: false`.
+**src/components/deals/PaymentDialog.tsx**
+```typescript
+// Было:
+{
+  address: escrowAddress,
+  amount: amountNano,
+  bounce: false, // Разрешить отправку на неинициализированный эскроу-адрес
+} as any,
 
-## Изменяемые файлы
+// Станет:
+{
+  address: escrowAddress,
+  amount: amountNano,
+},
+```
 
-| Файл | Изменение |
-|------|-----------|
-| `src/components/channel/PaymentStep.tsx` | Добавить `bounce: false` в сообщение транзакции |
-| `src/components/deals/PaymentDialog.tsx` | Добавить `bounce: false` в сообщение транзакции |
-| `supabase/functions/create-deal/index.ts` | Генерировать адрес с `bounceable: false` (формат UQ) |
+## Почему это работает
 
-## Важный нюанс
+1. Бэкенд (`create-deal`) уже генерирует адреса в формате `UQ...` (`bounceable: false`)
+2. Кошелёк видит `UQ...` адрес и автоматически отправляет транзакцию с `bounce: false`
+3. Средства успешно зачисляются на неинициализированный эскроу-кошелёк
 
-Существующие сделки с адресами `EQ...` продолжат работать благодаря `bounce: false` на фронтенде. Новые сделки будут создаваться с адресами `UQ...` для дополнительной совместимости.
+## Проверка после исправления
 
-## Результат
-
-После исправления:
-- Транзакции не будут возвращаться
-- Средства останутся на эскроу-кошельке
-- Система проверки оплаты (`check-escrow-payments`) обнаружит баланс и переведёт сделку в статус `escrow`
+1. Создать новую сделку — адрес должен начинаться с `UQ`
+2. Нажать "Оплатить" — Tonkeeper откроется без ошибок
+3. Подтвердить транзакцию — средства останутся на эскроу
