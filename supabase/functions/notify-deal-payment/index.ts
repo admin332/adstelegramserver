@@ -13,6 +13,7 @@ interface Deal {
   duration_hours: number;
   scheduled_at: string | null;
   campaign: {
+    campaign_type: string;
     text: string;
     media_urls: string[] | null;
     button_text: string | null;
@@ -55,6 +56,28 @@ function isVideoUrl(url: string): boolean {
   const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
   const lowerUrl = url.toLowerCase();
   return videoExtensions.some(ext => lowerUrl.includes(ext));
+}
+
+// Send prompt brief to channel owner (for prompt campaigns)
+async function sendPromptBrief(telegramId: number, campaign: Deal['campaign']) {
+  if (!campaign) return;
+  
+  const { text, button_url } = campaign;
+  
+  let briefMessage = `📋 <b>Бриф от рекламодателя:</b>\n\n${text}`;
+  
+  if (button_url) {
+    briefMessage += `\n\n🔗 <b>Референс:</b> ${button_url}`;
+  }
+  
+  briefMessage += `\n\n✍️ <b>Напишите пост по этому брифу</b>\nОтправьте текст и медиа в этот чат.`;
+  
+  await sendTelegramRequest("sendMessage", {
+    chat_id: telegramId,
+    text: briefMessage,
+    parse_mode: "HTML",
+    disable_web_page_preview: false,
+  });
 }
 
 // Send campaign preview to owner
@@ -246,7 +269,7 @@ serve(async (req) => {
         posts_count,
         duration_hours,
         scheduled_at,
-        campaign:campaigns(text, media_urls, button_text, button_url),
+        campaign:campaigns(campaign_type, text, media_urls, button_text, button_url),
         channel:channels(
           id,
           title,
@@ -278,8 +301,15 @@ serve(async (req) => {
       );
     }
 
-    // 1. Send campaign preview
-    await sendCampaignPreview(ownerTelegramId, typedDeal.campaign);
+    // Determine campaign type and send appropriate message
+    const isPromptCampaign = typedDeal.campaign?.campaign_type === "prompt";
+    
+    // 1. Send campaign preview or brief based on campaign type
+    if (isPromptCampaign) {
+      await sendPromptBrief(ownerTelegramId, typedDeal.campaign);
+    } else {
+      await sendCampaignPreview(ownerTelegramId, typedDeal.campaign);
+    }
     
     // Small delay to ensure messages arrive in order
     await new Promise(resolve => setTimeout(resolve, 500));

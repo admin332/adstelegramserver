@@ -378,6 +378,8 @@ export const CreateCampaignForm = ({ onBack, onComplete, editingCampaign }: Crea
                   <Label>Ссылки</Label>
                   <Input
                     placeholder="https://example.com"
+                    value={campaignData.button_url}
+                    onChange={(e) => setCampaignData({ ...campaignData, button_url: e.target.value })}
                     className="bg-card border-0"
                   />
                   <p className="text-xs text-muted-foreground">
