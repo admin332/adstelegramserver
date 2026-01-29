@@ -1,25 +1,31 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
-interface TestModeValue {
+interface SettingValue {
   enabled: boolean;
 }
 
 export function useAppSettings() {
   const [testModeEnabled, setTestModeEnabled] = useState(false);
+  const [stickerEnabled, setStickerEnabled] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchTestMode = useCallback(async () => {
+  const fetchSettings = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('app_settings')
-        .select('value')
-        .eq('key', 'test_mode')
-        .maybeSingle();
+        .select('key, value')
+        .in('key', ['test_mode', 'animated_sticker']);
       
-      if (!error && data?.value) {
-        const value = data.value as unknown as TestModeValue;
-        setTestModeEnabled(value.enabled ?? false);
+      if (!error && data) {
+        data.forEach(setting => {
+          const value = setting.value as unknown as SettingValue;
+          if (setting.key === 'test_mode') {
+            setTestModeEnabled(value.enabled ?? false);
+          } else if (setting.key === 'animated_sticker') {
+            setStickerEnabled(value.enabled ?? true);
+          }
+        });
       }
     } catch (err) {
       console.error('Error fetching app settings:', err);
@@ -49,9 +55,37 @@ export function useAppSettings() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchTestMode();
-  }, [fetchTestMode]);
+  const updateStickerEnabled = useCallback(async (enabled: boolean) => {
+    try {
+      const { error } = await supabase
+        .from('app_settings')
+        .update({ 
+          value: { enabled },
+          updated_at: new Date().toISOString() 
+        })
+        .eq('key', 'animated_sticker');
+      
+      if (!error) {
+        setStickerEnabled(enabled);
+        return { error: null };
+      }
+      return { error };
+    } catch (err) {
+      console.error('Error updating sticker setting:', err);
+      return { error: err };
+    }
+  }, []);
 
-  return { testModeEnabled, isLoading, updateTestMode, refetch: fetchTestMode };
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
+  return { 
+    testModeEnabled, 
+    stickerEnabled,
+    isLoading, 
+    updateTestMode, 
+    updateStickerEnabled,
+    refetch: fetchSettings 
+  };
 }
