@@ -64,9 +64,9 @@ async function generateEscrowWallet(): Promise<{ address: string; mnemonic: stri
     workchain: 0,
   });
   
-  // Получаем адрес в формате EQ (Bounceable) — понимают все кошельки
+  // Получаем адрес в формате UQ (Non-bounceable) — для неинициализированных кошельков
   const address = wallet.address.toString({
-    bounceable: true,
+    bounceable: false,
     testOnly: false,
   });
   
