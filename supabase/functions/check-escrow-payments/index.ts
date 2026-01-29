@@ -13,20 +13,26 @@ interface Deal {
   posts_count: number;
   duration_hours: number;
   scheduled_at: string | null;
+  advertiser_id: string;
   campaign: {
     text: string;
     media_urls: string[] | null;
     button_text: string | null;
     button_url: string | null;
+    campaign_type: string;
   } | null;
   channel: {
     id: string;
     title: string;
+    username: string;
     telegram_chat_id: number;
     owner_id: string;
     owner: {
       telegram_id: number;
     };
+  };
+  advertiser: {
+    telegram_id: number;
   };
 }
 
@@ -85,7 +91,7 @@ function isVideoUrl(url: string): boolean {
   return videoExtensions.some(ext => lowerUrl.includes(ext));
 }
 
-// Send campaign preview to owner
+// Send campaign preview to telegram user
 async function sendCampaignPreview(telegramId: number, campaign: Deal['campaign']) {
   if (!campaign) return;
   
@@ -204,8 +210,8 @@ function formatDate(dateStr: string | null): string {
   return `${day}.${month}.${year} в ${hour}:${minute}`;
 }
 
-// Send payment notification with approve/reject buttons
-async function sendPaymentNotification(deal: Deal) {
+// Send payment notification to CHANNEL OWNER with approve/reject buttons
+async function sendOwnerNotification(deal: Deal) {
   const ownerTelegramId = deal.channel.owner.telegram_id;
   
   if (!ownerTelegramId) {
@@ -213,18 +219,66 @@ async function sendPaymentNotification(deal: Deal) {
     return;
   }
 
-  // Message 1: Campaign preview
-  await sendCampaignPreview(ownerTelegramId, deal.campaign);
+  const isPromptCampaign = deal.campaign?.campaign_type === "prompt";
+
+  // For ready_post campaigns: send preview first
+  if (!isPromptCampaign) {
+    await sendCampaignPreview(ownerTelegramId, deal.campaign);
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
   
-  // Small delay to ensure messages arrive in order
-  await new Promise(resolve => setTimeout(resolve, 500));
-  
-  // Message 2: Notification with buttons
   const formattedDate = formatDate(deal.scheduled_at);
   const postsWord = getPostsWord(deal.posts_count);
   const hoursWord = getHoursWord(deal.duration_hours);
   
-  const notificationText = `✅ <b>Реклама оплачена!</b>
+  let notificationText: string;
+  
+  if (isPromptCampaign) {
+    // Prompt campaign: owner needs to write the post
+    notificationText = `✅ <b>Реклама оплачена!</b>
+
+📢 Канал: <b>${deal.channel.title || deal.channel.username}</b>
+
+Рекламодатель оплатил <b>${deal.posts_count} ${postsWord}</b> на <b>${deal.duration_hours} ${hoursWord}</b>
+
+📅 Публикация: <b>${formattedDate}</b>
+
+💰 Вы получите: <b>${deal.total_price} TON</b>
+
+📝 <b>Это заказ по брифу</b> — вам нужно написать пост самостоятельно.
+
+Отправьте мне текст поста (можно с фото/видео), и я перешлю его рекламодателю на проверку.`;
+
+    await sendTelegramRequest("sendMessage", {
+      chat_id: ownerTelegramId,
+      text: notificationText,
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "❌ Отклонить заказ", callback_data: `reject_deal:${deal.id}` }]
+        ]
+      }
+    });
+
+    // Send brief as separate message
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    const briefText = `📋 <b>Бриф от рекламодателя:</b>
+
+${deal.campaign?.text || "Бриф не указан"}${deal.campaign?.button_text && deal.campaign?.button_url ? `
+
+🔗 Кнопка: <b>${deal.campaign.button_text}</b>
+Ссылка: ${deal.campaign.button_url}` : ""}`;
+
+    await sendTelegramRequest("sendMessage", {
+      chat_id: ownerTelegramId,
+      text: briefText,
+      parse_mode: "HTML",
+    });
+
+  } else {
+    // Ready post campaign: standard flow
+    notificationText = `✅ <b>Реклама оплачена!</b>
 
 Рекламодатель оплатил <b>${deal.posts_count} ${postsWord}</b> на <b>${deal.duration_hours} ${hoursWord}</b>
 
@@ -234,21 +288,99 @@ async function sendPaymentNotification(deal: Deal) {
 
 Проверьте материалы выше и нажмите «Одобрить» для публикации или откройте бот и предложите изменения.`;
 
-  await sendTelegramRequest("sendMessage", {
-    chat_id: ownerTelegramId,
-    text: notificationText,
-    parse_mode: "HTML",
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "✅ Одобрить", callback_data: `approve_deal:${deal.id}` },
-          { text: "❌ Отклонить", callback_data: `reject_deal:${deal.id}` }
+    await sendTelegramRequest("sendMessage", {
+      chat_id: ownerTelegramId,
+      text: notificationText,
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "✅ Одобрить", callback_data: `approve_deal:${deal.id}` },
+            { text: "❌ Отклонить", callback_data: `reject_deal:${deal.id}` }
+          ]
         ]
-      ]
-    }
-  });
+      }
+    });
+  }
   
-  console.log(`Sent payment notification for deal ${deal.id} to user ${ownerTelegramId}`);
+  console.log(`Sent owner notification for deal ${deal.id} to user ${ownerTelegramId}`);
+}
+
+// Send payment confirmation to ADVERTISER
+async function sendAdvertiserConfirmation(deal: Deal) {
+  const advertiserTelegramId = deal.advertiser.telegram_id;
+  
+  if (!advertiserTelegramId) {
+    console.error(`No telegram_id found for advertiser of deal ${deal.id}`);
+    return;
+  }
+
+  const isPromptCampaign = deal.campaign?.campaign_type === "prompt";
+  const formattedDate = formatDate(deal.scheduled_at);
+  const postsWord = getPostsWord(deal.posts_count);
+  const hoursWord = getHoursWord(deal.duration_hours);
+  const channelName = deal.channel.title || `@${deal.channel.username}`;
+
+  let notificationText: string;
+
+  if (isPromptCampaign) {
+    // Prompt campaign: advertiser will receive draft for review
+    notificationText = `💳 <b>Оплата прошла успешно!</b>
+
+📢 Канал: <b>${channelName}</b>
+📦 Заказ: <b>${deal.posts_count} ${postsWord}</b> на <b>${deal.duration_hours} ${hoursWord}</b>
+📅 Публикация: <b>${formattedDate}</b>
+💰 Сумма: <b>${deal.total_price} TON</b>
+
+📝 <b>Тип кампании:</b> По брифу
+
+Автор канала напишет пост по вашему брифу и пришлёт на проверку. Вы сможете одобрить или попросить доработку.`;
+
+    await sendTelegramRequest("sendMessage", {
+      chat_id: advertiserTelegramId,
+      text: notificationText,
+      parse_mode: "HTML",
+    });
+
+    // Send brief reminder
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    const briefText = `📋 <b>Ваш бриф:</b>
+
+${deal.campaign?.text || "Бриф не указан"}${deal.campaign?.button_text && deal.campaign?.button_url ? `
+
+🔗 Кнопка: <b>${deal.campaign.button_text}</b>
+Ссылка: ${deal.campaign.button_url}` : ""}`;
+
+    await sendTelegramRequest("sendMessage", {
+      chat_id: advertiserTelegramId,
+      text: briefText,
+      parse_mode: "HTML",
+    });
+
+  } else {
+    // Ready post: show preview and confirmation
+    notificationText = `💳 <b>Оплата прошла успешно!</b>
+
+📢 Канал: <b>${channelName}</b>
+📦 Заказ: <b>${deal.posts_count} ${postsWord}</b> на <b>${deal.duration_hours} ${hoursWord}</b>
+📅 Публикация: <b>${formattedDate}</b>
+💰 Сумма: <b>${deal.total_price} TON</b>
+
+Ожидаем подтверждения от владельца канала. Вы получите уведомление, когда пост будет опубликован.`;
+
+    // Send preview first
+    await sendCampaignPreview(advertiserTelegramId, deal.campaign);
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    await sendTelegramRequest("sendMessage", {
+      chat_id: advertiserTelegramId,
+      text: notificationText,
+      parse_mode: "HTML",
+    });
+  }
+
+  console.log(`Sent advertiser confirmation for deal ${deal.id} to user ${advertiserTelegramId}`);
 }
 
 serve(async (req) => {
@@ -290,14 +422,17 @@ serve(async (req) => {
         posts_count,
         duration_hours,
         scheduled_at,
-        campaign:campaigns(text, media_urls, button_text, button_url),
+        advertiser_id,
+        campaign:campaigns(text, media_urls, button_text, button_url, campaign_type),
         channel:channels(
           id,
           title,
+          username,
           telegram_chat_id,
           owner_id,
           owner:users!channels_owner_id_fkey(telegram_id)
-        )
+        ),
+        advertiser:users!deals_advertiser_id_fkey(telegram_id)
       `)
       .eq('status', 'pending')
       .gte('expires_at', now)
@@ -352,14 +487,22 @@ serve(async (req) => {
 
         console.log(`Deal ${deal.id} status updated to 'escrow'`);
 
-        // 4. Send notification to channel owner
+        // 4. Send notification to CHANNEL OWNER
         try {
-          await sendPaymentNotification(deal);
+          await sendOwnerNotification(deal);
+        } catch (notifyError) {
+          console.error(`Error sending owner notification for deal ${deal.id}:`, notifyError);
+        }
+
+        // 5. Send confirmation to ADVERTISER
+        try {
+          await sendAdvertiserConfirmation(deal);
           results.push({ dealId: deal.id, status: 'success', balance: balanceTon });
           processedCount++;
         } catch (notifyError) {
-          console.error(`Error sending notification for deal ${deal.id}:`, notifyError);
-          results.push({ dealId: deal.id, status: 'notified_failed', balance: balanceTon });
+          console.error(`Error sending advertiser confirmation for deal ${deal.id}:`, notifyError);
+          results.push({ dealId: deal.id, status: 'owner_notified_only', balance: balanceTon });
+          processedCount++;
         }
       } else {
         results.push({ dealId: deal.id, status: 'insufficient_balance', balance: balanceTon });
