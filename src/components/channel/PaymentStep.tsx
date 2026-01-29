@@ -60,8 +60,9 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
         {
           address: escrowAddress,
           amount: amountNano,
-        }
-      ]
+          bounce: false, // Разрешить отправку на неинициализированный эскроу-адрес
+        } as any,
+      ],
     };
     
     try {
