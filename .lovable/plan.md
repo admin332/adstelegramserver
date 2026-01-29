@@ -1,111 +1,72 @@
 
 
-# Исправление расшифровки мнемоники для перевода средств
+# Исправление: добавить ссылку на товар в бриф для prompt кампаний
 
 ## Проблема
 
-Функции `admin-complete-deal` и `complete-posted-deals` используют неправильный алгоритм расшифровки мнемоники. 
+При уведомлении владельца канала о **prompt** кампании не отображается ссылка на товар (Product Link), которую рекламодатель добавил при создании кампании.
 
-**Формат хранения** (в `create-deal`):
-```
-iv_hex:authTag_hex:encrypted_hex
-```
+**Причина:** В `check-escrow-payments` условие проверяет `button_text && button_url`, но для prompt кампаний `button_text` не заполняется — только `button_url`.
 
-**Что ожидает расшифровка** (сейчас):
-```
-base64(iv + ciphertext + authTag)
-```
+## Сравнение текущего кода
 
-Из-за этого `atob()` падает с ошибкой `Failed to decode base64`.
+| Файл | Условие | Результат |
+|------|---------|-----------|
+| `notify-deal-payment` | `if (button_url)` | ✅ Ссылка показывается |
+| `check-escrow-payments` | `button_text && button_url` | ❌ Ссылка НЕ показывается |
 
 ## Решение
 
-Переписать функцию `decryptMnemonic` с правильной логикой:
-
-1. Разделить строку по `:`
-2. Декодировать IV, authTag и encrypted из hex
-3. Использовать `SubtleCrypto.decrypt()` с AES-256-GCM
-4. Вернуть массив слов мнемоники
+Исправить условие в `check-escrow-payments` для prompt кампаний — показывать ссылку даже без текста кнопки.
 
 ## Изменения
 
-### 1. Исправить `decryptMnemonic` в обеих Edge Functions
+### Файл: `supabase/functions/check-escrow-payments/index.ts`
 
+Заменить формирование брифа (строки 266-271):
+
+**Было:**
 ```typescript
-async function decryptMnemonic(encryptedData: string): Promise<string[]> {
-  try {
-    const ENCRYPTION_KEY = Deno.env.get("ENCRYPTION_KEY")!;
-    
-    // Формат: iv:authTag:encrypted (все в hex)
-    const parts = encryptedData.split(":");
-    if (parts.length !== 3) {
-      console.error("Invalid encrypted format - expected 3 parts separated by ':'");
-      return [];
-    }
-    
-    const [ivHex, authTagHex, encryptedHex] = parts;
-    
-    // Декодируем из hex
-    const iv = new Uint8Array(ivHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-    const authTag = new Uint8Array(authTagHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-    const encrypted = new Uint8Array(encryptedHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-    
-    // Собираем ciphertext + authTag для SubtleCrypto
-    const ciphertextWithTag = new Uint8Array(encrypted.length + authTag.length);
-    ciphertextWithTag.set(encrypted);
-    ciphertextWithTag.set(authTag, encrypted.length);
-    
-    // Импортируем ключ
-    const keyBuffer = new Uint8Array(ENCRYPTION_KEY.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-    const cryptoKey = await crypto.subtle.importKey(
-      "raw",
-      keyBuffer,
-      { name: "AES-GCM" },
-      false,
-      ["decrypt"]
-    );
-    
-    // Расшифровываем
-    const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv },
-      cryptoKey,
-      ciphertextWithTag
-    );
-    
-    const mnemonicString = new TextDecoder().decode(decrypted);
-    return mnemonicString.split(" ");
-  } catch (error) {
-    console.error("Decryption error:", error);
-    return [];
+const briefText = `📋 <b>Бриф от рекламодателя:</b>
+
+${deal.campaign?.text || "Бриф не указан"}${deal.campaign?.button_text && deal.campaign?.button_url ? `
+
+🔗 Кнопка: <b>${deal.campaign.button_text}</b>
+Ссылка: ${deal.campaign.button_url}` : ""}`;
+```
+
+**Станет:**
+```typescript
+let briefText = `📋 <b>Бриф от рекламодателя:</b>
+
+${deal.campaign?.text || "Бриф не указан"}`;
+
+// Для prompt кампаний - показываем ссылку на товар (Product Link)
+if (deal.campaign?.button_url) {
+  if (deal.campaign?.button_text) {
+    // Есть и текст кнопки и ссылка (ready_post)
+    briefText += `\n\n🔗 Кнопка: <b>${deal.campaign.button_text}</b>\nСсылка: ${deal.campaign.button_url}`;
+  } else {
+    // Только ссылка (prompt кампания - Product Link)
+    briefText += `\n\n🔗 <b>Ссылка на товар:</b> ${deal.campaign.button_url}`;
   }
 }
 ```
 
-### 2. Обновить вызовы функции
+## Результат
 
-Сделать функцию `async` и добавить `await`:
+**Сообщение владельцу канала для prompt кампании:**
+```
+📋 Бриф от рекламодателя:
 
-```typescript
-// Было
-const mnemonicWords = decryptMnemonic(encryptedMnemonic);
+[Текст брифа]
 
-// Станет
-const mnemonicWords = await decryptMnemonic(encryptedMnemonic);
+🔗 Ссылка на товар: https://example.com/product
 ```
 
 ## Файлы к изменению
 
 | Файл | Изменение |
 |------|-----------|
-| `supabase/functions/admin-complete-deal/index.ts` | Исправить `decryptMnemonic` |
-| `supabase/functions/admin-cancel-deal/index.ts` | Исправить `decryptMnemonic` |
-| `supabase/functions/complete-posted-deals/index.ts` | Исправить `decryptMnemonic` |
-| `supabase/functions/auto-refund-expired-deals/index.ts` | Исправить `decryptMnemonic` (если есть) |
-
-## Результат
-
-После исправления:
-- Админ меняет статус на "Завершено" → средства сразу переводятся владельцу
-- Автоматическое завершение сделок работает корректно
-- Рефанды при отмене работают корректно
+| `supabase/functions/check-escrow-payments/index.ts` | Исправить условие показа ссылки в брифе |
 
