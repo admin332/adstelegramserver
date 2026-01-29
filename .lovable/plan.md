@@ -1,11 +1,22 @@
 
-# Интеграция MTProto для детальной статистики каналов
 
-## Статус: Требуется VPS
+# MTProto в Deno Edge Function с использованием mtcute
 
-Supabase Edge Functions **не поддерживают** библиотеки типа `grm` (MTProto) из-за ограничений на импорт внешних модулей с сетевыми зависимостями (`--allow-import` флаг недоступен).
+## Обзор
 
-## Текущая реализация
+Реализую получение статистики каналов через MTProto **напрямую в Edge Function** используя библиотеку `mtcute` — современный TypeScript клиент для Telegram, который поддерживает Deno.
+
+## Почему mtcute вместо grm?
+
+| Аспект | grm | mtcute |
+|--------|-----|--------|
+| Поддержка | Заброшен (v0.1.4) | Активная разработка (v0.27+) |
+| JSR | Нет | Да (`jsr:@mtcute/deno`) |
+| Deno совместимость | Частичная | Полная |
+| Конвертация сессий | Нет | Есть `@mtcute/convert` |
+| MemoryStorage | Нужен workaround | Встроенный |
+
+## Архитектура
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
@@ -14,186 +25,126 @@ Supabase Edge Functions **не поддерживают** библиотеки �
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│            refresh-channel-stats (Edge Function)            │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │  1. Базовая статистика через Bot API + скрапинг    │   │
-│  │  2. Попытка вызвать MTProto VPS (если настроен)    │   │
-│  │  3. Обновление БД со всеми данными                  │   │
-│  └─────────────────────────────────────────────────────┘   │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
 │           mtproto-channel-stats (Edge Function)             │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  Прокси к VPS (если MTPROTO_VPS_URL настроен)       │   │
-│  │  Иначе возвращает setupRequired: true               │   │
+│  │  mtcute TelegramClient                               │   │
+│  │  - MemoryStorage (без файловой системы)              │   │
+│  │  - importSession() из GramJS формата                 │   │
+│  │  - tg.call({ _: 'channels.getFullChannel' })        │   │
+│  │  - tg.call({ _: 'stats.getBroadcastStats' })        │   │
 │  └─────────────────────────────────────────────────────┘   │
 └────────────────────────┬────────────────────────────────────┘
-                         │ HTTPS
+                         │ MTProto (encrypted)
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│           MTProto VPS (ТРЕБУЕТСЯ НАСТРОЙКА)                 │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │  Node.js + GramJS                                    │   │
-│  │  - StringSession авторизация                        │   │
-│  │  - channels.GetFullChannel                          │   │
-│  │  - stats.GetBroadcastStats                          │   │
-│  └─────────────────────────────────────────────────────┘   │
+│                   Telegram DC Servers                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Следующие шаги для полной интеграции
+## Данные из MTProto API
 
-### 1. Купить VPS
+| Метод | Данные |
+|-------|--------|
+| `channels.getFullChannel` | subscribers_count, about, linked_chat, stats_dc |
+| `stats.getBroadcastStats` | languages_graph, growth_graph, top_hours_graph, enabled_notifications, views_per_post |
 
-| Провайдер | План | Цена | Рекомендация |
-|-----------|------|------|--------------|
-| **Hetzner** | CX11 | ~€4/мес | ✅ Лучший выбор |
-| **Contabo** | VPS S | ~€5/мес | Больше ресурсов |
-| **DigitalOcean** | Basic | $6/мес | Простота |
+## Реализация
 
-### 2. Развернуть MTProto сервис на VPS
+### 1. Обновить `supabase/functions/mtproto-channel-stats/deno.json`
 
-```bash
-# SSH на VPS
-ssh root@your-vps-ip
-
-# Установить Node.js
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-
-# Создать проект
-mkdir mtproto-stats && cd mtproto-stats
-npm init -y
-npm install telegram gramjs express dotenv
-```
-
-### 3. Создать сервис (server.js)
-
-```javascript
-const express = require("express");
-const { TelegramClient, Api } = require("telegram");
-const { StringSession } = require("telegram/sessions");
-
-const app = express();
-
-const apiId = parseInt(process.env.TG_API_ID);
-const apiHash = process.env.TG_API_HASH;
-const sessionString = process.env.TG_SESSION;
-const apiSecret = process.env.API_SECRET;
-
-let client;
-
-async function initClient() {
-  client = new TelegramClient(
-    new StringSession(sessionString),
-    apiId,
-    apiHash,
-    { connectionRetries: 5 }
-  );
-  await client.connect();
-  console.log("MTProto connected");
-}
-
-// Проверка API ключа
-app.use((req, res, next) => {
-  const key = req.headers["x-api-key"];
-  if (key !== apiSecret) {
-    return res.status(401).json({ error: "Unauthorized" });
+```json
+{
+  "imports": {
+    "@mtcute/deno": "jsr:@mtcute/deno@^0.27.0",
+    "@mtcute/convert": "jsr:@mtcute/convert@^0.27.0",
+    "@mtcute/core": "jsr:@mtcute/core@^0.27.0"
   }
-  next();
-});
-
-// Получить статистику канала
-app.get("/stats/:username", async (req, res) => {
-  try {
-    const { username } = req.params;
-    
-    const result = await client.invoke(
-      new Api.channels.GetFullChannel({ channel: username })
-    );
-    
-    const fullChat = result.fullChat;
-    
-    let stats = null;
-    if (fullChat.participantsCount >= 500 && fullChat.canViewStats) {
-      try {
-        stats = await client.invoke(
-          new Api.stats.GetBroadcastStats({ channel: username, dark: false })
-        );
-      } catch (e) {
-        console.log("Stats not available:", e.message);
-      }
-    }
-    
-    res.json({
-      success: true,
-      channel: {
-        title: result.chats[0]?.title,
-        participantsCount: fullChat.participantsCount,
-        about: fullChat.about,
-        canViewStats: fullChat.canViewStats,
-      },
-      stats: stats ? {
-        followers: stats.followers,
-        viewsPerPost: stats.viewsPerPost,
-        enabledNotifications: stats.enabledNotifications,
-        languagesGraph: stats.languagesGraph,
-        topHoursGraph: stats.topHoursGraph,
-      } : null,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.listen(3000, () => {
-  console.log("API running on port 3000");
-  initClient();
-});
-```
-
-### 4. Настроить HTTPS (Caddy рекомендуется)
-
-```bash
-sudo apt install caddy
-
-# /etc/caddy/Caddyfile
-mtproto.yourdomain.com {
-    reverse_proxy localhost:3000
 }
-
-sudo systemctl restart caddy
 ```
 
-### 5. Добавить секреты в Lovable Cloud
+### 2. Полностью переписать `supabase/functions/mtproto-channel-stats/index.ts`
 
-| Секрет | Описание |
-|--------|----------|
-| `MTPROTO_VPS_URL` | `https://mtproto.yourdomain.com` |
-| `MTPROTO_VPS_SECRET` | Случайный ключ 32+ символа |
+Основные изменения:
+- Импорт `TelegramClient` из `@mtcute/deno`
+- Импорт `convertFromGramjsSession` для конвертации текущей сессии
+- Использование `MemoryStorage` для serverless окружения
+- Импорт сессии через `tg.importSession()`
+- Вызов `tg.call({ _: 'channels.getFullChannel', channel: username })`
+- Вызов `tg.call({ _: 'stats.getBroadcastStats', channel: ..., dark: false })`
+- Обработка ошибки `STATS_MIGRATE` для переключения DC
+- Парсинг графиков (languages, top_hours, growth)
 
-После добавления секретов, Edge Function `mtproto-channel-stats` автоматически начнёт проксировать запросы к VPS.
+```typescript
+// Пример структуры кода
+import { TelegramClient, MemoryStorage } from "jsr:@mtcute/deno@^0.27.0";
+import { convertFromGramjsSession } from "jsr:@mtcute/convert@^0.27.0";
 
-## Уже настроенные секреты
+const tg = new TelegramClient({
+  apiId: parseInt(Deno.env.get("MTPROTO_API_ID")!),
+  apiHash: Deno.env.get("MTPROTO_API_HASH")!,
+  storage: new MemoryStorage(),
+});
 
-- ✅ `MTPROTO_API_ID` - 32035706
-- ✅ `MTPROTO_API_HASH` - настроен
-- ✅ `MTPROTO_SESSION` - настроен (для VPS)
+// Конвертируем и импортируем GramJS сессию
+const gramjsSession = Deno.env.get("MTPROTO_SESSION")!;
+await tg.importSession(convertFromGramjsSession(gramjsSession));
 
-## Поля БД для MTProto данных
+// Получаем полную информацию о канале
+const fullChannel = await tg.call({
+  _: "channels.getFullChannel",
+  channel: { _: "inputChannel", channelId: ..., accessHash: ... },
+});
 
-Таблица `channels` уже содержит нужные поля:
-- `language_stats` - jsonb
-- `growth_rate` - numeric
-- `notifications_enabled` - numeric
-- `top_hours` - jsonb
+// Получаем статистику (для каналов 500+)
+const stats = await tg.call({
+  _: "stats.getBroadcastStats",
+  channel: ...,
+  dark: false,
+});
+```
 
-## Результат после настройки VPS
+### 3. Обработка STATS_MIGRATE
 
-ChannelAnalytics будет отображать **реальные данные**:
-- ✅ Языки аудитории (из languages_graph)
-- ✅ Прирост подписчиков (growth_rate)
-- ✅ % включённых уведомлений
-- ✅ Пиковые часы активности
+Telegram может вернуть ошибку `STATS_MIGRATE_X`, требующую подключения к другому DC. mtcute автоматически обрабатывает миграцию DC.
+
+### 4. Парсинг графиков
+
+Создам функции для парсинга:
+- `parseLanguagesGraph()` — языки аудитории
+- `parseTopHoursGraph()` — активность по часам
+- `parseFollowersGraph()` — прирост подписчиков
+
+## Ограничения и решения
+
+| Проблема | Решение |
+|----------|---------|
+| Cold start (загрузка mtcute) | 3-5 секунд первый запрос |
+| Edge Function timeout | 60 сек достаточно |
+| Статистика недоступна (<500 подписчиков) | Возвращаем null, используем fallback |
+| Session expiration | Обработка ошибок, переавторизация |
+
+## Файлы к изменению
+
+| Файл | Действие |
+|------|----------|
+| `supabase/functions/mtproto-channel-stats/deno.json` | Обновить — mtcute зависимости |
+| `supabase/functions/mtproto-channel-stats/index.ts` | Переписать — mtcute клиент |
+
+## Секреты
+
+Уже добавлены:
+- `MTPROTO_API_ID` — 32035706
+- `MTPROTO_API_HASH` — 6036cd3cb12e15ff119e92cb62f4c3b5  
+- `MTPROTO_SESSION` — GramJS StringSession
+
+## Результат
+
+После реализации Edge Function будет:
+1. Подключаться к Telegram через MTProto
+2. Резолвить канал по username
+3. Получать полную информацию (`channels.getFullChannel`)
+4. Получать статистику (`stats.getBroadcastStats`) для каналов 500+
+5. Возвращать парсенные данные: языки, top hours, growth rate, notifications enabled
+
+`ChannelAnalytics` будет отображать **реальные данные** вместо "Примерно".
+
