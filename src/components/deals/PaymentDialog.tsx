@@ -77,8 +77,7 @@ export function PaymentDialog({
           {
             address: escrowAddress,
             amount: amountNano,
-            bounce: false, // Разрешить отправку на неинициализированный эскроу-адрес
-          } as any,
+          },
         ],
       });
       
