@@ -122,6 +122,20 @@ export function AdminDealsTable() {
             ? 'Средства переведены владельцу канала' 
             : 'Статус обновлён. Средства будут переведены позже.',
         });
+      } else if (newStatus === 'cancelled') {
+        // Cancel with refund via Edge Function
+        const { data, error } = await supabase.functions.invoke('admin-cancel-deal', {
+          body: { dealId }
+        });
+
+        if (error) throw error;
+
+        toast({
+          title: 'Сделка отменена',
+          description: data?.refundSuccess 
+            ? 'Средства возвращены рекламодателю' 
+            : 'Статус обновлён',
+        });
       } else if (newStatus === 'escrow') {
         // Update status first
         const { error } = await supabase

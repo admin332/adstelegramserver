@@ -86,3 +86,6 @@ verify_jwt = false
 
 [functions.admin-complete-deal]
 verify_jwt = false
+
+[functions.admin-cancel-deal]
+verify_jwt = false
