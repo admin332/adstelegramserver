@@ -10,6 +10,7 @@ import { TgsSticker } from "@/components/TgsSticker";
 import { mockChannels } from "@/data/mockChannels";
 import { useFavorites } from "@/hooks/useFavorites";
 import { useChannels } from "@/hooks/useChannels";
+import { useAppSettings } from "@/hooks/useAppSettings";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TrendingUp, Users, Heart, DollarSign, ArrowUpDown } from "lucide-react";
 import animatedSticker from "@/assets/stickers/animated-sticker.tgs";
@@ -27,6 +28,7 @@ const Index = () => {
   const [sortBy, setSortBy] = useState<SortOption>("subscribers");
   const { favorites, toggleFavorite, isFavorite } = useFavorites();
   const { data: dbChannels, isLoading } = useChannels();
+  const { stickerEnabled } = useAppSettings();
   const [stickerReady, setStickerReady] = useState(false);
   
   // Use real channels if available, fallback to mock
@@ -192,7 +194,7 @@ const Index = () => {
             ) : filteredChannels.length > 0 ? (
               filteredChannels.map((channel, index) => (
                 <div key={channel.id} className="relative">
-                  {index === 0 && (
+                  {index === 0 && stickerEnabled && (
                     <div 
                       className={`absolute -top-20 left-1/2 translate-x-8 z-0 pointer-events-none 
                         transition-all duration-500 ease-out

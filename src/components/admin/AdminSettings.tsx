@@ -1,12 +1,12 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { Settings, Shield, Bell, Database, FlaskConical, Loader2 } from 'lucide-react';
+import { Settings, Shield, Bell, Database, FlaskConical, Loader2, Sparkles } from 'lucide-react';
 import { useAppSettings } from '@/hooks/useAppSettings';
 import { toast } from 'sonner';
 
 export function AdminSettings() {
-  const { testModeEnabled, isLoading, updateTestMode } = useAppSettings();
+  const { testModeEnabled, stickerEnabled, isLoading, updateTestMode, updateStickerEnabled } = useAppSettings();
 
   const handleTestModeChange = async (enabled: boolean) => {
     const { error } = await updateTestMode(enabled);
@@ -14,6 +14,15 @@ export function AdminSettings() {
       toast.error('Ошибка при изменении настройки');
     } else {
       toast.success(enabled ? 'Тестовый режим включён' : 'Тестовый режим выключен');
+    }
+  };
+
+  const handleStickerChange = async (enabled: boolean) => {
+    const { error } = await updateStickerEnabled(enabled);
+    if (error) {
+      toast.error('Ошибка при изменении настройки');
+    } else {
+      toast.success(enabled ? 'Анимированный стикер включён' : 'Анимированный стикер выключен');
     }
   };
 
@@ -42,6 +51,25 @@ export function AdminSettings() {
               <Switch
                 checked={testModeEnabled}
                 onCheckedChange={handleTestModeChange}
+              />
+            )}
+          </div>
+          <div className="flex items-center justify-between p-4 rounded-lg bg-background/50 border border-border/50">
+            <div className="flex items-start gap-3">
+              <Sparkles className="h-5 w-5 text-primary mt-0.5" />
+              <div>
+                <p className="font-medium text-foreground">Анимированный стикер</p>
+                <p className="text-sm text-muted-foreground">
+                  Показывать TGS-анимацию над первой карточкой канала на главной странице
+                </p>
+              </div>
+            </div>
+            {isLoading ? (
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            ) : (
+              <Switch
+                checked={stickerEnabled}
+                onCheckedChange={handleStickerChange}
               />
             )}
           </div>
