@@ -1,4 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { mnemonicToPrivateKey } from "@ton/crypto";
+import { WalletContractV4, TonClient, internal, SendMode } from "@ton/ton";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,8 +10,116 @@ const corsHeaders = {
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const ENCRYPTION_KEY = Deno.env.get("ENCRYPTION_KEY")!;
+const TONCENTER_API_KEY = Deno.env.get("TONCENTER_API_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// Initialize TON client
+const tonClient = new TonClient({
+  endpoint: "https://toncenter.com/api/v2/jsonRPC",
+  apiKey: TONCENTER_API_KEY,
+});
+
+// Decrypt AES-256-GCM encrypted mnemonic
+async function decryptMnemonic(encryptedData: string): Promise<string[]> {
+  try {
+    const parts = encryptedData.split(":");
+    if (parts.length !== 3) {
+      console.error("Invalid encrypted format - expected 3 parts separated by ':'");
+      return [];
+    }
+    
+    const [ivHex, authTagHex, encryptedHex] = parts;
+    
+    const iv = new Uint8Array(ivHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const authTag = new Uint8Array(authTagHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const encrypted = new Uint8Array(encryptedHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    
+    const ciphertextWithTag = new Uint8Array(encrypted.length + authTag.length);
+    ciphertextWithTag.set(encrypted);
+    ciphertextWithTag.set(authTag, encrypted.length);
+    
+    const keyBuffer = new Uint8Array(ENCRYPTION_KEY.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      keyBuffer,
+      { name: "AES-GCM" },
+      false,
+      ["decrypt"]
+    );
+    
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv },
+      cryptoKey,
+      ciphertextWithTag
+    );
+    
+    const mnemonicString = new TextDecoder().decode(decrypted);
+    console.log("Mnemonic decrypted successfully");
+    return mnemonicString.split(" ");
+  } catch (error) {
+    console.error("Decryption error:", error);
+    return [];
+  }
+}
+
+// Refund TON from escrow wallet to advertiser
+async function refundToAdvertiser(
+  encryptedMnemonic: string,
+  advertiserWalletAddress: string,
+  amount: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    console.log(`Initiating refund of ${amount} TON to ${advertiserWalletAddress}`);
+    
+    const mnemonicWords = await decryptMnemonic(encryptedMnemonic);
+    
+    if (mnemonicWords.length === 0) {
+      console.error("Could not decrypt mnemonic - manual refund required");
+      return { success: false, error: "Decryption failed" };
+    }
+    
+    const keyPair = await mnemonicToPrivateKey(mnemonicWords);
+    
+    const wallet = WalletContractV4.create({ 
+      publicKey: keyPair.publicKey, 
+      workchain: 0 
+    });
+    const contract = tonClient.open(wallet);
+    
+    const balance = await contract.getBalance();
+    const networkFee = BigInt(0.02 * 1_000_000_000);
+    const refundAmount = balance - networkFee;
+    
+    if (refundAmount <= 0n) {
+      return { success: false, error: "Insufficient balance for refund" };
+    }
+    
+    const seqno = await contract.getSeqno();
+    await contract.sendTransfer({
+      seqno,
+      secretKey: keyPair.secretKey,
+      sendMode: SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS,
+      messages: [
+        internal({
+          to: advertiserWalletAddress,
+          value: refundAmount,
+          body: "Adsingo refund - deal rejected by owner",
+        }),
+      ],
+    });
+    
+    console.log(`Refund initiated: ${refundAmount} nanoTON to ${advertiserWalletAddress}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Refund error:", error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : "Unknown refund error" 
+    };
+  }
+}
 
 // Store for tracking users waiting for draft input
 // Format: { telegramId: { dealId: string, step: 'awaiting_draft' | 'awaiting_revision' } }
@@ -633,9 +743,10 @@ async function handleDealRejection(callbackQueryId: string, dealId: string, from
     return;
   }
 
+  // Fetch deal with escrow_mnemonic_encrypted for refund
   const { data: deal } = await supabase
     .from("deals")
-    .select("id, status, channel_id, advertiser_id, total_price")
+    .select("id, status, channel_id, advertiser_id, total_price, escrow_mnemonic_encrypted")
     .eq("id", dealId)
     .single();
 
@@ -689,24 +800,51 @@ async function handleDealRejection(callbackQueryId: string, dealId: string, from
   // Remove buttons
   await editMessageReplyMarkup(message.chat.id, message.message_id);
 
-  // Notify advertiser
+  // Get advertiser info with wallet for refund
   const { data: advertiser } = await supabase
     .from("users")
-    .select("telegram_id")
+    .select("telegram_id, wallet_address")
     .eq("id", deal.advertiser_id)
     .single();
 
+  // Perform refund if escrow was paid
+  let refundSuccess = false;
+  if (advertiser?.wallet_address && deal.escrow_mnemonic_encrypted) {
+    const refundResult = await refundToAdvertiser(
+      deal.escrow_mnemonic_encrypted,
+      advertiser.wallet_address,
+      deal.total_price
+    );
+    refundSuccess = refundResult.success;
+    
+    if (!refundSuccess) {
+      console.error(`Refund failed for deal ${deal.id}:`, refundResult.error);
+    }
+  } else {
+    console.log(`No wallet or escrow mnemonic for deal ${deal.id} - skipping refund`);
+  }
+
+  // Notify advertiser with refund status
   if (advertiser?.telegram_id) {
     const channelName = channel?.title || `@${channel?.username}`;
+    const refundNote = refundSuccess
+      ? `\n\n💰 Возврат: <b>${deal.total_price} TON</b> отправлен на ваш кошелёк.`
+      : `\n\n💰 Средства (<b>${deal.total_price} TON</b>) будут возвращены в ближайшее время.`;
+    
     await sendTelegramMessage(
       advertiser.telegram_id,
-      `❌ <b>Заказ отклонён</b>\n\nВладелец канала <b>${channelName}</b> отклонил вашу рекламу.\n\n💰 Средства (<b>${deal.total_price} TON</b>) будут возвращены автоматически.`
+      `❌ <b>Заказ отклонён</b>\n\nВладелец канала <b>${channelName}</b> отклонил вашу рекламу.${refundNote}`
     );
   }
 
-  await sendTelegramMessage(from.id, "❌ <b>Заказ отклонён</b>\n\nСредства будут возвращены рекламодателю.");
+  // Notify owner
+  const ownerMessage = refundSuccess
+    ? "❌ <b>Заказ отклонён</b>\n\nСредства возвращены рекламодателю."
+    : "❌ <b>Заказ отклонён</b>\n\nСредства будут возвращены рекламодателю.";
+  await sendTelegramMessage(from.id, ownerMessage);
+  
   await answerCallbackQuery(callbackQueryId, "Заказ отклонён");
-  console.log(`Deal ${dealId} rejected by owner`);
+  console.log(`Deal ${dealId} rejected by owner, refund: ${refundSuccess}`);
 }
 
 // Handle ratings

@@ -1,11 +1,119 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createHmac } from "node:crypto";
+import { mnemonicToPrivateKey } from "@ton/crypto";
+import { WalletContractV4, TonClient, internal, SendMode } from "@ton/ton";
+
+const ENCRYPTION_KEY = Deno.env.get("ENCRYPTION_KEY")!;
+const TONCENTER_API_KEY = Deno.env.get("TONCENTER_API_KEY")!;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Initialize TON client
+const tonClient = new TonClient({
+  endpoint: "https://toncenter.com/api/v2/jsonRPC",
+  apiKey: TONCENTER_API_KEY,
+});
+
+// Decrypt AES-256-GCM encrypted mnemonic
+async function decryptMnemonic(encryptedData: string): Promise<string[]> {
+  try {
+    const parts = encryptedData.split(":");
+    if (parts.length !== 3) {
+      console.error("Invalid encrypted format");
+      return [];
+    }
+    
+    const [ivHex, authTagHex, encryptedHex] = parts;
+    
+    const iv = new Uint8Array(ivHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const authTag = new Uint8Array(authTagHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const encrypted = new Uint8Array(encryptedHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    
+    const ciphertextWithTag = new Uint8Array(encrypted.length + authTag.length);
+    ciphertextWithTag.set(encrypted);
+    ciphertextWithTag.set(authTag, encrypted.length);
+    
+    const keyBuffer = new Uint8Array(ENCRYPTION_KEY.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      keyBuffer,
+      { name: "AES-GCM" },
+      false,
+      ["decrypt"]
+    );
+    
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv },
+      cryptoKey,
+      ciphertextWithTag
+    );
+    
+    return new TextDecoder().decode(decrypted).split(" ");
+  } catch (error) {
+    console.error("Decryption error:", error);
+    return [];
+  }
+}
+
+// Refund TON from escrow wallet to advertiser
+async function refundToAdvertiser(
+  encryptedMnemonic: string,
+  advertiserWalletAddress: string,
+  amount: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    console.log(`Initiating refund of ${amount} TON to ${advertiserWalletAddress}`);
+    
+    const mnemonicWords = await decryptMnemonic(encryptedMnemonic);
+    
+    if (mnemonicWords.length === 0) {
+      return { success: false, error: "Decryption failed" };
+    }
+    
+    const keyPair = await mnemonicToPrivateKey(mnemonicWords);
+    
+    const wallet = WalletContractV4.create({ 
+      publicKey: keyPair.publicKey, 
+      workchain: 0 
+    });
+    const contract = tonClient.open(wallet);
+    
+    const balance = await contract.getBalance();
+    const networkFee = BigInt(0.02 * 1_000_000_000);
+    const refundAmount = balance - networkFee;
+    
+    if (refundAmount <= 0n) {
+      return { success: false, error: "Insufficient balance for refund" };
+    }
+    
+    const seqno = await contract.getSeqno();
+    await contract.sendTransfer({
+      seqno,
+      secretKey: keyPair.secretKey,
+      sendMode: SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS,
+      messages: [
+        internal({
+          to: advertiserWalletAddress,
+          value: refundAmount,
+          body: "Adsingo refund - deal rejected",
+        }),
+      ],
+    });
+    
+    console.log(`Refund initiated: ${refundAmount} nanoTON`);
+    return { success: true };
+  } catch (error) {
+    console.error("Refund error:", error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : "Unknown error" 
+    };
+  }
+}
 
 // Validate Telegram initData
 function validateTelegramData(initData: string, botToken: string): { valid: boolean; user?: any } {
@@ -135,7 +243,7 @@ serve(async (req) => {
 
     const userId = dbUser.id;
 
-    // Fetch deal with channel info
+    // Fetch deal with channel info and escrow data for refund
     const { data: deal, error: dealError } = await supabase
       .from("deals")
       .select(`
@@ -147,6 +255,7 @@ serve(async (req) => {
         total_price,
         posts_count,
         duration_hours,
+        escrow_mnemonic_encrypted,
         channel:channels(id, title, username)
       `)
       .eq("id", dealId)
@@ -182,10 +291,10 @@ serve(async (req) => {
       );
     }
 
-    // Get advertiser info for notification
+    // Get advertiser info for notification and refund
     const { data: advertiser } = await supabase
       .from("users")
-      .select("telegram_id, first_name")
+      .select("telegram_id, first_name, wallet_address")
       .eq("id", deal.advertiser_id)
       .maybeSingle();
 
@@ -232,7 +341,11 @@ serve(async (req) => {
       // Update deal status to cancelled
       const { error: updateError } = await supabase
         .from("deals")
-        .update({ status: "cancelled", updated_at: new Date().toISOString() })
+        .update({ 
+          status: "cancelled", 
+          cancellation_reason: "owner_rejected",
+          updated_at: new Date().toISOString() 
+        })
         .eq("id", dealId);
 
       if (updateError) {
@@ -243,21 +356,39 @@ serve(async (req) => {
         );
       }
 
-      // Notify advertiser
+      // Perform refund if escrow was paid
+      let refundSuccess = false;
+      if (advertiser?.wallet_address && deal.escrow_mnemonic_encrypted) {
+        const refundResult = await refundToAdvertiser(
+          deal.escrow_mnemonic_encrypted,
+          advertiser.wallet_address,
+          deal.total_price
+        );
+        refundSuccess = refundResult.success;
+        
+        if (!refundSuccess) {
+          console.error(`Refund failed for deal ${deal.id}:`, refundResult.error);
+        }
+      }
+
+      // Notify advertiser with refund status
       if (advertiser?.telegram_id) {
+        const refundNote = refundSuccess
+          ? `\n\n💰 Возврат: <b>${deal.total_price} TON</b> отправлен на ваш кошелёк.`
+          : `\n\n💰 Средства будут возвращены в ближайшее время.`;
+        
         await sendTelegramMessage(
           botToken,
           advertiser.telegram_id,
           `❌ <b>Реклама отклонена</b>\n\n` +
-          `Канал: ${channelTitle}\n\n` +
-          `Средства будут возвращены на ваш кошелёк.`
+          `Канал: ${channelTitle}${refundNote}`
         );
       }
 
-      // TODO: Initiate refund process
+      console.log(`Deal ${dealId} rejected, refund: ${refundSuccess}`);
 
       return new Response(
-        JSON.stringify({ success: true, message: "Deal rejected" }),
+        JSON.stringify({ success: true, message: "Deal rejected", refundSuccess }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
