@@ -1,10 +1,11 @@
 
-# Интеграция MTProto через Deno Edge Function
+# Интеграция MTProto для детальной статистики каналов
 
-## Цель
-Получать детальную статистику каналов через MTProto API прямо в Edge Function, используя уже имеющуюся сессию и ключи API.
+## Статус: Требуется VPS
 
-## Архитектура
+Supabase Edge Functions **не поддерживают** библиотеки типа `grm` (MTProto) из-за ограничений на импорт внешних модулей с сетевыми зависимостями (`--allow-import` флаг недоступен).
+
+## Текущая реализация
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
@@ -15,204 +16,184 @@
 ┌─────────────────────────────────────────────────────────────┐
 │            refresh-channel-stats (Edge Function)            │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  1. Проверка свежести данных (< 24ч)                │   │
-│  │  2. Вызов mtproto-channel-stats                     │   │
-│  │  3. Обновление БД                                    │   │
+│  │  1. Базовая статистика через Bot API + скрапинг    │   │
+│  │  2. Попытка вызвать MTProto VPS (если настроен)    │   │
+│  │  3. Обновление БД со всеми данными                  │   │
 │  └─────────────────────────────────────────────────────┘   │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│           mtproto-channel-stats (новая Edge Function)       │
+│           mtproto-channel-stats (Edge Function)             │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  GRM (Deno MTProto client)                          │   │
-│  │  - StringSession (сохранённая авторизация)           │   │
-│  │  - channels.GetFullChannel                          │   │
-│  │  - stats.GetBroadcastStats (для каналов 500+)       │   │
+│  │  Прокси к VPS (если MTPROTO_VPS_URL настроен)       │   │
+│  │  Иначе возвращает setupRequired: true               │   │
 │  └─────────────────────────────────────────────────────┘   │
 └────────────────────────┬────────────────────────────────────┘
-                         │ MTProto (encrypted)
+                         │ HTTPS
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   Telegram DC Servers                       │
+│           MTProto VPS (ТРЕБУЕТСЯ НАСТРОЙКА)                 │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  Node.js + GramJS                                    │   │
+│  │  - StringSession авторизация                        │   │
+│  │  - channels.GetFullChannel                          │   │
+│  │  - stats.GetBroadcastStats                          │   │
+│  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Данные из MTProto API
+## Следующие шаги для полной интеграции
 
-| Метод | Данные |
-|-------|--------|
-| `channels.GetFullChannel` | subscribers_count, about, linked_chat, stats_dc |
-| `stats.GetBroadcastStats` | languages_graph, growth_graph, top_hours_graph, enabled_notifications |
+### 1. Купить VPS
 
-**Важно:** Статистика `GetBroadcastStats` доступна только для каналов с **500+ подписчиков**.
+| Провайдер | План | Цена | Рекомендация |
+|-----------|------|------|--------------|
+| **Hetzner** | CX11 | ~€4/мес | ✅ Лучший выбор |
+| **Contabo** | VPS S | ~€5/мес | Больше ресурсов |
+| **DigitalOcean** | Basic | $6/мес | Простота |
 
-## Реализация
+### 2. Развернуть MTProto сервис на VPS
 
-### 1. Добавить секреты в Lovable Cloud
+```bash
+# SSH на VPS
+ssh root@your-vps-ip
 
-| Секрет | Значение |
-|--------|----------|
-| `MTPROTO_API_ID` | `32035706` |
-| `MTPROTO_API_HASH` | `6036cd3cb12e15ff119e92cb62f4c3b5` |
-| `MTPROTO_SESSION` | Строка сессии (которую ты предоставил) |
+# Установить Node.js
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
 
-### 2. Создать Edge Function `mtproto-channel-stats`
+# Создать проект
+mkdir mtproto-stats && cd mtproto-stats
+npm init -y
+npm install telegram gramjs express dotenv
+```
 
-Файл: `supabase/functions/mtproto-channel-stats/index.ts`
+### 3. Создать сервис (server.js)
 
-```typescript
-import { TelegramClient, Api } from "https://deno.land/x/grm@0.6.0/mod.ts";
-import { StringSession } from "https://deno.land/x/grm@0.6.0/sessions/mod.ts";
+```javascript
+const express = require("express");
+const { TelegramClient, Api } = require("telegram");
+const { StringSession } = require("telegram/sessions");
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+const app = express();
 
-// Парсинг графика языков
-function parseLanguagesGraph(graph: any): { language: string; percentage: number }[] {
-  if (!graph?.json?.data) return [];
-  // Структура: { columns: [[name, ...values]], names: {id: label} }
-  // ...логика парсинга
-}
+const apiId = parseInt(process.env.TG_API_ID);
+const apiHash = process.env.TG_API_HASH;
+const sessionString = process.env.TG_SESSION;
+const apiSecret = process.env.API_SECRET;
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+let client;
 
-  const { username } = await req.json();
-  
-  const apiId = parseInt(Deno.env.get("MTPROTO_API_ID")!);
-  const apiHash = Deno.env.get("MTPROTO_API_HASH")!;
-  const sessionString = Deno.env.get("MTPROTO_SESSION")!;
-
-  const client = new TelegramClient(
+async function initClient() {
+  client = new TelegramClient(
     new StringSession(sessionString),
     apiId,
-    apiHash
+    apiHash,
+    { connectionRetries: 5 }
   );
-
   await client.connect();
+  console.log("MTProto connected");
+}
 
-  // 1. GetFullChannel - базовая информация
-  const fullChannel = await client.invoke(
-    new Api.channels.GetFullChannel({ channel: username })
-  );
-
-  // 2. GetBroadcastStats - расширенная статистика (500+ подписчиков)
-  let broadcastStats = null;
-  try {
-    broadcastStats = await client.invoke(
-      new Api.stats.GetBroadcastStats({ channel: username, dark: false })
-    );
-  } catch (e) {
-    console.log("Stats not available (need 500+ subscribers):", e.message);
+// Проверка API ключа
+app.use((req, res, next) => {
+  const key = req.headers["x-api-key"];
+  if (key !== apiSecret) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
+  next();
+});
 
-  await client.disconnect();
+// Получить статистику канала
+app.get("/stats/:username", async (req, res) => {
+  try {
+    const { username } = req.params;
+    
+    const result = await client.invoke(
+      new Api.channels.GetFullChannel({ channel: username })
+    );
+    
+    const fullChat = result.fullChat;
+    
+    let stats = null;
+    if (fullChat.participantsCount >= 500 && fullChat.canViewStats) {
+      try {
+        stats = await client.invoke(
+          new Api.stats.GetBroadcastStats({ channel: username, dark: false })
+        );
+      } catch (e) {
+        console.log("Stats not available:", e.message);
+      }
+    }
+    
+    res.json({
+      success: true,
+      channel: {
+        title: result.chats[0]?.title,
+        participantsCount: fullChat.participantsCount,
+        about: fullChat.about,
+        canViewStats: fullChat.canViewStats,
+      },
+      stats: stats ? {
+        followers: stats.followers,
+        viewsPerPost: stats.viewsPerPost,
+        enabledNotifications: stats.enabledNotifications,
+        languagesGraph: stats.languagesGraph,
+        topHoursGraph: stats.topHoursGraph,
+      } : null,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
-  return new Response(JSON.stringify({
-    success: true,
-    fullChannel: {
-      participantsCount: fullChannel.fullChat.participantsCount,
-      about: fullChannel.fullChat.about,
-      statsDc: fullChannel.fullChat.statsDc,
-    },
-    stats: broadcastStats ? {
-      languageStats: parseLanguagesGraph(broadcastStats.languagesGraph),
-      growthRate: broadcastStats.followers?.current || 0,
-      enabledNotifications: broadcastStats.enabledNotifications?.part || 0,
-      topHours: parseTopHoursGraph(broadcastStats.topHoursGraph),
-    } : null,
-  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+app.listen(3000, () => {
+  console.log("API running on port 3000");
+  initClient();
 });
 ```
 
-### 3. Добавить конфигурацию
+### 4. Настроить HTTPS (Caddy рекомендуется)
 
-Файл: `supabase/functions/mtproto-channel-stats/deno.json`
+```bash
+sudo apt install caddy
 
-```json
-{
-  "imports": {
-    "grm": "https://deno.land/x/grm@0.6.0/mod.ts",
-    "grm/sessions": "https://deno.land/x/grm@0.6.0/sessions/mod.ts"
-  }
+# /etc/caddy/Caddyfile
+mtproto.yourdomain.com {
+    reverse_proxy localhost:3000
 }
+
+sudo systemctl restart caddy
 ```
 
-### 4. Обновить `refresh-channel-stats`
+### 5. Добавить секреты в Lovable Cloud
 
-Добавить вызов MTProto функции после обновления базовых данных:
+| Секрет | Описание |
+|--------|----------|
+| `MTPROTO_VPS_URL` | `https://mtproto.yourdomain.com` |
+| `MTPROTO_VPS_SECRET` | Случайный ключ 32+ символа |
 
-```typescript
-// После получения базовой статистики через Bot API
-// Вызвать MTProto для расширенных данных
-if (channel.username && subscribersCount >= 500) {
-  try {
-    const mtprotoResponse = await fetch(
-      `${supabaseUrl}/functions/v1/mtproto-channel-stats`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: channel.username }),
-      }
-    );
-    const mtprotoData = await mtprotoResponse.json();
-    
-    if (mtprotoData.success && mtprotoData.stats) {
-      languageStats = mtprotoData.stats.languageStats;
-      premiumPercentage = mtprotoData.stats.premiumPercentage;
-      growthRate = mtprotoData.stats.growthRate;
-      topHours = mtprotoData.stats.topHours;
-    }
-  } catch (e) {
-    console.log("[refresh] MTProto stats failed:", e);
-  }
-}
-```
+После добавления секретов, Edge Function `mtproto-channel-stats` автоматически начнёт проксировать запросы к VPS.
 
-### 5. Обновить `supabase/config.toml`
+## Уже настроенные секреты
 
-```toml
-[functions.mtproto-channel-stats]
-verify_jwt = false
-```
+- ✅ `MTPROTO_API_ID` - 32035706
+- ✅ `MTPROTO_API_HASH` - настроен
+- ✅ `MTPROTO_SESSION` - настроен (для VPS)
 
-## Особенности GRM в Edge Functions
+## Поля БД для MTProto данных
 
-| Аспект | Детали |
-|--------|--------|
-| **Cold Start** | 2-4 секунды (загрузка модулей MTProto) |
-| **Таймаут** | По умолчанию 60 сек, достаточно для подключения |
-| **Сессия** | StringSession не требует файловой системы |
-| **DC Миграция** | GRM автоматически обрабатывает STATS_MIGRATE |
+Таблица `channels` уже содержит нужные поля:
+- `language_stats` - jsonb
+- `growth_rate` - numeric
+- `notifications_enabled` - numeric
+- `top_hours` - jsonb
 
-## Ограничения и решения
+## Результат после настройки VPS
 
-| Проблема | Решение |
-|----------|---------|
-| Статистика недоступна (<500 подписчиков) | Fallback на текущий скрапинг t.me |
-| Rate limits Telegram | Кэширование 24 часа, как сейчас |
-| Session expiration | Мониторинг ошибок, переавторизация при необходимости |
-
-## Файлы к созданию/изменению
-
-| Файл | Действие |
-|------|----------|
-| `supabase/functions/mtproto-channel-stats/index.ts` | Создать — MTProto клиент |
-| `supabase/functions/mtproto-channel-stats/deno.json` | Создать — зависимости |
-| `supabase/functions/refresh-channel-stats/index.ts` | Обновить — вызов MTProto |
-| `supabase/config.toml` | Обновить — добавить функцию |
-
-## Результат
-
-После реализации в `ChannelAnalytics` будут отображаться **реальные данные**:
-- Языки аудитории (из `languages_graph`)
-- % Premium пользователей (если доступно в API)
-- Прирост подписчиков (`growth_rate`)  
-- Пиковые часы активности (`top_hours`)
-
-Плашки "Примерно" исчезнут для каналов с реальными данными.
+ChannelAnalytics будет отображать **реальные данные**:
+- ✅ Языки аудитории (из languages_graph)
+- ✅ Прирост подписчиков (growth_rate)
+- ✅ % включённых уведомлений
+- ✅ Пиковые часы активности

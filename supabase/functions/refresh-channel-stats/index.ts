@@ -282,6 +282,12 @@ Deno.serve(async (req) => {
     let avgViews = channel.avg_views || 0;
     let engagement = channel.engagement || 0;
 
+    // MTProto extended stats
+    let languageStats = channel.language_stats || null;
+    let growthRate = channel.growth_rate || null;
+    let notificationsEnabled = channel.notifications_enabled || null;
+    let topHours = channel.top_hours || null;
+
     if (channel.username) {
       const latestMsgId = await findLatestMessageId(channel.username);
       
@@ -296,21 +302,97 @@ Deno.serve(async (req) => {
       } else {
         console.log(`[refresh] Could not find latest message ID for @${channel.username}`);
       }
+
+      // Try to get extended stats via MTProto (for channels with 500+ subscribers)
+      // Note: MTProto requires VPS deployment, so this may return setupRequired: true
+      if (subscribersCount >= 500) {
+        try {
+          console.log(`[refresh] Fetching MTProto stats for @${channel.username}`);
+          
+          const mtprotoResponse = await fetch(
+            `${supabaseUrl}/functions/v1/mtproto-channel-stats`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ username: channel.username }),
+            }
+          );
+          
+          const mtprotoData = await mtprotoResponse.json();
+          
+          if (mtprotoData.success) {
+            console.log(`[refresh] MTProto stats received`);
+            
+            // Update subscribers from MTProto if available (more accurate)
+            if (mtprotoData.channel?.participantsCount) {
+              subscribersCount = mtprotoData.channel.participantsCount;
+            }
+            
+            if (mtprotoData.stats) {
+              // Language stats
+              if (mtprotoData.stats.languageStats?.length > 0) {
+                languageStats = mtprotoData.stats.languageStats;
+                console.log(`[refresh] Got ${languageStats.length} language entries`);
+              }
+              
+              // Growth rate
+              if (mtprotoData.stats.followers?.growthRate !== undefined) {
+                growthRate = mtprotoData.stats.followers.growthRate;
+                console.log(`[refresh] Growth rate: ${growthRate}%`);
+              }
+              
+              // Notifications enabled percentage
+              if (mtprotoData.stats.enabledNotifications?.part !== undefined) {
+                notificationsEnabled = mtprotoData.stats.enabledNotifications.part;
+                console.log(`[refresh] Notifications enabled: ${notificationsEnabled}%`);
+              }
+              
+              // Top hours
+              if (mtprotoData.stats.topHours?.length > 0) {
+                topHours = mtprotoData.stats.topHours;
+                console.log(`[refresh] Got top hours data`);
+              }
+            }
+          } else if (mtprotoData.setupRequired) {
+            console.log(`[refresh] MTProto VPS not configured, skipping extended stats`);
+          } else {
+            console.log(`[refresh] MTProto stats failed: ${mtprotoData.error}`);
+          }
+        } catch (e) {
+          console.error("[refresh] MTProto stats error:", e);
+        }
+      }
     }
 
-    // Update channel in database
+    // Update channel in database with all stats including MTProto data
+    const updateData: Record<string, any> = {
+      subscribers_count: subscribersCount,
+      avg_views: avgViews,
+      engagement: engagement,
+      title: title,
+      description: description,
+      avatar_url: avatarUrl,
+      recent_posts_stats: recentPostsStats,
+      stats_updated_at: new Date().toISOString(),
+    };
+
+    // Add MTProto stats if available
+    if (languageStats !== null) {
+      updateData.language_stats = languageStats;
+    }
+    if (growthRate !== null) {
+      updateData.growth_rate = growthRate;
+    }
+    if (notificationsEnabled !== null) {
+      updateData.notifications_enabled = notificationsEnabled;
+    }
+    if (topHours !== null) {
+      updateData.top_hours = topHours;
+    }
+
     const { error: updateError } = await supabase
       .from("channels")
-      .update({
-        subscribers_count: subscribersCount,
-        avg_views: avgViews,
-        engagement: engagement,
-        title: title,
-        description: description,
-        avatar_url: avatarUrl,
-        recent_posts_stats: recentPostsStats,
-        stats_updated_at: new Date().toISOString(),
-      })
+      .update(updateData)
       .eq("id", channel_id);
 
     if (updateError) {
@@ -332,6 +414,10 @@ Deno.serve(async (req) => {
           avg_views: avgViews,
           engagement: engagement,
           recent_posts_stats: recentPostsStats,
+          language_stats: languageStats,
+          growth_rate: growthRate,
+          notifications_enabled: notificationsEnabled,
+          top_hours: topHours,
           stats_updated_at: new Date().toISOString(),
         },
       }),
