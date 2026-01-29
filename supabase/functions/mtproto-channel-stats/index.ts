@@ -1,5 +1,6 @@
-// MTProto channel stats - placeholder for VPS integration
-// NOTE: Full MTProto implementation requires VPS deployment due to Supabase Edge Function limitations
+// MTProto channel stats - VPS proxy required
+// MTProto libraries require native Node.js modules (sqlite, crypto) not available in Deno Edge Functions
+// This function proxies requests to a VPS with the full MTProto implementation
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -67,7 +68,7 @@ Deno.serve(async (req) => {
       JSON.stringify({ 
         success: false, 
         error: "MTProto VPS not configured",
-        message: "MTProto requires a VPS deployment due to Supabase Edge Function limitations. Set MTPROTO_VPS_URL and MTPROTO_VPS_SECRET secrets to enable.",
+        message: "MTProto requires native Node.js modules (sqlite, crypto) not available in Deno Edge Functions. Deploy the VPS service and set MTPROTO_VPS_URL + MTPROTO_VPS_SECRET.",
         setupRequired: true,
       }),
       { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
