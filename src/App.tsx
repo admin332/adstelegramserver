@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import AnimatedBackground from "@/components/ui/animated-background";
 import { AuthProvider } from "@/contexts/AuthContext";
-import { isTelegramMiniApp } from "@/lib/telegram";
+import { isTelegramMiniApp, isMobilePlatform } from "@/lib/telegram";
 import Index from "./pages/Index";
 import Channels from "./pages/Channels";
 import Channel from "./pages/Channel";
@@ -19,10 +19,11 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 const App = () => {
-  const [isTelegram, setIsTelegram] = useState(false);
+  const [showTelegramHeader, setShowTelegramHeader] = useState(false);
 
   useEffect(() => {
-    setIsTelegram(isTelegramMiniApp());
+    // Показываем шапку и отступ только для мобильных Telegram устройств
+    setShowTelegramHeader(isTelegramMiniApp() && isMobilePlatform());
   }, []);
 
   return (
@@ -30,9 +31,9 @@ const App = () => {
       <TooltipProvider>
         <AuthProvider>
           <AnimatedBackground />
-          <div className="app-container relative z-10" style={{ paddingTop: isTelegram ? '2.5rem' : '0' }}>
-            {/* Синий заголовок только для Telegram Mini App */}
-            {isTelegram && (
+          <div className="app-container relative z-10" style={{ paddingTop: showTelegramHeader ? '2.5rem' : '0' }}>
+            {/* Синий заголовок только для мобильного Telegram */}
+            {showTelegramHeader && (
               <div className="fixed top-0 left-0 right-0 h-10 z-50" style={{ backgroundColor: '#1484fb' }} />
             )}
           <Toaster />
