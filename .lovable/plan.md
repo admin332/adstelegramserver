@@ -2,147 +2,149 @@
 
 ## Обзор
 
-Сейчас при добавлении канала MTProto-статистика не запрашивается, а `refresh-channel-stats` срабатывает только если данные старше 24 часов. Для @slixone `stats_updated_at` = сегодня, поэтому MTProto не вызывается и все расширенные поля (`language_stats`, `growth_rate`, `top_hours`, `premium_percentage`) остаются `null`.
+После обновления VPS-сервиса на Railway, формат данных изменился. Нужно адаптировать Edge Functions и фронтенд для корректной обработки нового формата.
+
+---
+
+## Изменения в формате данных VPS
+
+| Поле | Было | Стало |
+|------|------|-------|
+| **notifications** | `enabledNotifications.part` (число) | `notificationsRaw: { part, total }` |
+| **languages** | `languageStats: []` (пустой) | `languageStats: [{ label, value }, ...]` |
+| **growth** | `followers.growthRate` | `growthRate` (напрямую) |
+| **premium** | `premiumPercentage` (undefined) | `premiumStats: [{ x, y0 }, ...]` (график) |
+| **topHours** | `topHours: [{ hour, value }]` | `topHours: [{ x, y0 }, ...]` (формат графика) |
 
 ---
 
 ## Изменения
 
-### 1. verify-channel: Вызов MTProto при добавлении канала
+### 1. verify-channel/index.ts (строки 504-536)
 
-После успешного создания канала вызываем `mtproto-channel-stats` и сразу сохраняем расширенную статистику:
+Адаптировать парсинг нового формата:
 
 ```typescript
-// После создания канала (строка ~487)
-// Fetch MTProto stats immediately for new channels with 500+ subscribers
-if (subscribersCount >= 500) {
-  try {
-    const mtprotoResponse = await fetch(
-      `${supabaseUrl}/functions/v1/mtproto-channel-stats`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: chat.username }),
-      }
-    );
-    const mtprotoData = await mtprotoResponse.json();
-    
-    if (mtprotoData.success && mtprotoData.stats) {
-      // Update channel with MTProto stats
-      await supabase
-        .from("channels")
-        .update({
-          language_stats: mtprotoData.stats.languageStats || null,
-          growth_rate: mtprotoData.stats.followers?.growthRate || null,
-          notifications_enabled: mtprotoData.stats.enabledNotifications?.part || null,
-          top_hours: mtprotoData.stats.topHours || null,
-          premium_percentage: mtprotoData.stats.premiumPercentage || null,
-        })
-        .eq("id", newChannel.id);
-    }
-  } catch (e) {
-    console.log("[verify-channel] MTProto stats fetch failed:", e);
+if (mtprotoData.success && mtprotoData.stats) {
+  const stats = mtprotoData.stats;
+  const updateData: Record<string, unknown> = {};
+  
+  // Language stats: новый формат { label, value } → { language, percentage }
+  if (stats.languageStats && Array.isArray(stats.languageStats) && stats.languageStats.length > 0) {
+    const totalLang = stats.languageStats.reduce((sum, l) => sum + (l.value || 0), 0);
+    updateData.language_stats = stats.languageStats.map(l => ({
+      language: l.label || 'Unknown',
+      percentage: totalLang > 0 ? Math.round((l.value / totalLang) * 100) : 0
+    }));
+  }
+  
+  // Growth rate: теперь напрямую
+  if (stats.growthRate !== undefined) {
+    updateData.growth_rate = stats.growthRate;
+  }
+  
+  // Notifications: новый формат с part/total для точного расчета %
+  if (stats.notificationsRaw) {
+    const { part, total } = stats.notificationsRaw;
+    const percentage = total > 0 ? Math.round((part / total) * 10000) / 100 : 0;
+    updateData.notifications_enabled = percentage;
+  }
+  
+  // Top hours: формат графика { x, y0 } → { hour, value }
+  if (stats.topHours && Array.isArray(stats.topHours) && stats.topHours.length > 0) {
+    updateData.top_hours = stats.topHours.map((h, idx) => ({
+      hour: idx,
+      value: h.y0 || h['y0'] || 0
+    }));
+  }
+  
+  // Premium stats: это график активности, не процент подписчиков
+  // Можно сохранить для будущего отображения
+  if (stats.premiumStats && Array.isArray(stats.premiumStats)) {
+    // Пока не сохраняем - это данные графика, не % премиум подписчиков
+  }
+  
+  // ... остальной код сохранения
+}
+```
+
+---
+
+### 2. refresh-channel-stats/index.ts (строки 331-355)
+
+Аналогичные изменения для обработки нового формата:
+
+```typescript
+if (mtprotoData.stats) {
+  // Languages: { label, value } → { language, percentage }
+  if (mtprotoData.stats.languageStats?.length > 0) {
+    const total = mtprotoData.stats.languageStats.reduce((s, l) => s + (l.value || 0), 0);
+    languageStats = mtprotoData.stats.languageStats.map(l => ({
+      language: l.label || 'Unknown',
+      percentage: total > 0 ? Math.round((l.value / total) * 100) : 0
+    }));
+  }
+  
+  // Growth rate: теперь напрямую
+  if (mtprotoData.stats.growthRate !== undefined) {
+    growthRate = mtprotoData.stats.growthRate;
+  }
+  
+  // Notifications: part/total → percentage
+  if (mtprotoData.stats.notificationsRaw) {
+    const { part, total } = mtprotoData.stats.notificationsRaw;
+    notificationsEnabled = total > 0 ? Math.round((part / total) * 10000) / 100 : 0;
+  }
+  
+  // Top hours: { x, y0 } → { hour, value }
+  if (mtprotoData.stats.topHours?.length > 0) {
+    topHours = mtprotoData.stats.topHours.map((h, idx) => ({
+      hour: idx,
+      value: h.y0 || h['y0'] || 0
+    }));
   }
 }
 ```
 
 ---
 
-### 2. Обновить интерфейс Channel (mockChannels.ts)
+### 3. ChannelAnalytics.tsx
 
-Добавить недостающие поля:
-
-```typescript
-export interface Channel {
-  // ... existing fields ...
-  growthRate?: number;        // % роста подписчиков
-  notificationsEnabled?: number;  // % включенных уведомлений
-  topHours?: Array<{ hour: number; value: number }>;  // Активность по часам
-}
-```
-
----
-
-### 3. Обновить useChannels.ts
-
-Добавить маппинг новых полей из БД:
+Добавить защиту от некорректных значений:
 
 ```typescript
-function mapDatabaseToChannel(dbChannel: DatabaseChannel): Channel {
-  // ... existing mapping ...
-  return {
-    // ... existing fields ...
-    growthRate: dbChannel.growth_rate ?? undefined,
-    notificationsEnabled: dbChannel.notifications_enabled ?? undefined,
-    topHours: parseTopHours(dbChannel.top_hours),
-  };
-}
+// Строка 218-226: ограничить до 100%
+const safeNotifications = Math.min(notificationsEnabled ?? 0, 100);
+// Использовать safeNotifications вместо notificationsEnabled в анимации
 ```
 
 ---
 
-### 4. Обновить ChannelAnalytics компонент
+### 4. Обновить данные @slixone
 
-Добавить отображение реальных данных:
-
-- **Growth Rate** — показывать рост/падение подписчиков за период
-- **Top Hours** — тепловая карта активности аудитории по часам
-- **Notifications Enabled** — процент аудитории с включенными уведомлениями
-
-```tsx
-// Новые пропсы
-interface ChannelAnalyticsProps {
-  // ... existing props ...
-  growthRate?: number;
-  notificationsEnabled?: number;
-  topHours?: Array<{ hour: number; value: number }>;
-}
-```
+После деплоя Edge Functions вызвать `refresh-channel-stats` принудительно для @slixone:
+- Сбросить `stats_updated_at` на старую дату чтобы lazy-update сработал
+- Или вызвать напрямую с параметром force
 
 ---
 
-### 5. Обновить страницу Channel.tsx
-
-Передать новые данные в ChannelAnalytics:
-
-```tsx
-<ChannelAnalytics
-  // ... existing props ...
-  growthRate={channel.growthRate}
-  notificationsEnabled={channel.notificationsEnabled}
-  topHours={channel.topHours}
-/>
-```
-
----
-
-## Порядок изменений
+## Порядок действий
 
 | # | Файл | Действие |
 |---|------|----------|
-| 1 | `supabase/functions/verify-channel/index.ts` | Добавить вызов MTProto после создания канала |
-| 2 | `src/data/mockChannels.ts` | Расширить интерфейс Channel |
-| 3 | `src/hooks/useChannels.ts` | Добавить маппинг новых полей |
-| 4 | `src/components/channel/ChannelAnalytics.tsx` | Добавить секции: Growth Rate, Top Hours, Notifications |
-| 5 | `src/pages/Channel.tsx` | Передать новые данные в компонент |
+| 1 | `supabase/functions/verify-channel/index.ts` | Адаптировать парсинг нового формата VPS |
+| 2 | `supabase/functions/refresh-channel-stats/index.ts` | Адаптировать парсинг нового формата VPS |
+| 3 | `src/components/channel/ChannelAnalytics.tsx` | Добавить защиту от >100% |
+| 4 | База данных | Сбросить stats_updated_at для @slixone |
 
 ---
 
-## Что отобразим в аналитике
+## Итоговый формат данных в БД
 
-| Метрика | Источник | Описание |
-|---------|----------|----------|
-| Language Stats | MTProto | Языки аудитории с процентами |
-| Premium % | MTProto | Доля Premium-подписчиков |
-| Growth Rate | MTProto | Рост/падение за период |
-| Notifications | MTProto | % с включенными уведомлениями |
-| Top Hours | MTProto | Часы максимальной активности |
-
----
-
-## Для @slixone
-
-Для уже добавленных каналов можно:
-1. Вручную вызвать `refresh-channel-stats` с параметром force
-2. Или изменить `stats_updated_at` на старую дату, чтобы lazy-update сработал
+| Поле | Формат | Пример |
+|------|--------|--------|
+| `notifications_enabled` | `number` (процент 0-100) | `4.69` |
+| `language_stats` | `[{ language, percentage }]` | `[{ "language": "Russian", "percentage": 75 }]` |
+| `growth_rate` | `number` (процент) | `-0.23` |
+| `top_hours` | `[{ hour, value }]` | `[{ "hour": 0, "value": 5 }, ...]` |
 
