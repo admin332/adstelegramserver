@@ -1,272 +1,366 @@
 
 
-## Логика выбора кампаний по типу
+## Поддержка нескольких постов для промпт-кампаний
 
-Изменяем поведение выбора кампаний в зависимости от типа рекламы.
-
----
-
-## Правила
-
-| Тип кампании | Количество постов | Требуется кампаний |
-|--------------|-------------------|-------------------|
-| `prompt` | 1, 2, 3... любое | **Всегда 1** |
-| `ready_post` | 1 | 1 |
-| `ready_post` | 2 | 2 |
-| `ready_post` | 3 | 3 |
-
-**Дополнительно для каналов с `acceptedCampaignTypes = 'both'`:**
-- После выбора первой кампании — показываем только кампании того же типа
-- Если выбрана промпт-кампания — больше ничего выбрать нельзя
-- Если выбрана ready_post — промпт-кампании скрываются
+Добавляем логику для отправки и одобрения нескольких черновиков, когда рекламодатель заказывает несколько постов с промпт-кампанией.
 
 ---
 
-## Архитектура изменений
+## Текущая проблема
 
-```text
-OrderDrawer
-    │
-    ├── selectedCampaigns (текущие выбранные)
-    ├── selectedCampaignType (новое состояние: null | 'prompt' | 'ready_post')
-    │
-    ├── Вычисление requiredCount:
-    │   └── if selectedCampaignType === 'prompt' → 1
-    │   └── else → quantity (количество постов)
-    │
-    ├── Фильтрация campaigns:
-    │   └── if selectedCampaignType !== null → только этот тип
-    │   └── else → по acceptedCampaignTypes канала
-    │
-    └── CampaignSelector
-          ├── campaigns (отфильтрованные)
-          ├── requiredCount (динамический)
-          ├── onSelectionChange (с логикой определения типа)
-          └── Обновлённый UI для показа правил
+| Что заказал рекламодатель | Что происходит сейчас | Что должно быть |
+|---------------------------|----------------------|-----------------|
+| 3 поста, промпт-кампания | Владелец получает бриф, шлёт 1 черновик | Владелец должен прислать **3 черновика** |
+| | Рекламодатель одобряет 1 черновик | Рекламодатель одобряет **каждый из 3** |
+| | Публикуется 1 пост | Публикуется **3 поста** |
+
+---
+
+## Текущая структура данных
+
+```sql
+deals:
+  - posts_count: 3           -- количество заказанных постов
+  - author_draft: text       -- ОДИН черновик (текст)
+  - author_draft_entities: jsonb
+  - author_draft_media: jsonb
+  - is_draft_approved: boolean
+```
+
+---
+
+## Новая структура данных
+
+Нужны новые колонки для хранения **массива черновиков**:
+
+```sql
+deals:
+  - posts_count: 3
+  - author_drafts: jsonb     -- МАССИВ черновиков
+  -- Формат:
+  -- [
+  --   { "text": "...", "entities": [...], "media": [...], "approved": null },
+  --   { "text": "...", "entities": [...], "media": [...], "approved": true },
+  --   { "text": "...", "entities": [...], "media": [...], "approved": null }
+  -- ]
+  
+  -- Старые поля оставить для обратной совместимости
+  - author_draft: text (deprecated)
+  - author_draft_entities: jsonb (deprecated)
+  - author_draft_media: jsonb (deprecated)
+  - is_draft_approved: boolean (deprecated)
 ```
 
 ---
 
 ## Файлы для изменения
 
-### 1. `src/components/channel/OrderDrawer.tsx`
+### 1. Миграция базы данных
 
-**Добавить состояние для отслеживания выбранного типа:**
-
-```typescript
-const [selectedCampaignType, setSelectedCampaignType] = useState<string | null>(null);
-```
-
-**Вычислить динамический requiredCount:**
-
-```typescript
-// Для промпта нужна только 1 кампания, для ready_post — по количеству постов
-const requiredCampaignsCount = selectedCampaignType === 'prompt' ? 1 : quantity;
-```
-
-**Обновить фильтрацию кампаний:**
-
-```typescript
-// Фильтруем кампании
-const filteredUserCampaigns = userCampaigns.filter(c => {
-  // Если уже выбран тип — показываем только этот тип
-  if (selectedCampaignType) {
-    return c.campaign_type === selectedCampaignType;
-  }
-  // Иначе фильтруем по настройкам канала
-  if (acceptedCampaignTypes === 'both') return true;
-  return c.campaign_type === acceptedCampaignTypes;
-});
-```
-
-**Обновить handleSelectionChange для определения типа:**
-
-```typescript
-const handleCampaignSelectionChange = (ids: string[]) => {
-  setSelectedCampaigns(ids);
-  
-  if (ids.length === 0) {
-    // Сбросить тип если ничего не выбрано
-    setSelectedCampaignType(null);
-  } else if (ids.length === 1 && selectedCampaignType === null) {
-    // Определить тип по первой выбранной кампании
-    const selectedCampaign = userCampaigns.find(c => c.id === ids[0]);
-    if (selectedCampaign) {
-      setSelectedCampaignType(selectedCampaign.campaign_type);
-    }
-  }
-};
-```
-
-**Обновить canProceed для шага 3:**
-
-```typescript
-case 3:
-  return selectedCampaigns.length === requiredCampaignsCount;
-```
-
-**Обновить subtitle для шага 3:**
-
-```typescript
-3: selectedCampaignType === 'prompt' 
-  ? 'Выберите 1 кампанию (промпт)'
-  : quantity > 1 
-    ? `Выберите ${quantity} кампании` 
-    : 'Выберите кампанию',
-```
-
-**Сбросить тип при возврате на шаг 3:**
-
-```typescript
-const handleBack = () => {
-  if (currentStep > 1) {
-    setCurrentStep(currentStep - 1);
-    if (currentStep === 4) {
-      setEscrowAddress(null);
-      setDealId(null);
-    }
-    // Сбросить выбор кампаний при возврате на шаг 2
-    if (currentStep === 3) {
-      setSelectedCampaigns([]);
-      setSelectedCampaignType(null);
-    }
-  }
-};
+```sql
+-- Новая колонка для массива черновиков
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS author_drafts jsonb DEFAULT '[]';
 ```
 
 ---
 
-### 2. `src/components/channel/CampaignSelector.tsx`
+### 2. `notify-deal-payment/index.ts`
 
-**Обновить интерфейс:**
+**Изменить функцию `sendPromptBrief`:**
 
 ```typescript
-interface CampaignSelectorProps {
-  campaigns: Campaign[];
-  selectedCampaigns: string[];
-  requiredCount: number;
-  onSelectionChange: (ids: string[]) => void;
-  onCreateNew: () => void;
-  acceptedCampaignTypes?: string;
-  selectedCampaignType?: string | null;  // новое
-  isPromptMode?: boolean;  // новое: для UI подсказок
+async function sendPromptBrief(
+  telegramId: number, 
+  campaign: Deal['campaign'],
+  postsCount: number  // новый параметр
+) {
+  if (!campaign) return;
+  
+  const { text, button_url } = campaign;
+  
+  const postsWord = getPostsWord(postsCount);
+  
+  let briefMessage = `📋 <b>Бриф от рекламодателя:</b>\n\n${text}`;
+  
+  if (button_url) {
+    briefMessage += `\n\n🔗 <b>Ссылка на продукт:</b> ${button_url}`;
+  }
+  
+  if (postsCount > 1) {
+    briefMessage += `\n\n📝 <b>Нужно написать ${postsCount} ${postsWord}</b>`;
+    briefMessage += `\nОтправляйте готовые посты по одному в этот чат.`;
+    briefMessage += `\n\n<i>После каждого поста рекламодатель проверит и одобрит его.</i>`;
+  } else {
+    briefMessage += `\n\n✍️ <b>Напишите пост по этому брифу</b>\nОтправьте текст и медиа в этот чат.`;
+  }
+  
+  await sendTelegramRequest("sendMessage", {
+    chat_id: telegramId,
+    text: briefMessage,
+    parse_mode: "HTML",
+    disable_web_page_preview: false,
+  });
 }
 ```
 
-**Обновить handleToggleCampaign:**
+**Передать `posts_count`:**
 
 ```typescript
-const handleToggleCampaign = (campaignId: string) => {
-  if (selectedCampaigns.includes(campaignId)) {
-    // Снять выбор
-    onSelectionChange(selectedCampaigns.filter((id) => id !== campaignId));
-  } else {
-    // Если промпт — только 1 кампания
-    if (requiredCount === 1) {
-      onSelectionChange([campaignId]);
-    } else if (selectedCampaigns.length < requiredCount) {
-      onSelectionChange([...selectedCampaigns, campaignId]);
-    }
-  }
-};
-```
-
-**Добавить информационное сообщение о правилах:**
-
-```tsx
-{/* Info about prompt mode */}
-{isPromptMode && (
-  <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-center">
-    <p className="text-sm text-muted-foreground">
-      Для промпт-рекламы нужна только <span className="font-medium text-blue-500">1 кампания</span> независимо от количества постов
-    </p>
-  </div>
-)}
-
-{/* Info when type is locked */}
-{selectedCampaignType && acceptedCampaignTypes === 'both' && (
-  <div className="bg-primary/10 border border-primary/20 rounded-xl p-3 text-center">
-    <p className="text-sm text-muted-foreground">
-      Выбран тип: <span className="font-medium text-primary">{getAcceptedTypeLabel(selectedCampaignType)}</span>
-    </p>
-  </div>
-)}
-```
-
-**Обновить Selection Info:**
-
-```tsx
-{/* Selection Info */}
-{requiredCount > 1 && (
-  <p className="text-sm text-muted-foreground text-center">
-    Выбрано {selectedCampaigns.length} из {requiredCount} кампаний
-  </p>
-)}
-{requiredCount === 1 && selectedCampaigns.length === 0 && (
-  <p className="text-sm text-muted-foreground text-center">
-    Выберите кампанию
-  </p>
-)}
+if (isPromptCampaign) {
+  await sendPromptBrief(ownerTelegramId, typedDeal.campaign, typedDeal.posts_count);
+} else {
+  await sendCampaignPreview(ownerTelegramId, typedDeal.campaign);
+}
 ```
 
 ---
 
-## Визуальный результат
+### 3. `telegram-webhook/index.ts`
 
-**Канал принимает оба типа, выбрано 3 поста:**
+**Изменить `handleDraftMessage`:**
 
+```typescript
+async function handleDraftMessage(telegramUserId: number, message: Record<string, unknown>) {
+  // ... получение пользователя и сделки ...
+  
+  // Получить текущее состояние черновиков
+  const currentDrafts = deal.author_drafts || [];
+  const requiredCount = deal.posts_count;
+  const approvedCount = currentDrafts.filter(d => d.approved === true).length;
+  const pendingCount = currentDrafts.filter(d => d.approved === null).length;
+  const submittedCount = currentDrafts.length;
+  
+  // Проверить, нужны ли ещё черновики
+  if (submittedCount >= requiredCount) {
+    await sendTelegramMessage(
+      telegramUserId, 
+      `📭 Все ${requiredCount} постов уже отправлены.\n\nОжидайте проверки рекламодателем.`
+    );
+    return;
+  }
+  
+  // Извлечь контент
+  const text = (message.text || message.caption || "") as string;
+  const entities = (message.entities || message.caption_entities || []) as object[];
+  const media = extractMedia(message);
+  
+  // Добавить новый черновик в массив
+  const newDraft = {
+    index: submittedCount,
+    text: text || null,
+    entities,
+    media,
+    approved: null,  // ожидает проверки
+    message_id: message.message_id,
+    chat_id: (message.chat as { id: number }).id,
+  };
+  
+  const updatedDrafts = [...currentDrafts, newDraft];
+  
+  // Сохранить в БД
+  await supabase
+    .from("deals")
+    .update({ author_drafts: updatedDrafts })
+    .eq("id", deal.id);
+  
+  // Уведомить рекламодателя о новом черновике
+  const draftNumber = submittedCount + 1;
+  await sendTelegramMessage(
+    advertiser.telegram_id,
+    `📝 <b>Черновик ${draftNumber} из ${requiredCount}</b>\n\nАвтор канала отправил пост. Проверьте ниже:`
+  );
+  
+  // Переслать черновик
+  await copyMessage(advertiser.telegram_id, message.chat.id, message.message_id);
+  
+  // Кнопки одобрения
+  await sendTelegramMessage(
+    advertiser.telegram_id,
+    `👆 <b>Проверьте черновик ${draftNumber}</b>`,
+    {
+      inline_keyboard: [
+        [
+          { text: "✅ Одобрить", callback_data: `approve_draft:${deal.id}:${draftNumber - 1}` },
+          { text: "✏️ На доработку", callback_data: `revise_draft:${deal.id}:${draftNumber - 1}` }
+        ]
+      ]
+    }
+  );
+  
+  // Подтвердить владельцу
+  const remaining = requiredCount - draftNumber;
+  let ownerMessage = `✅ <b>Черновик ${draftNumber} из ${requiredCount} отправлен!</b>`;
+  
+  if (remaining > 0) {
+    ownerMessage += `\n\nОсталось отправить: ${remaining} ${getPostsWord(remaining)}`;
+  } else {
+    ownerMessage += `\n\n🎉 Все посты отправлены! Ожидайте проверки.`;
+  }
+  
+  await sendTelegramMessage(telegramUserId, ownerMessage);
+}
 ```
-Шаг 1: [3 поста]
-Шаг 2: [дата/время]
-Шаг 3:
-┌─────────────────────────────────────────┐
-│   [ Промпт кампания 1 ]  ← кликаем      │
-│   [ Промпт кампания 2 ]                 │
-│   [ Ready Post 1 ]                      │
-│   [ Ready Post 2 ]                      │
-└─────────────────────────────────────────┘
+
+---
+
+### 4. Изменить обработчики одобрения
+
+**`handleDraftApproval` — работа с массивом:**
+
+```typescript
+async function handleDraftApproval(
+  callbackQueryId: string, 
+  dealId: string, 
+  draftIndex: number,  // новый параметр: индекс черновика
+  from: { id: number }, 
+  message: { chat: { id: number }; message_id: number }
+) {
+  // ... проверки ...
+  
+  // Обновить конкретный черновик в массиве
+  const drafts = deal.author_drafts || [];
+  if (draftIndex >= drafts.length) {
+    await answerCallbackQuery(callbackQueryId, "Черновик не найден");
+    return;
+  }
+  
+  drafts[draftIndex].approved = true;
+  
+  // Проверить, все ли черновики одобрены
+  const allApproved = drafts.length === deal.posts_count && 
+                      drafts.every(d => d.approved === true);
+  
+  await supabase
+    .from("deals")
+    .update({ 
+      author_drafts: drafts,
+      // Переводим в in_progress только когда ВСЕ одобрены
+      ...(allApproved && { status: "in_progress", is_draft_approved: true })
+    })
+    .eq("id", dealId);
+  
+  // Уведомления
+  await editMessageReplyMarkup(message.chat.id, message.message_id);
+  
+  const draftNumber = draftIndex + 1;
+  const approvedCount = drafts.filter(d => d.approved === true).length;
+  
+  if (allApproved) {
+    // Все одобрены
+    await sendTelegramMessage(from.id, 
+      `✅ <b>Все ${deal.posts_count} постов одобрены!</b>\n\nПубликация будет выполнена автоматически.`
+    );
+    
+    // Уведомить владельца
+    await sendTelegramMessage(owner.telegram_id,
+      `🎉 <b>Все посты одобрены!</b>\n\nРекламодатель принял все ${deal.posts_count} постов. Ожидайте публикации.`
+    );
+  } else {
+    await sendTelegramMessage(from.id,
+      `✅ Черновик ${draftNumber} одобрен!\n\nОдобрено: ${approvedCount} из ${deal.posts_count}`
+    );
+  }
+}
 ```
 
-**После выбора промпт-кампании:**
+---
 
-```
-┌─────────────────────────────────────────┐
-│   Выбран тип: промпт (нативная реклама) │
-│   Для промпт-рекламы нужна только       │
-│   1 кампания независимо от кол-ва постов│
-├─────────────────────────────────────────┤
-│   [✓] Промпт кампания 1  ← выбрана      │
-│   [ ] Промпт кампания 2  ← можно        │
-│                          поменять выбор │
-│   (Ready Post скрыты)                   │
-├─────────────────────────────────────────┤
-│   Выбрано 1 из 1 кампаний               │
-│   [Далее →]                             │
-└─────────────────────────────────────────┘
+### 5. Изменить `publish-scheduled-posts`
+
+**Публикация всех постов из массива:**
+
+```typescript
+async function processDeal(deal: Deal): Promise<{ success: boolean; error?: string }> {
+  const campaign = await getCampaign(deal.campaign_id);
+  const channel = await getChannel(deal.channel_id);
+  const isPromptCampaign = campaign.campaign_type === "prompt";
+  
+  let messageIds: number[] = [];
+  
+  if (isPromptCampaign && deal.author_drafts?.length > 0) {
+    // Публикуем ВСЕ одобренные черновики из массива
+    for (const draft of deal.author_drafts) {
+      if (draft.approved !== true) continue;
+      
+      const messageId = await publishDraftToChannel(
+        channel.telegram_chat_id,
+        draft.text,
+        draft.entities || [],
+        draft.media || [],
+        null,
+        null
+      );
+      messageIds.push(messageId);
+      
+      // Небольшая задержка между постами
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  } else {
+    // ready_post — один пост
+    const messageId = await publishToChannel(channel.telegram_chat_id, campaign);
+    messageIds.push(messageId);
+  }
+  
+  // Сохранить все message_id
+  await supabase
+    .from("deals")
+    .update({
+      posted_at: new Date().toISOString(),
+      telegram_message_id: messageIds[0], // первый для обратной совместимости
+      telegram_message_ids: messageIds,   // новое поле — массив
+    })
+    .eq("id", deal.id);
+}
 ```
 
-**Если вместо этого выбрали Ready Post:**
+---
 
+## Визуальный флоу
+
+```text
+Рекламодатель заказывает 3 поста (промпт)
+          │
+          ▼
+┌─────────────────────────────────────┐
+│  Владелец получает бриф:            │
+│  "Нужно написать 3 поста"           │
+│  "Отправляйте по одному"            │
+└─────────────────────────────────────┘
+          │
+          ▼
+Владелец отправляет пост #1 → Рекламодатель: [Одобрить] [На доработку]
+          │
+          ▼
+Владелец отправляет пост #2 → Рекламодатель: [Одобрить] [На доработку]
+          │
+          ▼
+Владелец отправляет пост #3 → Рекламодатель: [Одобрить] [На доработку]
+          │
+          ▼
+Все 3 одобрены → Статус: in_progress
+          │
+          ▼
+По расписанию публикуются все 3 поста
 ```
-┌─────────────────────────────────────────┐
-│   Выбран тип: готовый пост              │
-├─────────────────────────────────────────┤
-│   [✓] Ready Post 1  ← выбрана           │
-│   [ ] Ready Post 2  ← можно добавить    │
-│   (Промпт кампании скрыты)              │
-├─────────────────────────────────────────┤
-│   Выбрано 1 из 3 кампаний               │
-│   [Далее →] (неактивна, нужно ещё 2)    │
-└─────────────────────────────────────────┘
+
+---
+
+## Миграция данных
+
+Добавить колонки:
+
+```sql
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS author_drafts jsonb DEFAULT '[]';
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS telegram_message_ids jsonb DEFAULT '[]';
 ```
 
 ---
 
 ## Результат
 
-- Промпт-кампании: всегда 1 кампания независимо от количества постов
-- Ready Post кампании: количество кампаний = количеству постов
-- Нельзя смешивать типы кампаний в одном заказе
-- После выбора первой кампании — список фильтруется по её типу
-- Понятные UI-подсказки о текущих правилах
+- Владелец канала получает понятное сообщение "нужно N постов"
+- Каждый черновик отправляется и проверяется отдельно
+- Рекламодатель одобряет каждый пост индивидуально
+- Только после одобрения ВСЕХ постов сделка переходит в `in_progress`
+- При публикации отправляются ВСЕ одобренные посты
 
