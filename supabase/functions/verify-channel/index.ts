@@ -505,21 +505,37 @@ Deno.serve(async (req) => {
           const stats = mtprotoData.stats;
           const updateData: Record<string, unknown> = {};
           
-          if (stats.languageStats) {
-            updateData.language_stats = stats.languageStats;
+          // Language stats: новый формат { label, value } → { language, percentage }
+          if (stats.languageStats && Array.isArray(stats.languageStats) && stats.languageStats.length > 0) {
+            const totalLang = stats.languageStats.reduce((sum: number, l: { value?: number }) => sum + (l.value || 0), 0);
+            updateData.language_stats = stats.languageStats.map((l: { label?: string; value?: number }) => ({
+              language: l.label || 'Unknown',
+              percentage: totalLang > 0 ? Math.round((l.value || 0) / totalLang * 100) : 0
+            }));
           }
-          if (stats.followers?.growthRate !== undefined) {
-            updateData.growth_rate = stats.followers.growthRate;
+          
+          // Growth rate: теперь напрямую в stats.growthRate
+          if (stats.growthRate !== undefined) {
+            updateData.growth_rate = stats.growthRate;
           }
-          if (stats.enabledNotifications?.part !== undefined) {
-            updateData.notifications_enabled = stats.enabledNotifications.part;
+          
+          // Notifications: новый формат с part/total для точного расчета %
+          if (stats.notificationsRaw) {
+            const { part, total } = stats.notificationsRaw;
+            const percentage = total > 0 ? Math.round((part / total) * 10000) / 100 : 0;
+            updateData.notifications_enabled = percentage;
           }
-          if (stats.topHours) {
-            updateData.top_hours = stats.topHours;
+          
+          // Top hours: формат графика { x, y0 } → { hour, value }
+          if (stats.topHours && Array.isArray(stats.topHours) && stats.topHours.length > 0) {
+            updateData.top_hours = stats.topHours.map((h: { y0?: number; [key: string]: unknown }, idx: number) => ({
+              hour: idx,
+              value: h.y0 || h['y0'] || 0
+            }));
           }
-          if (stats.premiumPercentage !== undefined) {
-            updateData.premium_percentage = stats.premiumPercentage;
-          }
+          
+          // Premium stats: это график активности, не процент подписчиков
+          // Пока не сохраняем - VPS не возвращает реальный % премиум подписчиков
           
           if (Object.keys(updateData).length > 0) {
             const { error: updateError } = await supabase
