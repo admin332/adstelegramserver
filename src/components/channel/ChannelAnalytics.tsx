@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { TrendingUp, Eye, BarChart3, Globe, Crown, CheckCircle, AlertTriangle } from 'lucide-react';
+import { TrendingUp, TrendingDown, Eye, BarChart3, Globe, Crown, CheckCircle, AlertTriangle, Clock, Bell } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 
@@ -15,6 +15,11 @@ interface LanguageStat {
   percentage: number;
 }
 
+interface TopHourStat {
+  hour: number;
+  value: number;
+}
+
 interface ChannelAnalyticsProps {
   subscribers: number;
   avgViews: number;
@@ -22,6 +27,9 @@ interface ChannelAnalyticsProps {
   recentPosts?: PostStat[];
   languageStats?: LanguageStat[];
   premiumPercentage?: number;
+  growthRate?: number;
+  notificationsEnabled?: number;
+  topHours?: TopHourStat[];
 }
 
 const formatNumber = (num: number): string => {
@@ -65,6 +73,11 @@ const getEngagementLevel = (er: number): {
   };
 };
 
+// Format hour for display
+const formatHour = (hour: number): string => {
+  return `${hour.toString().padStart(2, '0')}:00`;
+};
+
 const ChannelAnalytics: React.FC<ChannelAnalyticsProps> = ({
   subscribers,
   avgViews,
@@ -72,9 +85,17 @@ const ChannelAnalytics: React.FC<ChannelAnalyticsProps> = ({
   recentPosts = [],
   languageStats,
   premiumPercentage,
+  growthRate,
+  notificationsEnabled,
+  topHours,
 }) => {
   const engagementLevel = getEngagementLevel(engagement);
   const maxViews = recentPosts.length > 0 ? Math.max(...recentPosts.map(p => p.views)) : 0;
+  
+  // Find max value for top hours heatmap
+  const maxHourValue = topHours && topHours.length > 0 
+    ? Math.max(...topHours.map(h => h.value)) 
+    : 0;
 
   return (
     <div className="space-y-4">
@@ -113,6 +134,34 @@ const ChannelAnalytics: React.FC<ChannelAnalyticsProps> = ({
         </div>
       </motion.div>
 
+      {/* Growth Rate Card */}
+      {growthRate !== undefined && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="bg-secondary/50 rounded-2xl p-4"
+        >
+          <div className="flex items-center gap-2 mb-2">
+            {growthRate >= 0 ? (
+              <TrendingUp className="h-5 w-5 text-green-500" />
+            ) : (
+              <TrendingDown className="h-5 w-5 text-red-500" />
+            )}
+            <span className="font-medium text-foreground">Рост подписчиков</span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className={cn(
+              "text-2xl font-bold",
+              growthRate >= 0 ? "text-green-500" : "text-red-500"
+            )}>
+              {growthRate >= 0 ? '+' : ''}{growthRate.toFixed(2)}%
+            </span>
+            <span className="text-sm text-muted-foreground">за последний период</span>
+          </div>
+        </motion.div>
+      )}
+
       {/* Average Views Card */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
@@ -130,12 +179,119 @@ const ChannelAnalytics: React.FC<ChannelAnalyticsProps> = ({
         </div>
       </motion.div>
 
+      {/* Notifications Enabled Card */}
+      {notificationsEnabled !== undefined && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="bg-secondary/50 rounded-2xl p-4"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <Bell className="h-5 w-5 text-primary" />
+            <span className="font-medium text-foreground">Уведомления включены</span>
+          </div>
+          
+          <div className="flex items-center gap-4">
+            <div className="relative w-16 h-16">
+              <svg className="w-16 h-16 transform -rotate-90">
+                <circle
+                  cx="32"
+                  cy="32"
+                  r="28"
+                  stroke="currentColor"
+                  strokeWidth="6"
+                  fill="none"
+                  className="text-secondary"
+                />
+                <motion.circle
+                  cx="32"
+                  cy="32"
+                  r="28"
+                  stroke="currentColor"
+                  strokeWidth="6"
+                  fill="none"
+                  strokeLinecap="round"
+                  className="text-primary"
+                  initial={{ strokeDasharray: "0 176" }}
+                  animate={{
+                    strokeDasharray: `${(notificationsEnabled / 100) * 176} 176`,
+                  }}
+                  transition={{ duration: 0.8, delay: 0.3 }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-sm font-bold text-foreground">
+                  {notificationsEnabled.toFixed(0)}%
+                </span>
+              </div>
+            </div>
+            
+            <div className="flex-1">
+              <p className="text-sm text-muted-foreground">
+                {formatNumber(Math.round(subscribers * notificationsEnabled / 100))} подписчиков получают уведомления о новых постах
+              </p>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Top Hours Heatmap */}
+      {topHours && topHours.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="bg-secondary/50 rounded-2xl p-4"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <Clock className="h-5 w-5 text-primary" />
+            <span className="font-medium text-foreground">Пиковая активность</span>
+          </div>
+          
+          <div className="grid grid-cols-6 gap-1.5 mb-2">
+            {topHours.slice(0, 12).map((hourStat, index) => {
+              const intensity = maxHourValue > 0 ? hourStat.value / maxHourValue : 0;
+              return (
+                <motion.div
+                  key={hourStat.hour}
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.2, delay: 0.35 + index * 0.02 }}
+                  className="flex flex-col items-center"
+                >
+                  <div
+                    className={cn(
+                      "w-full aspect-square rounded-lg flex items-center justify-center text-xs font-medium transition-colors",
+                      intensity >= 0.8 ? "bg-primary text-primary-foreground" :
+                      intensity >= 0.5 ? "bg-primary/60 text-primary-foreground" :
+                      intensity >= 0.3 ? "bg-primary/30 text-foreground" :
+                      "bg-secondary text-muted-foreground"
+                    )}
+                    title={`${formatHour(hourStat.hour)}: ${hourStat.value} постов`}
+                  >
+                    {hourStat.value}
+                  </div>
+                  <span className="text-[10px] text-muted-foreground mt-1">
+                    {hourStat.hour}h
+                  </span>
+                </motion.div>
+              );
+            })}
+          </div>
+          
+          <p className="text-xs text-muted-foreground text-center mt-2">
+            Часы с наибольшей активностью аудитории (UTC+3)
+          </p>
+        </motion.div>
+      )}
+
       {/* Recent Posts Bar Chart */}
       {recentPosts.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
+          transition={{ delay: 0.35 }}
           className="bg-secondary/50 rounded-2xl p-4"
         >
           <div className="flex items-center justify-between mb-3">

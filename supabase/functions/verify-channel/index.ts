@@ -486,7 +486,62 @@ Deno.serve(async (req) => {
 
     console.log(`[verify-channel] Channel ${newChannel.id} created for user ${userData.id}`);
 
-    // 5. Create channel_admin record for the owner
+    // 5.1 Fetch MTProto stats immediately for new channels with 500+ subscribers
+    if (subscribersCount >= 500) {
+      try {
+        console.log(`[verify-channel] Fetching MTProto stats for @${chat.username}`);
+        const mtprotoResponse = await fetch(
+          `${supabaseUrl}/functions/v1/mtproto-channel-stats`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: chat.username }),
+          }
+        );
+        const mtprotoData = await mtprotoResponse.json();
+        console.log(`[verify-channel] MTProto response:`, mtprotoData);
+        
+        if (mtprotoData.success && mtprotoData.stats) {
+          const stats = mtprotoData.stats;
+          const updateData: Record<string, unknown> = {};
+          
+          if (stats.languageStats) {
+            updateData.language_stats = stats.languageStats;
+          }
+          if (stats.followers?.growthRate !== undefined) {
+            updateData.growth_rate = stats.followers.growthRate;
+          }
+          if (stats.enabledNotifications?.part !== undefined) {
+            updateData.notifications_enabled = stats.enabledNotifications.part;
+          }
+          if (stats.topHours) {
+            updateData.top_hours = stats.topHours;
+          }
+          if (stats.premiumPercentage !== undefined) {
+            updateData.premium_percentage = stats.premiumPercentage;
+          }
+          
+          if (Object.keys(updateData).length > 0) {
+            const { error: updateError } = await supabase
+              .from("channels")
+              .update(updateData)
+              .eq("id", newChannel.id);
+            
+            if (updateError) {
+              console.error("[verify-channel] Failed to save MTProto stats:", updateError);
+            } else {
+              console.log(`[verify-channel] MTProto stats saved:`, Object.keys(updateData));
+            }
+          }
+        }
+      } catch (e) {
+        console.log("[verify-channel] MTProto stats fetch failed (non-critical):", e);
+      }
+    } else {
+      console.log(`[verify-channel] Skipping MTProto stats (${subscribersCount} < 500 subscribers)`);
+    }
+
+    // 5.2 Create channel_admin record for the owner
     const memberStatus = userMember?.status; // 'creator' or 'administrator'
     const isCreator = memberStatus === "creator";
 
