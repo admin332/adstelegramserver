@@ -1,60 +1,142 @@
 
 
-## Добавление детального логирования в refresh-channel-stats
-
-Цель: увидеть сырые данные `topHours` и `languageStats` от VPS перед парсингом, чтобы понять что именно приходит.
+## Обновление парсинга статистики в refresh-channel-stats
 
 ---
 
-## Изменения
+## Что нужно сделать
 
-### 1. refresh-channel-stats/index.ts (после строки 331)
+### 1. Добавить новые колонки в БД
 
-Добавить логирование raw данных сразу после получения `mtprotoData.stats`:
+В таблице `channels` нет полей `views_per_post` и `shares_per_post`. Нужно добавить миграцию:
+
+```sql
+ALTER TABLE public.channels 
+ADD COLUMN IF NOT EXISTS views_per_post numeric DEFAULT NULL,
+ADD COLUMN IF NOT EXISTS shares_per_post numeric DEFAULT NULL;
+```
+
+---
+
+### 2. Обновить парсинг topHours (суммирование всех недель)
+
+**Текущая логика (берёт только первый ключ):**
+```typescript
+const valueKey = Object.keys(h).find(k => k !== 'x');
+const value = valueKey ? (Number(h[valueKey]) || 0) : 0;
+```
+
+**Новая логика (суммирует все недели):**
+```typescript
+// Суммируем значения всех недель для каждого часа
+const value = Object.entries(h)
+  .filter(([key]) => key !== 'x')
+  .reduce((sum, [_, val]) => sum + (Number(val) || 0), 0);
+return { hour: Number(h.x) || idx, value };
+```
+
+**Пример данных от VPS:**
+```json
+{"x": 21, "Jan 16-22": 55, "Jan 23-29": 11}
+```
+**Результат:** `{ hour: 21, value: 66 }`
+
+---
+
+### 3. Обновить парсинг premiumStats
+
+VPS теперь отдаёт `premiumStats` (массив точек графика). Нужно извлечь последнее значение как `premium_percentage`:
 
 ```typescript
-if (mtprotoData.stats) {
-  // === ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ RAW ДАННЫХ ===
-  console.log(`[refresh] RAW languageStats:`, JSON.stringify(mtprotoData.stats.languageStats));
-  console.log(`[refresh] RAW topHours:`, JSON.stringify(mtprotoData.stats.topHours));
-  console.log(`[refresh] RAW stats keys:`, Object.keys(mtprotoData.stats));
-  
-  // Если topHours есть, показать структуру первого элемента
-  if (mtprotoData.stats.topHours?.length > 0) {
-    const firstItem = mtprotoData.stats.topHours[0];
-    console.log(`[refresh] topHours[0] keys:`, Object.keys(firstItem));
-    console.log(`[refresh] topHours[0] full:`, JSON.stringify(firstItem));
+if (mtprotoData.stats.premiumStats?.length > 0) {
+  const lastPoint = mtprotoData.stats.premiumStats[mtprotoData.stats.premiumStats.length - 1];
+  const valueKey = Object.keys(lastPoint).find(k => k !== 'x');
+  if (valueKey) {
+    premiumPercentage = Number(lastPoint[valueKey]) || null;
+    console.log(`[refresh] Premium percentage: ${premiumPercentage}%`);
   }
-  // === КОНЕЦ ЛОГИРОВАНИЯ ===
-  
-  // Languages: { label, value } → { language, percentage }
-  // ... остальной код парсинга
 }
 ```
 
 ---
 
-## Действия после применения
+### 4. Сохранять viewsPerPost и sharesPerPost
 
-1. Деплой Edge Function `refresh-channel-stats`
-2. Сбросить `stats_updated_at = NULL` для канала @slixone
-3. Открыть страницу канала чтобы триггернуть обновление
-4. Проверить логи — теперь будет видно:
-   - Какие ключи приходят от VPS
-   - Полная структура `topHours[0]`
-   - Содержимое `languageStats`
+VPS отдаёт их напрямую. Если `null` — используем fallback из парсинга последних 10 постов:
+
+```typescript
+// viewsPerPost: если MTProto не отдал — используем наш avgViews
+let viewsPerPost = mtprotoData.stats.viewsPerPost;
+if (viewsPerPost === null && avgViews > 0) {
+  viewsPerPost = avgViews;
+  console.log(`[refresh] viewsPerPost fallback to avgViews: ${avgViews}`);
+}
+
+let sharesPerPost = mtprotoData.stats.sharesPerPost;
+```
+
+---
+
+### 5. Убедиться в корректности расчёта уведомлений
+
+Текущая логика уже правильная:
+```typescript
+const { part, total } = mtprotoData.stats.notificationsRaw;
+notificationsEnabled = total > 0 ? Math.round((part / total) * 10000) / 100 : 0;
+```
+
+---
+
+### 6. Убедиться в корректности расчёта языков (проценты)
+
+Текущая логика уже правильная — считает сумму всех значений и делит каждое на неё:
+```typescript
+const total = mtprotoData.stats.languageStats.reduce((s, l) => s + (l.value || 0), 0);
+languageStats = mtprotoData.stats.languageStats.map(l => ({
+  language: l.label || 'Unknown',
+  percentage: total > 0 ? Math.round((l.value || 0) / total * 100) : 0
+}));
+```
+
+---
+
+## Итоговые изменения
+
+| Файл | Изменение |
+|------|-----------|
+| `supabase/migrations/` | Добавить колонки `views_per_post`, `shares_per_post` |
+| `refresh-channel-stats/index.ts` | Обновить парсинг `topHours`, добавить `premiumStats`, `viewsPerPost`, `sharesPerPost` |
 
 ---
 
 ## Техническая информация
 
-Логи покажут один из следующих сценариев:
+### Структура данных от VPS (обновлённый index.js)
 
-| Сценарий | Что увидим в логах |
-|----------|-------------------|
-| VPS отдаёт данные | `RAW topHours: [{"x":1234567890,"Top Hours":150},...]` |
-| Telegram не отдаёт | `RAW topHours: []` или `RAW topHours: null` |
-| VPS парсит неверно | `RAW topHours: [{"x":123}]` (без value-ключей) |
+```json
+{
+  "success": true,
+  "stats": {
+    "languageStats": [{"label": "Russian", "value": 12345}, ...],
+    "premiumStats": [{"x": 1737763200000, "Premium": 5.12}, ...],
+    "topHours": [{"x": 0, "Jan 16-22": 10, "Jan 23-29": 15}, ...],
+    "growthRate": -0.23,
+    "notificationsRaw": {"part": 823, "total": 1753},
+    "viewsPerPost": 456,
+    "sharesPerPost": 12
+  }
+}
+```
 
-Это позволит точно диагностировать проблему.
+### Что будет сохранено в БД
+
+| Поле | Значение |
+|------|----------|
+| `language_stats` | `[{"language": "Russian", "percentage": 78}, ...]` |
+| `premium_percentage` | `5.12` (последняя точка графика) |
+| `top_hours` | `[{"hour": 0, "value": 25}, {"hour": 1, "value": 30}, ...]` |
+| `growth_rate` | `-0.23` |
+| `notifications_enabled` | `46.89` |
+| `views_per_post` | `456` или fallback из avgViews |
+| `shares_per_post` | `12` |
 
