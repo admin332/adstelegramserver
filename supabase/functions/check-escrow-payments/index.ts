@@ -482,7 +482,10 @@ serve(async (req) => {
       
       console.log(`Deal ${deal.id}: balance=${balanceTon} TON, required=${deal.total_price} TON`);
       
-      if (balanceNano >= requiredNano) {
+      // Allow 1% tolerance for network fees (e.g., 0.01 TON for 1 TON deal)
+      const tolerance = requiredNano * 0.01;
+      
+      if (balanceNano >= (requiredNano - tolerance)) {
         // 3. Update deal status to 'escrow'
         const { error: updateError } = await supabase
           .from('deals')
