@@ -261,17 +261,9 @@ const ChannelAnalytics: React.FC<ChannelAnalyticsProps> = ({
             className="bg-secondary/50 rounded-2xl p-4"
           >
             {/* Header */}
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Clock className="h-5 w-5 text-primary" />
-                <span className="font-medium text-foreground">Пиковая активность</span>
-              </div>
-              <div className="flex items-center gap-1 text-primary text-sm">
-                <span>🎯</span>
-                <span className="font-semibold">
-                  {peakHour.displayHour.toString().padStart(2,'0')}:00
-                </span>
-              </div>
+            <div className="flex items-center gap-2 mb-3">
+              <Clock className="h-5 w-5 text-primary" />
+              <span className="font-medium text-foreground">Пиковая активность</span>
             </div>
             
             {/* Area Chart */}
@@ -325,7 +317,7 @@ const ChannelAnalytics: React.FC<ChannelAnalyticsProps> = ({
             </div>
             
             <p className="text-xs text-muted-foreground text-center mt-2">
-              Активность аудитории по часам (UTC+3)
+              Лучшая активность аудитории в ({peakHour.displayHour.toString().padStart(2,'0')}:00)
             </p>
           </motion.div>
         );
