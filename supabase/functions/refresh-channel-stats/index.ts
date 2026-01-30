@@ -329,27 +329,35 @@ Deno.serve(async (req) => {
             }
             
             if (mtprotoData.stats) {
-              // Language stats
+              // Languages: { label, value } → { language, percentage }
               if (mtprotoData.stats.languageStats?.length > 0) {
-                languageStats = mtprotoData.stats.languageStats;
+                const total = mtprotoData.stats.languageStats.reduce((s: number, l: { value?: number }) => s + (l.value || 0), 0);
+                languageStats = mtprotoData.stats.languageStats.map((l: { label?: string; value?: number }) => ({
+                  language: l.label || 'Unknown',
+                  percentage: total > 0 ? Math.round((l.value || 0) / total * 100) : 0
+                }));
                 console.log(`[refresh] Got ${languageStats.length} language entries`);
               }
               
-              // Growth rate
-              if (mtprotoData.stats.followers?.growthRate !== undefined) {
-                growthRate = mtprotoData.stats.followers.growthRate;
+              // Growth rate: теперь напрямую
+              if (mtprotoData.stats.growthRate !== undefined) {
+                growthRate = mtprotoData.stats.growthRate;
                 console.log(`[refresh] Growth rate: ${growthRate}%`);
               }
               
-              // Notifications enabled percentage
-              if (mtprotoData.stats.enabledNotifications?.part !== undefined) {
-                notificationsEnabled = mtprotoData.stats.enabledNotifications.part;
+              // Notifications: part/total → percentage
+              if (mtprotoData.stats.notificationsRaw) {
+                const { part, total } = mtprotoData.stats.notificationsRaw;
+                notificationsEnabled = total > 0 ? Math.round((part / total) * 10000) / 100 : 0;
                 console.log(`[refresh] Notifications enabled: ${notificationsEnabled}%`);
               }
               
-              // Top hours
+              // Top hours: { x, y0 } → { hour, value }
               if (mtprotoData.stats.topHours?.length > 0) {
-                topHours = mtprotoData.stats.topHours;
+                topHours = mtprotoData.stats.topHours.map((h: { y0?: number; [key: string]: unknown }, idx: number) => ({
+                  hour: idx,
+                  value: h.y0 || h['y0'] || 0
+                }));
                 console.log(`[refresh] Got top hours data`);
               }
             }

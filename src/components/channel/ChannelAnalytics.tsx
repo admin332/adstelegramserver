@@ -204,25 +204,25 @@ const ChannelAnalytics: React.FC<ChannelAnalyticsProps> = ({
                   fill="none"
                   className="text-secondary"
                 />
-                <motion.circle
-                  cx="32"
-                  cy="32"
-                  r="28"
-                  stroke="currentColor"
-                  strokeWidth="6"
-                  fill="none"
-                  strokeLinecap="round"
-                  className="text-primary"
-                  initial={{ strokeDasharray: "0 176" }}
-                  animate={{
-                    strokeDasharray: `${(notificationsEnabled / 100) * 176} 176`,
-                  }}
-                  transition={{ duration: 0.8, delay: 0.3 }}
-                />
+                  <motion.circle
+                    cx="32"
+                    cy="32"
+                    r="28"
+                    stroke="currentColor"
+                    strokeWidth="6"
+                    fill="none"
+                    strokeLinecap="round"
+                    className="text-primary"
+                    initial={{ strokeDasharray: "0 176" }}
+                    animate={{
+                      strokeDasharray: `${(Math.min(notificationsEnabled, 100) / 100) * 176} 176`,
+                    }}
+                    transition={{ duration: 0.8, delay: 0.3 }}
+                  />
               </svg>
               <div className="absolute inset-0 flex items-center justify-center">
                 <span className="text-sm font-bold text-foreground">
-                  {notificationsEnabled.toFixed(0)}%
+                  {Math.min(notificationsEnabled, 100).toFixed(1)}%
                 </span>
               </div>
             </div>
