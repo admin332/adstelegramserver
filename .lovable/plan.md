@@ -1,192 +1,170 @@
 
 
-## Исправление ценообразования при заказе нескольких постов
+## Исправление расчёта минимального времени до публикации
 
-При выборе 2+ постов должна применяться сниженная цена `price_2_48`, а не `price_1_24`.
-
----
-
-## Текущая проблема
-
-| Количество | Ожидаемая цена | Текущая цена |
-|------------|----------------|--------------|
-| 1 пост | `price_1_24` | `price_1_24` ✓ |
-| 2+ постов | `price_2_48` | `price_1_24` ✗ |
+Логика расчёта доступных слотов для будущих дней неправильно считает время от начала дня, а не от текущего момента.
 
 ---
 
-## Архитектура изменений
+## Проблема
 
+| Параметр | Значение |
+|----------|----------|
+| Текущее время | ~20:00, 30 января |
+| `minHoursBeforePost` | 10 часов |
+| Выбранная дата | 31 января |
+
+**Неправильный расчёт:**
 ```text
-Channel.tsx
-    │
-    └── OrderDrawer
-           ├── price1Post (новый prop)
-           ├── price2Plus (новый prop)
-           │
-           └── PostQuantitySelector
-                  ├── pricePerPost (динамический)
-                  └── отображает текущую цену
+daysDiff = 1 (следующий день)
+hoursAlreadyCovered = 24 часа  ← Неверно! До полуночи осталось только ~4 часа
+remainingMinHours = 10 - 24 = -14
+→ Все слоты доступны с 00:00 (через ~4 часа)
+```
+
+**Правильный расчёт:**
+```text
+Сейчас 20:00, нужно +10 часов = минимум 06:00 следующего дня
+→ Слоты должны быть доступны только с 06:00
 ```
 
 ---
 
-## Файлы для изменения
+## Решение
 
-### 1. `src/data/mockChannels.ts`
-
-Добавить новое поле в интерфейс `Channel`:
-
-```typescript
-export interface Channel {
-  // ... existing fields
-  tonPrice: number;        // цена за 1 пост (price_1_24)
-  tonPrice2Plus?: number;  // цена за 2+ постов (price_2_48)
-  // ...
-}
-```
+Нужно считать абсолютное время от текущего момента, а не относительно начала дня.
 
 ---
 
-### 2. `src/hooks/useChannels.ts`
+## Файл: `src/components/channel/DateTimeSelector.tsx`
 
-Добавить маппинг для `price_2_48`:
+**Заменить функцию `getAvailableHours()` (строки 47-70):**
 
 ```typescript
-function mapDatabaseToChannel(dbChannel: DatabaseChannel): Channel {
-  const tonPrice = Number(dbChannel.price_1_24) || 0;
-  const tonPrice2Plus = Number(dbChannel.price_2_48) || tonPrice; // fallback на price_1_24
+const getAvailableHours = () => {
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMinutes = now.getMinutes();
   
-  return {
-    // ... existing fields
-    tonPrice: tonPrice,
-    tonPrice2Plus: tonPrice2Plus,
-    // ...
-  };
-}
-```
-
----
-
-### 3. `src/pages/Channel.tsx`
-
-Передать обе цены в `OrderDrawer`:
-
-```tsx
-<OrderDrawer
-  isOpen={isOrderDrawerOpen}
-  onClose={() => setIsOrderDrawerOpen(false)}
-  channelId={id!}
-  channelName={channel.name}
-  price1Post={channel.tonPrice}
-  price2Plus={channel.tonPrice2Plus || channel.tonPrice}
-  minHoursBeforePost={channel.minHoursBeforePost || 0}
-/>
-```
-
----
-
-### 4. `src/components/channel/OrderDrawer.tsx`
-
-**Изменить интерфейс props:**
-
-```typescript
-interface OrderDrawerProps {
-  isOpen: boolean;
-  onClose: () => void;
-  channelId: string;
-  channelName: string;
-  price1Post: number;      // было pricePerPost
-  price2Plus: number;      // новое
-  minHoursBeforePost?: number;
-}
-```
-
-**Добавить динамический расчёт цены:**
-
-```typescript
-// Динамическая цена в зависимости от количества
-const pricePerPost = quantity >= 2 ? price2Plus : price1Post;
-const totalPrice = quantity * pricePerPost;
-```
-
-**Обновить вызов создания сделки:**
-
-```typescript
-const { data, error } = await supabase.functions.invoke('create-deal', {
-  body: {
-    initData,
-    channelId,
-    postsCount: quantity,
-    pricePerPost,  // теперь динамическая цена
-    totalPrice,
-    scheduledAt: scheduledDate.toISOString(),
-    campaignIds: selectedCampaigns,
+  // Минимальный час = текущий час + minHoursBeforePost (минимум 2)
+  const minTotalHours = Math.max(2, minHoursBeforePost);
+  
+  // Рассчитываем абсолютное время минимальной публикации
+  const minPublishTime = new Date(now.getTime() + minTotalHours * 60 * 60 * 1000);
+  
+  // Получаем начало выбранного дня
+  const selectedDayStart = new Date(selectedDate);
+  selectedDayStart.setHours(0, 0, 0, 0);
+  
+  // Получаем начало сегодняшнего дня
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+  
+  // Если выбранный день раньше минимальной даты публикации
+  if (selectedDayStart < new Date(minPublishTime).setHours(0, 0, 0, 0)) {
+    // Это сегодня - фильтруем часы
+    if (selectedDayStart.getTime() === todayStart.getTime()) {
+      const minHour = minPublishTime.getHours();
+      // Если есть минуты, нужно округлить вверх до следующего часа
+      const adjustedMinHour = currentMinutes > 0 
+        ? Math.ceil((currentHour + minTotalHours)) 
+        : currentHour + minTotalHours;
+      return hours.filter(hour => hour >= adjustedMinHour);
+    }
+    return []; // День недоступен
   }
+  
+  // Проверяем, попадает ли минимальное время публикации на выбранный день
+  const minPublishDayStart = new Date(minPublishTime);
+  minPublishDayStart.setHours(0, 0, 0, 0);
+  
+  if (selectedDayStart.getTime() === minPublishDayStart.getTime()) {
+    // Выбранный день = день минимальной публикации
+    // Фильтруем часы, которые раньше минимального времени
+    const minHour = minPublishTime.getHours();
+    const adjustedMinHour = minPublishTime.getMinutes() > 0 ? minHour + 1 : minHour;
+    return hours.filter(hour => hour >= adjustedMinHour);
+  }
+  
+  // Выбранный день позже минимального - все часы доступны
+  return hours;
+};
+```
+
+---
+
+## Визуальный пример
+
+**Сейчас: 20:00, 30 января | minHoursBeforePost = 10**
+
+| Выбранная дата | Доступные слоты |
+|----------------|-----------------|
+| 30 января (сегодня) | Нет слотов (20 + 10 = 30 > 24) |
+| 31 января | С 06:00 (20 + 10 = 30 → 06:00 следующего дня) |
+| 1 февраля | Все слоты (00:00 - 23:00) |
+
+---
+
+## Дополнительно: OrderDrawer.tsx
+
+**Обновить инициализацию `selectedHour` (строки 50-55):**
+
+Нужно также правильно инициализировать начальный час с учётом выбранной даты:
+
+```typescript
+const [selectedHour, setSelectedHour] = useState(() => {
+  const now = new Date();
+  const minTotalHours = Math.max(2, minHoursBeforePost);
+  const minPublishTime = new Date(now.getTime() + minTotalHours * 60 * 60 * 1000);
+  
+  // Если минимальное время публикации сегодня
+  const todayEnd = new Date(now);
+  todayEnd.setHours(23, 59, 59, 999);
+  
+  if (minPublishTime <= todayEnd) {
+    return minPublishTime.getMinutes() > 0 
+      ? minPublishTime.getHours() + 1 
+      : minPublishTime.getHours();
+  }
+  
+  // Иначе возвращаем час из минимального времени публикации
+  return minPublishTime.getMinutes() > 0 
+    ? minPublishTime.getHours() + 1 
+    : minPublishTime.getHours();
 });
 ```
 
----
-
-### 5. `src/components/channel/PostQuantitySelector.tsx`
-
-Добавить отображение экономии при выборе 2+ постов:
+**Обновить `handleDateChange` (строки 176-185):**
 
 ```typescript
-interface PostQuantitySelectorProps {
-  quantity: number;
-  pricePerPost: number;
-  price1Post: number;      // для показа сравнения
-  price2Plus: number;      // для показа сравнения
-  onQuantityChange: (quantity: number) => void;
-  minQuantity?: number;
-  maxQuantity?: number;
-}
-```
-
-Добавить индикатор скидки:
-
-```tsx
-{quantity >= 2 && price2Plus < price1Post && (
-  <div className="text-green-500 text-sm text-center mt-2">
-    💰 Экономия: {(price1Post - price2Plus) * quantity} TON
-  </div>
-)}
-```
-
----
-
-## Визуальный результат
-
-**При выборе 1 поста:**
-```
-┌─────────────────────────────────────┐
-│         [ - ]   1   [ + ]           │
-│          пост на 24 часа            │
-├─────────────────────────────────────┤
-│        1 × 50 TON = 50 TON          │
-│             ≈ $175.00               │
-└─────────────────────────────────────┘
-```
-
-**При выборе 3 постов (со скидкой):**
-```
-┌─────────────────────────────────────┐
-│         [ - ]   3   [ + ]           │
-│         поста на 24 часа            │
-├─────────────────────────────────────┤
-│        3 × 40 TON = 120 TON         │
-│             ≈ $420.00               │
-│   💰 Экономия: 30 TON               │
-└─────────────────────────────────────┘
+const handleDateChange = (date: Date) => {
+  setSelectedDate(date);
+  
+  const now = new Date();
+  const minTotalHours = Math.max(2, minHoursBeforePost);
+  const minPublishTime = new Date(now.getTime() + minTotalHours * 60 * 60 * 1000);
+  
+  const selectedDayStart = new Date(date);
+  selectedDayStart.setHours(0, 0, 0, 0);
+  
+  const minPublishDayStart = new Date(minPublishTime);
+  minPublishDayStart.setHours(0, 0, 0, 0);
+  
+  if (selectedDayStart.getTime() === minPublishDayStart.getTime()) {
+    const minHour = minPublishTime.getMinutes() > 0 
+      ? minPublishTime.getHours() + 1 
+      : minPublishTime.getHours();
+    if (selectedHour < minHour) {
+      setSelectedHour(minHour);
+    }
+  }
+};
 ```
 
 ---
 
 ## Результат
 
-- При выборе 1 поста — используется `price_1_24`
-- При выборе 2+ постов — используется `price_2_48` (сниженная цена)
-- Отображается экономия при заказе нескольких постов
-- Правильная цена передаётся в edge function `create-deal`
+- При `minHoursBeforePost = 10` и текущем времени 20:00, слоты на завтра будут доступны только с 06:00
+- Логика корректно учитывает абсолютное время от текущего момента, а не от начала дня
 
