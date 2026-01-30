@@ -329,6 +329,18 @@ Deno.serve(async (req) => {
             }
             
             if (mtprotoData.stats) {
+              // === ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ RAW ДАННЫХ ===
+              console.log(`[refresh] RAW languageStats:`, JSON.stringify(mtprotoData.stats.languageStats));
+              console.log(`[refresh] RAW topHours:`, JSON.stringify(mtprotoData.stats.topHours));
+              console.log(`[refresh] RAW stats keys:`, Object.keys(mtprotoData.stats));
+              
+              if (mtprotoData.stats.topHours?.length > 0) {
+                const firstItem = mtprotoData.stats.topHours[0];
+                console.log(`[refresh] topHours[0] keys:`, Object.keys(firstItem));
+                console.log(`[refresh] topHours[0] full:`, JSON.stringify(firstItem));
+              }
+              // === КОНЕЦ ЛОГИРОВАНИЯ ===
+              
               // Languages: { label, value } → { language, percentage }
               if (mtprotoData.stats.languageStats?.length > 0) {
                 const total = mtprotoData.stats.languageStats.reduce((s: number, l: { value?: number }) => s + (l.value || 0), 0);
