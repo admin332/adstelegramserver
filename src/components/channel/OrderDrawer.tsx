@@ -30,6 +30,7 @@ interface OrderDrawerProps {
   price1Post: number;
   price2Plus: number;
   minHoursBeforePost?: number;
+  acceptedCampaignTypes?: string;
 }
 
 const OrderDrawer: React.FC<OrderDrawerProps> = ({
@@ -40,6 +41,7 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   price1Post,
   price2Plus,
   minHoursBeforePost = 0,
+  acceptedCampaignTypes = 'both',
 }) => {
   const navigate = useNavigate();
   const { data: userCampaigns = [] } = useUserCampaigns();
@@ -65,7 +67,13 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   const [escrowAddress, setEscrowAddress] = useState<string | null>(null);
   const [dealId, setDealId] = useState<string | null>(null);
 
-  const campaigns = userCampaigns.map(c => {
+  // Фильтруем кампании по типу, который принимает канал
+  const filteredUserCampaigns = userCampaigns.filter(c => {
+    if (acceptedCampaignTypes === 'both') return true;
+    return c.campaign_type === acceptedCampaignTypes;
+  });
+
+  const campaigns = filteredUserCampaigns.map(c => {
     const mediaUrls = (c as { media_urls?: string[] }).media_urls;
     const imageUrl = (mediaUrls && mediaUrls.length > 0) 
       ? mediaUrls[0] 
@@ -282,12 +290,13 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
               >
-                <CampaignSelector
+              <CampaignSelector
                   campaigns={campaigns}
                   selectedCampaigns={selectedCampaigns}
                   requiredCount={quantity}
                   onSelectionChange={setSelectedCampaigns}
                   onCreateNew={handleCreateNewCampaign}
+                  acceptedCampaignTypes={acceptedCampaignTypes}
                 />
               </motion.div>
             )}

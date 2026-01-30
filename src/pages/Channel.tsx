@@ -224,6 +224,7 @@ const Channel: React.FC = () => {
         price1Post={channel.tonPrice}
         price2Plus={channel.tonPrice2Plus || channel.tonPrice}
         minHoursBeforePost={channel.minHoursBeforePost || 0}
+        acceptedCampaignTypes={channel.acceptedCampaignTypes || 'both'}
       />
     </div>
   );
