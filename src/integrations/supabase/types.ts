@@ -320,6 +320,7 @@ export type Database = {
           author_draft_entities: Json | null
           author_draft_media: Json | null
           author_draft_media_urls: Json | null
+          author_drafts: Json | null
           campaign_id: string | null
           cancellation_reason: string | null
           channel_id: string
@@ -341,6 +342,7 @@ export type Database = {
           scheduled_at: string | null
           status: Database["public"]["Enums"]["deal_status"]
           telegram_message_id: number | null
+          telegram_message_ids: Json | null
           total_price: number
           updated_at: string | null
         }
@@ -350,6 +352,7 @@ export type Database = {
           author_draft_entities?: Json | null
           author_draft_media?: Json | null
           author_draft_media_urls?: Json | null
+          author_drafts?: Json | null
           campaign_id?: string | null
           cancellation_reason?: string | null
           channel_id: string
@@ -371,6 +374,7 @@ export type Database = {
           scheduled_at?: string | null
           status?: Database["public"]["Enums"]["deal_status"]
           telegram_message_id?: number | null
+          telegram_message_ids?: Json | null
           total_price: number
           updated_at?: string | null
         }
@@ -380,6 +384,7 @@ export type Database = {
           author_draft_entities?: Json | null
           author_draft_media?: Json | null
           author_draft_media_urls?: Json | null
+          author_drafts?: Json | null
           campaign_id?: string | null
           cancellation_reason?: string | null
           channel_id?: string
@@ -401,6 +406,7 @@ export type Database = {
           scheduled_at?: string | null
           status?: Database["public"]["Enums"]["deal_status"]
           telegram_message_id?: number | null
+          telegram_message_ids?: Json | null
           total_price?: number
           updated_at?: string | null
         }
