@@ -18,6 +18,7 @@ export interface TelegramWebApp {
     auth_date?: number;
     hash?: string;
   };
+  platform: string; // 'android', 'ios', 'tdesktop', 'web', 'macos', 'weba'
   ready: () => void;
   expand: () => void;
   close: () => void;
@@ -76,6 +77,14 @@ export function isTelegramMiniApp(): boolean {
   return webapp !== null && webapp.initData !== "";
 }
 
+export function isMobilePlatform(): boolean {
+  const webapp = getTelegramWebApp();
+  if (!webapp) return false;
+  
+  const platform = webapp.platform?.toLowerCase() || '';
+  return platform === 'android' || platform === 'ios';
+}
+
 export function getTelegramInitData(): string | null {
   const webapp = getTelegramWebApp();
   if (webapp && webapp.initData) {
@@ -98,24 +107,29 @@ export function initTelegramApp(): void {
     // Сообщаем Telegram что приложение готово
     webapp.ready();
     
-    // Пробуем запросить настоящий Fullscreen (Bot API 7.0+)
-    // Оборачиваем в try-catch т.к. не все версии поддерживают этот метод
-    try {
-      if (typeof webapp.requestFullscreen === 'function') {
-        webapp.requestFullscreen();
-      } else {
-        // Fallback для старых версий Telegram - используем expand
+    // Fullscreen только для мобильных устройств
+    const isMobile = isMobilePlatform();
+    
+    if (isMobile) {
+      // На мобильных — пробуем полноэкранный режим
+      try {
+        if (typeof webapp.requestFullscreen === 'function') {
+          webapp.requestFullscreen();
+        } else {
+          webapp.expand();
+        }
+      } catch (e) {
+        console.log('Fullscreen not supported, using expand');
         webapp.expand();
       }
-    } catch (e) {
-      // Fallback если requestFullscreen выбросил ошибку
-      console.log('Fullscreen not supported, using expand');
+      
+      // Отключаем вертикальные свайпы только на мобильных
+      if (typeof webapp.disableVerticalSwipes === 'function') {
+        webapp.disableVerticalSwipes();
+      }
+    } else {
+      // На десктопе — просто expand без fullscreen
       webapp.expand();
-    }
-    
-    // Отключаем вертикальные свайпы (защита от случайного закрытия)
-    if (typeof webapp.disableVerticalSwipes === 'function') {
-      webapp.disableVerticalSwipes();
     }
     
     // Включаем подтверждение закрытия
