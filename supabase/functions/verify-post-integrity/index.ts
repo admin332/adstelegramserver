@@ -1,4 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { mnemonicToPrivateKey } from "@ton/crypto";
+import { WalletContractV4, TonClient, internal, SendMode } from "@ton/ton";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,6 +11,7 @@ const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ENCRYPTION_KEY = Deno.env.get("ENCRYPTION_KEY")!;
+const TONCENTER_API_KEY = Deno.env.get("TONCENTER_API_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -52,8 +55,6 @@ async function sendTelegramMessage(chatId: number, text: string): Promise<void> 
 
 async function checkPostExists(chatId: number, messageId: number): Promise<boolean> {
   try {
-    // Use forwardMessage to check if message exists
-    // Forward to the same chat (will be deleted immediately)
     const result = await sendTelegramRequest("copyMessage", {
       chat_id: chatId,
       from_chat_id: chatId,
@@ -61,7 +62,6 @@ async function checkPostExists(chatId: number, messageId: number): Promise<boole
     });
     
     if (result.ok) {
-      // Delete the copied message immediately
       await sendTelegramRequest("deleteMessage", {
         chat_id: chatId,
         message_id: result.result.message_id,
@@ -75,32 +75,32 @@ async function checkPostExists(chatId: number, messageId: number): Promise<boole
   }
 }
 
-function decryptMnemonic(encryptedData: string): string {
-  const key = new TextEncoder().encode(ENCRYPTION_KEY.slice(0, 32).padEnd(32, "0"));
-  const data = Uint8Array.from(atob(encryptedData), (c) => c.charCodeAt(0));
+async function decryptMnemonic(encryptedData: string): Promise<string[]> {
+  const [ivHex, authTagHex, encryptedHex] = encryptedData.split(":");
   
-  const iv = data.slice(0, 12);
-  const authTag = data.slice(-16);
-  const ciphertext = data.slice(12, -16);
+  const iv = new Uint8Array(ivHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+  const authTag = new Uint8Array(authTagHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+  const encrypted = new Uint8Array(encryptedHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
   
-  // For AES-GCM decryption in Deno
-  const crypto = globalThis.crypto;
+  const ciphertextWithTag = new Uint8Array(encrypted.length + authTag.length);
+  ciphertextWithTag.set(encrypted);
+  ciphertextWithTag.set(authTag, encrypted.length);
   
-  // Simplified - in production use proper async crypto
-  // This is a placeholder - actual implementation needs Web Crypto API
-  const combined = new Uint8Array([...ciphertext, ...authTag]);
+  const keyBuffer = new Uint8Array(ENCRYPTION_KEY.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw", keyBuffer, { name: "AES-GCM" }, false, ["decrypt"]
+  );
   
-  // Note: This needs proper implementation with SubtleCrypto
-  // For now, return empty to prevent errors - will be implemented properly
-  console.log("Decryption would happen here with IV:", iv.length, "and data:", combined.length);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv }, cryptoKey, ciphertextWithTag
+  );
   
-  return "";
+  return new TextDecoder().decode(decrypted).split(" ");
 }
 
 async function refundToAdvertiser(deal: Deal): Promise<boolean> {
   console.log(`Processing refund for deal ${deal.id}...`);
   
-  // Get advertiser wallet
   const { data: advertiser } = await supabase
     .from("users")
     .select("telegram_id, wallet_address")
@@ -112,11 +112,56 @@ async function refundToAdvertiser(deal: Deal): Promise<boolean> {
     return false;
   }
 
-  // TODO: Implement actual TON transfer using @ton/ton
-  // For now, log the intent
-  console.log(`Would refund ${deal.total_price} TON to ${advertiser.wallet_address}`);
-  
-  return true;
+  try {
+    const mnemonicWords = await decryptMnemonic(deal.escrow_mnemonic_encrypted);
+    
+    if (mnemonicWords.length === 0) {
+      console.error("Could not decrypt mnemonic");
+      return false;
+    }
+
+    const keyPair = await mnemonicToPrivateKey(mnemonicWords);
+    
+    const client = new TonClient({
+      endpoint: "https://toncenter.com/api/v2/jsonRPC",
+      apiKey: TONCENTER_API_KEY,
+    });
+
+    const wallet = WalletContractV4.create({
+      publicKey: keyPair.publicKey,
+      workchain: 0,
+    });
+    
+    const contract = client.open(wallet);
+    const balance = await contract.getBalance();
+    const networkFee = BigInt(0.02 * 1_000_000_000);
+    const refundAmount = balance - networkFee;
+
+    if (refundAmount <= 0n) {
+      console.error("Insufficient balance for refund");
+      return false;
+    }
+
+    const seqno = await contract.getSeqno();
+    await contract.sendTransfer({
+      seqno,
+      secretKey: keyPair.secretKey,
+      sendMode: SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS,
+      messages: [
+        internal({
+          to: advertiser.wallet_address,
+          value: refundAmount,
+          body: "Adsingo refund - post deleted",
+        }),
+      ],
+    });
+
+    console.log(`Refund sent: ${refundAmount} nanoTON to ${advertiser.wallet_address}`);
+    return true;
+  } catch (error) {
+    console.error("Refund error:", error);
+    return false;
+  }
 }
 
 async function processDeal(deal: Deal): Promise<{ success: boolean; deleted: boolean; error?: string }> {
@@ -134,7 +179,6 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; deleted: boo
     if (!postExists) {
       console.log(`Post deleted for deal ${deal.id}, initiating refund...`);
       
-      // Get users for notifications
       const { data: advertiser } = await supabase
         .from("users")
         .select("telegram_id")
@@ -147,8 +191,8 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; deleted: boo
         .eq("id", channel.owner_id)
         .single();
 
-      // Process refund
-      await refundToAdvertiser(deal);
+      // Process actual refund
+      const refundSuccess = await refundToAdvertiser(deal);
 
       // Update deal status
       const { error: updateError } = await supabase
@@ -168,13 +212,17 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; deleted: boo
 
       // Notify advertiser
       if (advertiser?.telegram_id) {
+        const refundText = refundSuccess 
+          ? `💰 <b>Возврат:</b> ${deal.total_price} TON отправлен на ваш кошелёк.`
+          : `⚠️ Возврат средств не удался. Пожалуйста, обратитесь в поддержку.`;
+        
         await sendTelegramMessage(
           advertiser.telegram_id,
           `⚠️ <b>Пост удалён из канала</b>
 
 Ваша реклама в канале <b>${channelTitle}</b> (@${channel.username}) была удалена до окончания срока размещения.
 
-💰 <b>Возврат:</b> ${deal.total_price} TON отправлен на ваш кошелёк.`
+${refundText}`
         );
       }
 
@@ -215,8 +263,6 @@ Deno.serve(async (req) => {
   console.log("Checking post integrity for active deals...");
 
   try {
-    // Get all in_progress deals that need checking
-    // Check every 4 hours, so find deals where last check was >4 hours ago or never
     const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
     
     const { data: deals, error: dealsError } = await supabase
@@ -244,7 +290,6 @@ Deno.serve(async (req) => {
 
     console.log(`Found ${deals.length} deals to check`);
 
-    // Process each deal
     const results = await Promise.all(
       deals.map((deal) => {
         const channel = Array.isArray(deal.channel) ? deal.channel[0] : deal.channel;
