@@ -50,8 +50,13 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedHour, setSelectedHour] = useState(() => {
     const now = new Date();
-    const minHour = now.getHours() + Math.max(2, minHoursBeforePost);
-    return minHour > 23 ? 0 : minHour;
+    const minTotalHours = Math.max(2, minHoursBeforePost);
+    const minPublishTime = new Date(now.getTime() + minTotalHours * 60 * 60 * 1000);
+    
+    // Возвращаем час минимальной публикации (округляем вверх если есть минуты)
+    return minPublishTime.getMinutes() > 0 
+      ? minPublishTime.getHours() + 1 
+      : minPublishTime.getHours();
   });
   const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>([]);
   
@@ -176,10 +181,23 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   const handleDateChange = (date: Date) => {
     setSelectedDate(date);
     
-    if (isToday(date)) {
-      const minHour = new Date().getHours() + Math.max(2, minHoursBeforePost);
+    const now = new Date();
+    const minTotalHours = Math.max(2, minHoursBeforePost);
+    const minPublishTime = new Date(now.getTime() + minTotalHours * 60 * 60 * 1000);
+    
+    const selectedDayStart = new Date(date);
+    selectedDayStart.setHours(0, 0, 0, 0);
+    
+    const minPublishDayStart = new Date(minPublishTime);
+    minPublishDayStart.setHours(0, 0, 0, 0);
+    
+    // Если выбранный день = день минимальной публикации, корректируем час
+    if (selectedDayStart.getTime() === minPublishDayStart.getTime()) {
+      const minHour = minPublishTime.getMinutes() > 0 
+        ? minPublishTime.getHours() + 1 
+        : minPublishTime.getHours();
       if (selectedHour < minHour) {
-        setSelectedHour(minHour > 23 ? 0 : minHour);
+        setSelectedHour(minHour);
       }
     }
   };
