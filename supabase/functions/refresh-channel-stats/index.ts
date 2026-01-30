@@ -287,6 +287,9 @@ Deno.serve(async (req) => {
     let growthRate = channel.growth_rate || null;
     let notificationsEnabled = channel.notifications_enabled || null;
     let topHours = channel.top_hours || null;
+    let premiumPercentage = channel.premium_percentage || null;
+    let viewsPerPost = channel.views_per_post || null;
+    let sharesPerPost = channel.shares_per_post || null;
 
     if (channel.username) {
       const latestMsgId = await findLatestMessageId(channel.username);
@@ -329,17 +332,7 @@ Deno.serve(async (req) => {
             }
             
             if (mtprotoData.stats) {
-              // === ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ RAW ДАННЫХ ===
-              console.log(`[refresh] RAW languageStats:`, JSON.stringify(mtprotoData.stats.languageStats));
-              console.log(`[refresh] RAW topHours:`, JSON.stringify(mtprotoData.stats.topHours));
-              console.log(`[refresh] RAW stats keys:`, Object.keys(mtprotoData.stats));
-              
-              if (mtprotoData.stats.topHours?.length > 0) {
-                const firstItem = mtprotoData.stats.topHours[0];
-                console.log(`[refresh] topHours[0] keys:`, Object.keys(firstItem));
-                console.log(`[refresh] topHours[0] full:`, JSON.stringify(firstItem));
-              }
-              // === КОНЕЦ ЛОГИРОВАНИЯ ===
+              console.log(`[refresh] MTProto stats keys:`, Object.keys(mtprotoData.stats));
               
               // Languages: { label, value } → { language, percentage }
               if (mtprotoData.stats.languageStats?.length > 0) {
@@ -348,10 +341,10 @@ Deno.serve(async (req) => {
                   language: l.label || 'Unknown',
                   percentage: total > 0 ? Math.round((l.value || 0) / total * 100) : 0
                 }));
-                console.log(`[refresh] Got ${languageStats.length} language entries`);
+                console.log(`[refresh] Languages: ${languageStats.length} entries`);
               }
               
-              // Growth rate: теперь напрямую
+              // Growth rate
               if (mtprotoData.stats.growthRate !== undefined) {
                 growthRate = mtprotoData.stats.growthRate;
                 console.log(`[refresh] Growth rate: ${growthRate}%`);
@@ -361,17 +354,44 @@ Deno.serve(async (req) => {
               if (mtprotoData.stats.notificationsRaw) {
                 const { part, total } = mtprotoData.stats.notificationsRaw;
                 notificationsEnabled = total > 0 ? Math.round((part / total) * 10000) / 100 : 0;
-                console.log(`[refresh] Notifications enabled: ${notificationsEnabled}%`);
+                console.log(`[refresh] Notifications: ${notificationsEnabled}%`);
               }
               
-              // Top hours: { x, [label]: value } → { hour, value } (динамические ключи)
+              // Top hours: суммируем ВСЕ недели для каждого часа
               if (mtprotoData.stats.topHours?.length > 0) {
                 topHours = mtprotoData.stats.topHours.map((h: Record<string, unknown>, idx: number) => {
-                  const valueKey = Object.keys(h).find(k => k !== 'x');
-                  const value = valueKey ? (Number(h[valueKey]) || 0) : 0;
-                  return { hour: idx, value };
+                  // Суммируем значения всех недель (все ключи кроме 'x')
+                  const value = Object.entries(h)
+                    .filter(([key]) => key !== 'x')
+                    .reduce((sum, [_, val]) => sum + (Number(val) || 0), 0);
+                  return { hour: Number(h.x) ?? idx, value };
                 });
-                console.log(`[refresh] Got top hours data`);
+                console.log(`[refresh] Top hours: 24 entries with summed weeks`);
+              }
+              
+              // Premium stats: берём последнюю точку графика
+              if (mtprotoData.stats.premiumStats?.length > 0) {
+                const lastPoint = mtprotoData.stats.premiumStats[mtprotoData.stats.premiumStats.length - 1];
+                const valueKey = Object.keys(lastPoint).find((k: string) => k !== 'x');
+                if (valueKey) {
+                  premiumPercentage = Number(lastPoint[valueKey]) || null;
+                  console.log(`[refresh] Premium: ${premiumPercentage}%`);
+                }
+              }
+              
+              // Views per post: MTProto или fallback на avgViews
+              if (mtprotoData.stats.viewsPerPost !== null && mtprotoData.stats.viewsPerPost !== undefined) {
+                viewsPerPost = mtprotoData.stats.viewsPerPost;
+                console.log(`[refresh] Views/post from MTProto: ${viewsPerPost}`);
+              } else if (avgViews > 0) {
+                viewsPerPost = avgViews;
+                console.log(`[refresh] Views/post fallback to avgViews: ${viewsPerPost}`);
+              }
+              
+              // Shares per post
+              if (mtprotoData.stats.sharesPerPost !== null && mtprotoData.stats.sharesPerPost !== undefined) {
+                sharesPerPost = mtprotoData.stats.sharesPerPost;
+                console.log(`[refresh] Shares/post: ${sharesPerPost}`);
               }
             }
           } else if (mtprotoData.setupRequired) {
@@ -410,6 +430,15 @@ Deno.serve(async (req) => {
     if (topHours !== null) {
       updateData.top_hours = topHours;
     }
+    if (premiumPercentage !== null) {
+      updateData.premium_percentage = premiumPercentage;
+    }
+    if (viewsPerPost !== null) {
+      updateData.views_per_post = viewsPerPost;
+    }
+    if (sharesPerPost !== null) {
+      updateData.shares_per_post = sharesPerPost;
+    }
 
     const { error: updateError } = await supabase
       .from("channels")
@@ -439,6 +468,9 @@ Deno.serve(async (req) => {
           growth_rate: growthRate,
           notifications_enabled: notificationsEnabled,
           top_hours: topHours,
+          premium_percentage: premiumPercentage,
+          views_per_post: viewsPerPost,
+          shares_per_post: sharesPerPost,
           stats_updated_at: new Date().toISOString(),
         },
       }),

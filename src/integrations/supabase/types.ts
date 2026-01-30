@@ -214,6 +214,7 @@ export type Database = {
           rating: number | null
           recent_posts_stats: Json | null
           reviews_count: number | null
+          shares_per_post: number | null
           stats_updated_at: string | null
           subscribers_count: number | null
           successful_ads: number | null
@@ -223,6 +224,7 @@ export type Database = {
           updated_at: string | null
           username: string
           verified: boolean | null
+          views_per_post: number | null
         }
         Insert: {
           avatar_url?: string | null
@@ -246,6 +248,7 @@ export type Database = {
           rating?: number | null
           recent_posts_stats?: Json | null
           reviews_count?: number | null
+          shares_per_post?: number | null
           stats_updated_at?: string | null
           subscribers_count?: number | null
           successful_ads?: number | null
@@ -255,6 +258,7 @@ export type Database = {
           updated_at?: string | null
           username: string
           verified?: boolean | null
+          views_per_post?: number | null
         }
         Update: {
           avatar_url?: string | null
@@ -278,6 +282,7 @@ export type Database = {
           rating?: number | null
           recent_posts_stats?: Json | null
           reviews_count?: number | null
+          shares_per_post?: number | null
           stats_updated_at?: string | null
           subscribers_count?: number | null
           successful_ads?: number | null
@@ -287,6 +292,7 @@ export type Database = {
           updated_at?: string | null
           username?: string
           verified?: boolean | null
+          views_per_post?: number | null
         }
         Relationships: [
           {
