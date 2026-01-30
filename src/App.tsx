@@ -10,6 +10,7 @@ import { isTelegramMiniApp, isMobilePlatform } from "@/lib/telegram";
 import Index from "./pages/Index";
 import Channels from "./pages/Channels";
 import Channel from "./pages/Channel";
+import ChannelSettings from "./pages/ChannelSettings";
 import Create from "./pages/Create";
 import Deals from "./pages/Deals";
 import Profile from "./pages/Profile";
@@ -44,6 +45,7 @@ const App = () => {
                 <Route path="/" element={<Index />} />
                 <Route path="/channels" element={<Channels />} />
                 <Route path="/channel/:id" element={<Channel />} />
+                <Route path="/channel/:id/settings" element={<ChannelSettings />} />
                 <Route path="/create" element={<Create />} />
                 <Route path="/deals" element={<Deals />} />
                 <Route path="/profile" element={<Profile />} />

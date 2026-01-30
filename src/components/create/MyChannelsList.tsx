@@ -1,14 +1,13 @@
-import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Users, BadgeCheck, ArrowLeft, EyeOff, Settings } from "lucide-react";
-import { useUserChannels, useToggleChannelActive, UserChannel } from "@/hooks/useUserChannels";
+import { useUserChannels, useToggleChannelActive } from "@/hooks/useUserChannels";
 import { channelCategories } from "@/data/channelCategories";
 import { cn } from "@/lib/utils";
 import { ChannelTeamCompact } from "./ChannelTeamCompact";
-import { ChannelSettingsDialog } from "./ChannelSettingsDialog";
 
 interface MyChannelsListProps {
   onAddChannel: () => void;
@@ -16,9 +15,9 @@ interface MyChannelsListProps {
 }
 
 export const MyChannelsList = ({ onAddChannel, onBack }: MyChannelsListProps) => {
+  const navigate = useNavigate();
   const { data: channels, isLoading } = useUserChannels();
   const toggleActive = useToggleChannelActive();
-  const [settingsChannel, setSettingsChannel] = useState<UserChannel | null>(null);
 
   const getCategoryName = (categoryId: string) => {
     return channelCategories.find((c) => c.id === categoryId)?.name || categoryId;
@@ -31,10 +30,10 @@ export const MyChannelsList = ({ onAddChannel, onBack }: MyChannelsListProps) =>
     return count.toString();
   };
 
-  const handleToggle = (channel: UserChannel) => {
+  const handleToggle = (channelId: string, currentStatus: boolean | null) => {
     toggleActive.mutate({
-      channelId: channel.id,
-      isActive: !channel.is_active,
+      channelId,
+      isActive: !currentStatus,
     });
   };
 
@@ -117,7 +116,7 @@ export const MyChannelsList = ({ onAddChannel, onBack }: MyChannelsListProps) =>
 
                   <Switch
                     checked={channel.is_active || false}
-                    onCheckedChange={() => handleToggle(channel)}
+                    onCheckedChange={() => handleToggle(channel.id, channel.is_active)}
                     disabled={toggleActive.isPending}
                   />
                 </div>
@@ -126,7 +125,7 @@ export const MyChannelsList = ({ onAddChannel, onBack }: MyChannelsListProps) =>
                 <div className="flex items-center justify-between mt-2">
                   <ChannelTeamCompact channelId={channel.id} />
                   <button
-                    onClick={() => setSettingsChannel(channel)}
+                    onClick={() => navigate(`/channel/${channel.id}/settings`)}
                     className="p-2 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors"
                     title="Настройки канала"
                   >
@@ -156,13 +155,6 @@ export const MyChannelsList = ({ onAddChannel, onBack }: MyChannelsListProps) =>
         <ArrowLeft className="w-4 h-4 mr-2" />
         Назад
       </Button>
-
-      {/* Settings Dialog */}
-      <ChannelSettingsDialog
-        channel={settingsChannel}
-        isOpen={!!settingsChannel}
-        onClose={() => setSettingsChannel(null)}
-      />
     </div>
   );
 };
