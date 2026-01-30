@@ -23,8 +23,15 @@ Deno.serve(async (req) => {
     }
 
     // Check if VPS URL is configured
-    const vpsUrl = Deno.env.get("MTPROTO_VPS_URL");
+    let vpsUrl = Deno.env.get("MTPROTO_VPS_URL");
     const vpsSecret = Deno.env.get("MTPROTO_VPS_SECRET");
+
+    console.log(`[mtproto] VPS URL from env: "${vpsUrl}"`);
+
+    // Ensure URL has protocol
+    if (vpsUrl && !vpsUrl.startsWith("http")) {
+      vpsUrl = `https://${vpsUrl}`;
+    }
 
     if (vpsUrl && vpsSecret) {
       // Proxy request to VPS with MTProto implementation
