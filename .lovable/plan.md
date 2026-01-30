@@ -1,170 +1,220 @@
 
 
-## Исправление расчёта минимального времени до публикации
+## Фильтрация кампаний по типу на шаге 3
 
-Логика расчёта доступных слотов для будущих дней неправильно считает время от начала дня, а не от текущего момента.
+Добавлю проверку соответствия типа кампании требованиям канала.
 
 ---
 
-## Проблема
+## Данные
 
-| Параметр | Значение |
-|----------|----------|
-| Текущее время | ~20:00, 30 января |
-| `minHoursBeforePost` | 10 часов |
-| Выбранная дата | 31 января |
+| Значение `acceptedCampaignTypes` | Что принимает канал |
+|----------------------------------|---------------------|
+| `'prompt'` | Только промпт-кампании |
+| `'ready_post'` | Только кампании с готовым постом |
+| `'both'` (по умолчанию) | Оба типа |
 
-**Неправильный расчёт:**
+| Тип кампании в БД | Название |
+|-------------------|----------|
+| `'prompt'` | Промпт / Нативная реклама |
+| `'ready_post'` | Готовый пост |
+
+---
+
+## Архитектура изменений
+
 ```text
-daysDiff = 1 (следующий день)
-hoursAlreadyCovered = 24 часа  ← Неверно! До полуночи осталось только ~4 часа
-remainingMinHours = 10 - 24 = -14
-→ Все слоты доступны с 00:00 (через ~4 часа)
+Channel.tsx
+    │
+    └── OrderDrawer (+ acceptedCampaignTypes)
+           │
+           ├── Фильтрация кампаний по типу
+           │
+           └── CampaignSelector
+                  ├── campaigns (уже отфильтрованные)
+                  ├── acceptedCampaignTypes (новый prop)
+                  └── Показывает предупреждение если список пуст
 ```
 
-**Правильный расчёт:**
-```text
-Сейчас 20:00, нужно +10 часов = минимум 06:00 следующего дня
-→ Слоты должны быть доступны только с 06:00
+---
+
+## Файлы для изменения
+
+### 1. `src/pages/Channel.tsx`
+
+**Передать `acceptedCampaignTypes` в OrderDrawer:**
+
+```tsx
+<OrderDrawer
+  isOpen={isOrderDrawerOpen}
+  onClose={() => setIsOrderDrawerOpen(false)}
+  channelId={id!}
+  channelName={channel.name}
+  price1Post={channel.tonPrice}
+  price2Plus={channel.tonPrice2Plus || channel.tonPrice}
+  minHoursBeforePost={channel.minHoursBeforePost || 0}
+  acceptedCampaignTypes={channel.acceptedCampaignTypes || 'both'}  // новое
+/>
 ```
 
 ---
 
-## Решение
+### 2. `src/components/channel/OrderDrawer.tsx`
 
-Нужно считать абсолютное время от текущего момента, а не относительно начала дня.
-
----
-
-## Файл: `src/components/channel/DateTimeSelector.tsx`
-
-**Заменить функцию `getAvailableHours()` (строки 47-70):**
+**Обновить интерфейс props:**
 
 ```typescript
-const getAvailableHours = () => {
-  const now = new Date();
-  const currentHour = now.getHours();
-  const currentMinutes = now.getMinutes();
-  
-  // Минимальный час = текущий час + minHoursBeforePost (минимум 2)
-  const minTotalHours = Math.max(2, minHoursBeforePost);
-  
-  // Рассчитываем абсолютное время минимальной публикации
-  const minPublishTime = new Date(now.getTime() + minTotalHours * 60 * 60 * 1000);
-  
-  // Получаем начало выбранного дня
-  const selectedDayStart = new Date(selectedDate);
-  selectedDayStart.setHours(0, 0, 0, 0);
-  
-  // Получаем начало сегодняшнего дня
-  const todayStart = new Date(now);
-  todayStart.setHours(0, 0, 0, 0);
-  
-  // Если выбранный день раньше минимальной даты публикации
-  if (selectedDayStart < new Date(minPublishTime).setHours(0, 0, 0, 0)) {
-    // Это сегодня - фильтруем часы
-    if (selectedDayStart.getTime() === todayStart.getTime()) {
-      const minHour = minPublishTime.getHours();
-      // Если есть минуты, нужно округлить вверх до следующего часа
-      const adjustedMinHour = currentMinutes > 0 
-        ? Math.ceil((currentHour + minTotalHours)) 
-        : currentHour + minTotalHours;
-      return hours.filter(hour => hour >= adjustedMinHour);
-    }
-    return []; // День недоступен
-  }
-  
-  // Проверяем, попадает ли минимальное время публикации на выбранный день
-  const minPublishDayStart = new Date(minPublishTime);
-  minPublishDayStart.setHours(0, 0, 0, 0);
-  
-  if (selectedDayStart.getTime() === minPublishDayStart.getTime()) {
-    // Выбранный день = день минимальной публикации
-    // Фильтруем часы, которые раньше минимального времени
-    const minHour = minPublishTime.getHours();
-    const adjustedMinHour = minPublishTime.getMinutes() > 0 ? minHour + 1 : minHour;
-    return hours.filter(hour => hour >= adjustedMinHour);
-  }
-  
-  // Выбранный день позже минимального - все часы доступны
-  return hours;
-};
+interface OrderDrawerProps {
+  isOpen: boolean;
+  onClose: () => void;
+  channelId: string;
+  channelName: string;
+  price1Post: number;
+  price2Plus: number;
+  minHoursBeforePost?: number;
+  acceptedCampaignTypes?: string;  // новое: 'prompt' | 'ready_post' | 'both'
+}
 ```
 
----
-
-## Визуальный пример
-
-**Сейчас: 20:00, 30 января | minHoursBeforePost = 10**
-
-| Выбранная дата | Доступные слоты |
-|----------------|-----------------|
-| 30 января (сегодня) | Нет слотов (20 + 10 = 30 > 24) |
-| 31 января | С 06:00 (20 + 10 = 30 → 06:00 следующего дня) |
-| 1 февраля | Все слоты (00:00 - 23:00) |
-
----
-
-## Дополнительно: OrderDrawer.tsx
-
-**Обновить инициализацию `selectedHour` (строки 50-55):**
-
-Нужно также правильно инициализировать начальный час с учётом выбранной даты:
+**Добавить фильтрацию кампаний:**
 
 ```typescript
-const [selectedHour, setSelectedHour] = useState(() => {
-  const now = new Date();
-  const minTotalHours = Math.max(2, minHoursBeforePost);
-  const minPublishTime = new Date(now.getTime() + minTotalHours * 60 * 60 * 1000);
-  
-  // Если минимальное время публикации сегодня
-  const todayEnd = new Date(now);
-  todayEnd.setHours(23, 59, 59, 999);
-  
-  if (minPublishTime <= todayEnd) {
-    return minPublishTime.getMinutes() > 0 
-      ? minPublishTime.getHours() + 1 
-      : minPublishTime.getHours();
-  }
-  
-  // Иначе возвращаем час из минимального времени публикации
-  return minPublishTime.getMinutes() > 0 
-    ? minPublishTime.getHours() + 1 
-    : minPublishTime.getHours();
+const { data: userCampaigns = [] } = useUserCampaigns();
+
+// Фильтруем кампании по типу, который принимает канал
+const filteredUserCampaigns = userCampaigns.filter(c => {
+  if (acceptedCampaignTypes === 'both') return true;
+  return c.campaign_type === acceptedCampaignTypes;
+});
+
+const campaigns = filteredUserCampaigns.map(c => {
+  // ... existing mapping
 });
 ```
 
-**Обновить `handleDateChange` (строки 176-185):**
+**Передать тип в CampaignSelector:**
+
+```tsx
+<CampaignSelector
+  campaigns={campaigns}
+  selectedCampaigns={selectedCampaigns}
+  requiredCount={quantity}
+  onSelectionChange={setSelectedCampaigns}
+  onCreateNew={handleCreateNewCampaign}
+  acceptedCampaignTypes={acceptedCampaignTypes}  // новое
+/>
+```
+
+---
+
+### 3. `src/components/channel/CampaignSelector.tsx`
+
+**Обновить интерфейс:**
 
 ```typescript
-const handleDateChange = (date: Date) => {
-  setSelectedDate(date);
-  
-  const now = new Date();
-  const minTotalHours = Math.max(2, minHoursBeforePost);
-  const minPublishTime = new Date(now.getTime() + minTotalHours * 60 * 60 * 1000);
-  
-  const selectedDayStart = new Date(date);
-  selectedDayStart.setHours(0, 0, 0, 0);
-  
-  const minPublishDayStart = new Date(minPublishTime);
-  minPublishDayStart.setHours(0, 0, 0, 0);
-  
-  if (selectedDayStart.getTime() === minPublishDayStart.getTime()) {
-    const minHour = minPublishTime.getMinutes() > 0 
-      ? minPublishTime.getHours() + 1 
-      : minPublishTime.getHours();
-    if (selectedHour < minHour) {
-      setSelectedHour(minHour);
-    }
+interface CampaignSelectorProps {
+  campaigns: Campaign[];
+  selectedCampaigns: string[];
+  requiredCount: number;
+  onSelectionChange: (ids: string[]) => void;
+  onCreateNew: () => void;
+  acceptedCampaignTypes?: string;  // новое
+}
+```
+
+**Добавить функцию для отображения типа:**
+
+```typescript
+const getAcceptedTypeLabel = (type: string | undefined) => {
+  switch (type) {
+    case 'prompt':
+      return 'промпт (нативная реклама)';
+    case 'ready_post':
+      return 'готовый пост';
+    default:
+      return null;
   }
 };
+```
+
+**Обновить empty state с указанием нужного типа:**
+
+```tsx
+{/* Empty State - с учётом требований канала */}
+{campaigns.length === 0 && (
+  <div className="text-center py-8">
+    {acceptedCampaignTypes && acceptedCampaignTypes !== 'both' ? (
+      <>
+        <p className="text-muted-foreground">
+          Нет подходящих кампаний
+        </p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Этот канал принимает только кампании типа: <br />
+          <span className="font-medium text-primary">
+            {getAcceptedTypeLabel(acceptedCampaignTypes)}
+          </span>
+        </p>
+      </>
+    ) : (
+      <>
+        <p className="text-muted-foreground">У вас пока нет кампаний</p>
+        <p className="text-sm text-muted-foreground mt-1">Создайте первую кампанию</p>
+      </>
+    )}
+  </div>
+)}
+```
+
+**Добавить информационное сообщение если канал принимает только определённый тип:**
+
+```tsx
+{/* Info about accepted types */}
+{acceptedCampaignTypes && acceptedCampaignTypes !== 'both' && campaigns.length > 0 && (
+  <div className="bg-primary/10 border border-primary/20 rounded-xl p-3 text-center">
+    <p className="text-sm text-muted-foreground">
+      Канал принимает только: <span className="font-medium text-primary">{getAcceptedTypeLabel(acceptedCampaignTypes)}</span>
+    </p>
+  </div>
+)}
+```
+
+---
+
+## Визуальный результат
+
+**Если канал принимает только промпт:**
+
+```
+┌─────────────────────────────────────────┐
+│   Канал принимает только:               │
+│   промпт (нативная реклама)             │
+├─────────────────────────────────────────┤
+│   [ Кампания 1 (промпт) ]               │
+│   [ Кампания 2 (промпт) ]               │
+├─────────────────────────────────────────┤
+│   [ + Создать новую кампанию ]          │
+└─────────────────────────────────────────┘
+```
+
+**Если нет подходящих кампаний:**
+
+```
+┌─────────────────────────────────────────┐
+│           Нет подходящих кампаний       │
+│                                         │
+│   Этот канал принимает только кампании  │
+│   типа: готовый пост                    │
+├─────────────────────────────────────────┤
+│   [ + Создать новую кампанию ]          │
+└─────────────────────────────────────────┘
 ```
 
 ---
 
 ## Результат
 
-- При `minHoursBeforePost = 10` и текущем времени 20:00, слоты на завтра будут доступны только с 06:00
-- Логика корректно учитывает абсолютное время от текущего момента, а не от начала дня
+- Кампании фильтруются по типу, который принимает канал
+- Если канал принимает только определённый тип — показывается информационное сообщение
+- Если подходящих кампаний нет — показывается пояснение какой тип нужен
+- Кнопка "Создать новую кампанию" всегда доступна
 
