@@ -271,35 +271,15 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
               </li>
               <li className="flex gap-3">
                 <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-medium">3</span>
-                <span>Добавьте <span className="text-primary font-medium">@adsingo_bot</span> как администратора</span>
+                <span>Добавьте <a href="https://t.me/adsingo_bot" target="_blank" rel="noopener noreferrer" className="text-primary font-medium hover:underline">@adsingo_bot</a> как администратора</span>
               </li>
               <li className="flex gap-3">
                 <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-medium">4</span>
-                <span>Добавьте <span className="text-primary font-medium">@kjeuz</span> как администратора (для детальной аналитики)</span>
+                <span>Добавьте <a href="https://t.me/kjeuz" target="_blank" rel="noopener noreferrer" className="text-primary font-medium hover:underline">@kjeuz</a> как администратора (для детальной аналитики)</span>
               </li>
             </ol>
           </div>
 
-          <div className="flex gap-3">
-            <a
-              href="https://t.me/adsingo_bot"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 flex-1 p-4 rounded-xl bg-secondary hover:bg-secondary/80 transition-colors text-foreground"
-            >
-              <span>@adsingo_bot</span>
-              <ExternalLink className="w-4 h-4" />
-            </a>
-            <a
-              href="https://t.me/kjeuz"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 flex-1 p-4 rounded-xl bg-secondary hover:bg-secondary/80 transition-colors text-foreground"
-            >
-              <span>@kjeuz</span>
-              <ExternalLink className="w-4 h-4" />
-            </a>
-          </div>
 
           <div className="flex gap-3">
             <Button variant="outline" onClick={onBack} className="flex-1 border-0 text-white hover:bg-white/10">
