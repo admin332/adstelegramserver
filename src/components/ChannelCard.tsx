@@ -121,17 +121,19 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       </div>
 
 
-      {/* Category & Views Badge - Left */}
-      <div className="absolute top-3 left-3 flex items-center gap-2 flex-wrap">
-        <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1">
-          <Eye className="w-3 h-3" />
-          <span>{formatNumber(avgViews)}</span>
+      {/* Top Left Badges */}
+      <div className="absolute top-3 left-3 flex flex-col gap-1.5">
+        <div className="flex items-center gap-2">
+          <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1">
+            <Eye className="w-3 h-3" />
+            <span>{formatNumber(avgViews)}</span>
+          </div>
+          <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full">
+            {getCampaignTypeLabel(acceptedCampaignTypes)}
+          </div>
         </div>
-        <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full">
+        <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full w-fit">
           {getCategoryById(category)?.name || category}
-        </div>
-        <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full">
-          {getCampaignTypeLabel(acceptedCampaignTypes)}
         </div>
       </div>
 
