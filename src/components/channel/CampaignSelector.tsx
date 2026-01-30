@@ -19,6 +19,7 @@ interface CampaignSelectorProps {
   requiredCount: number;
   onSelectionChange: (ids: string[]) => void;
   onCreateNew: () => void;
+  acceptedCampaignTypes?: string;
 }
 
 const CampaignSelector: React.FC<CampaignSelectorProps> = ({
@@ -27,7 +28,18 @@ const CampaignSelector: React.FC<CampaignSelectorProps> = ({
   requiredCount,
   onSelectionChange,
   onCreateNew,
+  acceptedCampaignTypes = 'both',
 }) => {
+  const getAcceptedTypeLabel = (type: string | undefined) => {
+    switch (type) {
+      case 'prompt':
+        return 'промпт (нативная реклама)';
+      case 'ready_post':
+        return 'готовый пост';
+      default:
+        return null;
+    }
+  };
   const handleToggleCampaign = (campaignId: string) => {
     if (selectedCampaigns.includes(campaignId)) {
       onSelectionChange(selectedCampaigns.filter((id) => id !== campaignId));
@@ -51,11 +63,36 @@ const CampaignSelector: React.FC<CampaignSelectorProps> = ({
         </p>
       )}
 
-      {/* Empty State */}
+      {/* Info about accepted types */}
+      {acceptedCampaignTypes && acceptedCampaignTypes !== 'both' && campaigns.length > 0 && (
+        <div className="bg-primary/10 border border-primary/20 rounded-xl p-3 text-center">
+          <p className="text-sm text-muted-foreground">
+            Канал принимает только: <span className="font-medium text-primary">{getAcceptedTypeLabel(acceptedCampaignTypes)}</span>
+          </p>
+        </div>
+      )}
+
+      {/* Empty State - с учётом требований канала */}
       {campaigns.length === 0 && (
         <div className="text-center py-8">
-          <p className="text-muted-foreground">У вас пока нет кампаний</p>
-          <p className="text-sm text-muted-foreground mt-1">Создайте первую кампанию</p>
+          {acceptedCampaignTypes && acceptedCampaignTypes !== 'both' ? (
+            <>
+              <p className="text-muted-foreground">
+                Нет подходящих кампаний
+              </p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Этот канал принимает только кампании типа: <br />
+                <span className="font-medium text-primary">
+                  {getAcceptedTypeLabel(acceptedCampaignTypes)}
+                </span>
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-muted-foreground">У вас пока нет кампаний</p>
+              <p className="text-sm text-muted-foreground mt-1">Создайте первую кампанию</p>
+            </>
+          )}
         </div>
       )}
 
