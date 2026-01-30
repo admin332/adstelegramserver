@@ -352,12 +352,13 @@ Deno.serve(async (req) => {
                 console.log(`[refresh] Notifications enabled: ${notificationsEnabled}%`);
               }
               
-              // Top hours: { x, y0 } → { hour, value }
+              // Top hours: { x, [label]: value } → { hour, value } (динамические ключи)
               if (mtprotoData.stats.topHours?.length > 0) {
-                topHours = mtprotoData.stats.topHours.map((h: { y0?: number; [key: string]: unknown }, idx: number) => ({
-                  hour: idx,
-                  value: h.y0 || h['y0'] || 0
-                }));
+                topHours = mtprotoData.stats.topHours.map((h: Record<string, unknown>, idx: number) => {
+                  const valueKey = Object.keys(h).find(k => k !== 'x');
+                  const value = valueKey ? (Number(h[valueKey]) || 0) : 0;
+                  return { hour: idx, value };
+                });
                 console.log(`[refresh] Got top hours data`);
               }
             }

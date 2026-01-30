@@ -526,12 +526,14 @@ Deno.serve(async (req) => {
             updateData.notifications_enabled = percentage;
           }
           
-          // Top hours: формат графика { x, y0 } → { hour, value }
+          // Top hours: формат графика с динамическими ключами { x, [label]: value } → { hour, value }
           if (stats.topHours && Array.isArray(stats.topHours) && stats.topHours.length > 0) {
-            updateData.top_hours = stats.topHours.map((h: { y0?: number; [key: string]: unknown }, idx: number) => ({
-              hour: idx,
-              value: h.y0 || h['y0'] || 0
-            }));
+            updateData.top_hours = stats.topHours.map((h: Record<string, unknown>, idx: number) => {
+              // Найти первый ключ не равный 'x' — это и есть значение активности
+              const valueKey = Object.keys(h).find(k => k !== 'x');
+              const value = valueKey ? (Number(h[valueKey]) || 0) : 0;
+              return { hour: idx, value };
+            });
           }
           
           // Premium stats: это график активности, не процент подписчиков
