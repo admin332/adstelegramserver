@@ -222,6 +222,7 @@ const Channel: React.FC = () => {
         channelId={id!}
         channelName={channel.name}
         pricePerPost={channel.tonPrice}
+        minHoursBeforePost={channel.minHoursBeforePost || 0}
       />
     </div>
   );

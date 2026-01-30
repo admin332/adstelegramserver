@@ -34,6 +34,7 @@ interface Deal {
     title: string | null;
     username: string;
     owner_id: string;
+    auto_delete_posts: boolean | null;
   };
   advertiser_id: string;
 }
@@ -344,7 +345,7 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; refunded?: b
     // Increment successful_ads counter for the channel using raw update
     const { data: channelData } = await supabase
       .from("channels")
-      .select("successful_ads")
+      .select("successful_ads, auto_delete_posts")
       .eq("id", deal.channel_id)
       .maybeSingle();
 
@@ -360,15 +361,33 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; refunded?: b
       console.log(`Incremented successful_ads for channel ${deal.channel_id}`);
     }
 
+    // Auto-delete post if enabled
+    let postDeleted = false;
+    if (channelData?.auto_delete_posts && deal.telegram_message_id && deal.channel.telegram_chat_id) {
+      console.log(`Auto-delete enabled for channel ${deal.channel_id}, deleting post...`);
+      try {
+        const deleteResult = await sendTelegramRequest("deleteMessage", {
+          chat_id: deal.channel.telegram_chat_id,
+          message_id: deal.telegram_message_id,
+        });
+        postDeleted = deleteResult.ok === true;
+        console.log(`Auto-delete result for deal ${deal.id}:`, deleteResult);
+      } catch (deleteError) {
+        console.error(`Failed to auto-delete post for deal ${deal.id}:`, deleteError);
+      }
+    }
+
     // Notify advertiser and request rating
     if (advertiser?.telegram_id) {
+      const autoDeleteNote = postDeleted ? "\n\n🗑️ Рекламный пост был автоматически удалён." : "";
+      
       await sendTelegramMessage(
         advertiser.telegram_id,
         `✅ <b>Размещение завершено!</b>
 
 Ваша реклама в канале <b>${channelTitle}</b> (@${deal.channel.username}) успешно отработала полный срок (${durationText}).
 
-Средства переведены владельцу канала.
+Средства переведены владельцу канала.${autoDeleteNote}
 Спасибо за использование Adsingo! 🚀`
       );
 
@@ -388,12 +407,13 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; refunded?: b
       const paymentNote = transferSuccess 
         ? `\n\n💎 <b>${deal.total_price} TON</b> переведены на ваш кошелёк.`
         : `\n\nСредства будут переведены на ваш кошелёк в ближайшее время.`;
+      const autoDeleteNote = postDeleted ? "\n\n🗑️ Рекламный пост был автоматически удалён." : "";
       
       await sendTelegramMessage(
         owner.telegram_id,
         `💰 <b>Оплата получена!</b>
 
-Реклама в канале <b>${channelTitle}</b> успешно отработала.${paymentNote}
+Реклама в канале <b>${channelTitle}</b> успешно отработала.${paymentNote}${autoDeleteNote}
 
 Спасибо за использование Adsingo! 🚀`
       );
@@ -431,7 +451,7 @@ Deno.serve(async (req) => {
       .select(`
         id, posted_at, duration_hours, total_price, advertiser_id,
         telegram_message_id, escrow_mnemonic_encrypted, channel_id,
-        channel:channels(telegram_chat_id, title, username, owner_id)
+        channel:channels(telegram_chat_id, title, username, owner_id, auto_delete_posts)
       `)
       .eq("status", "in_progress")
       .not("posted_at", "is", null);

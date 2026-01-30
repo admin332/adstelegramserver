@@ -1,12 +1,14 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Users, BadgeCheck, ArrowLeft, EyeOff } from "lucide-react";
+import { Plus, Users, BadgeCheck, ArrowLeft, EyeOff, Settings } from "lucide-react";
 import { useUserChannels, useToggleChannelActive, UserChannel } from "@/hooks/useUserChannels";
 import { channelCategories } from "@/data/channelCategories";
 import { cn } from "@/lib/utils";
 import { ChannelTeamCompact } from "./ChannelTeamCompact";
+import { ChannelSettingsDialog } from "./ChannelSettingsDialog";
 
 interface MyChannelsListProps {
   onAddChannel: () => void;
@@ -16,6 +18,7 @@ interface MyChannelsListProps {
 export const MyChannelsList = ({ onAddChannel, onBack }: MyChannelsListProps) => {
   const { data: channels, isLoading } = useUserChannels();
   const toggleActive = useToggleChannelActive();
+  const [settingsChannel, setSettingsChannel] = useState<UserChannel | null>(null);
 
   const getCategoryName = (categoryId: string) => {
     return channelCategories.find((c) => c.id === categoryId)?.name || categoryId;
@@ -119,8 +122,17 @@ export const MyChannelsList = ({ onAddChannel, onBack }: MyChannelsListProps) =>
                   />
                 </div>
                 
-                {/* Channel Team */}
-                <ChannelTeamCompact channelId={channel.id} />
+                {/* Bottom row: Team + Settings */}
+                <div className="flex items-center justify-between mt-2">
+                  <ChannelTeamCompact channelId={channel.id} />
+                  <button
+                    onClick={() => setSettingsChannel(channel)}
+                    className="p-2 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors"
+                    title="Настройки канала"
+                  >
+                    <Settings className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -139,11 +151,18 @@ export const MyChannelsList = ({ onAddChannel, onBack }: MyChannelsListProps) =>
       <Button
         variant="outline"
         onClick={onBack}
-        className="w-full border-0 text-white hover:bg-white/10"
+        className="w-full border-0 text-foreground hover:bg-secondary"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Назад
       </Button>
+
+      {/* Settings Dialog */}
+      <ChannelSettingsDialog
+        channel={settingsChannel}
+        isOpen={!!settingsChannel}
+        onClose={() => setSettingsChannel(null)}
+      />
     </div>
   );
 };
