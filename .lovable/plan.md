@@ -1,113 +1,142 @@
 
 
-## Фильтрация кампаний по типу на шаге 3
+## Логика выбора кампаний по типу
 
-Добавлю проверку соответствия типа кампании требованиям канала.
+Изменяем поведение выбора кампаний в зависимости от типа рекламы.
 
 ---
 
-## Данные
+## Правила
 
-| Значение `acceptedCampaignTypes` | Что принимает канал |
-|----------------------------------|---------------------|
-| `'prompt'` | Только промпт-кампании |
-| `'ready_post'` | Только кампании с готовым постом |
-| `'both'` (по умолчанию) | Оба типа |
+| Тип кампании | Количество постов | Требуется кампаний |
+|--------------|-------------------|-------------------|
+| `prompt` | 1, 2, 3... любое | **Всегда 1** |
+| `ready_post` | 1 | 1 |
+| `ready_post` | 2 | 2 |
+| `ready_post` | 3 | 3 |
 
-| Тип кампании в БД | Название |
-|-------------------|----------|
-| `'prompt'` | Промпт / Нативная реклама |
-| `'ready_post'` | Готовый пост |
+**Дополнительно для каналов с `acceptedCampaignTypes = 'both'`:**
+- После выбора первой кампании — показываем только кампании того же типа
+- Если выбрана промпт-кампания — больше ничего выбрать нельзя
+- Если выбрана ready_post — промпт-кампании скрываются
 
 ---
 
 ## Архитектура изменений
 
 ```text
-Channel.tsx
+OrderDrawer
     │
-    └── OrderDrawer (+ acceptedCampaignTypes)
-           │
-           ├── Фильтрация кампаний по типу
-           │
-           └── CampaignSelector
-                  ├── campaigns (уже отфильтрованные)
-                  ├── acceptedCampaignTypes (новый prop)
-                  └── Показывает предупреждение если список пуст
+    ├── selectedCampaigns (текущие выбранные)
+    ├── selectedCampaignType (новое состояние: null | 'prompt' | 'ready_post')
+    │
+    ├── Вычисление requiredCount:
+    │   └── if selectedCampaignType === 'prompt' → 1
+    │   └── else → quantity (количество постов)
+    │
+    ├── Фильтрация campaigns:
+    │   └── if selectedCampaignType !== null → только этот тип
+    │   └── else → по acceptedCampaignTypes канала
+    │
+    └── CampaignSelector
+          ├── campaigns (отфильтрованные)
+          ├── requiredCount (динамический)
+          ├── onSelectionChange (с логикой определения типа)
+          └── Обновлённый UI для показа правил
 ```
 
 ---
 
 ## Файлы для изменения
 
-### 1. `src/pages/Channel.tsx`
+### 1. `src/components/channel/OrderDrawer.tsx`
 
-**Передать `acceptedCampaignTypes` в OrderDrawer:**
-
-```tsx
-<OrderDrawer
-  isOpen={isOrderDrawerOpen}
-  onClose={() => setIsOrderDrawerOpen(false)}
-  channelId={id!}
-  channelName={channel.name}
-  price1Post={channel.tonPrice}
-  price2Plus={channel.tonPrice2Plus || channel.tonPrice}
-  minHoursBeforePost={channel.minHoursBeforePost || 0}
-  acceptedCampaignTypes={channel.acceptedCampaignTypes || 'both'}  // новое
-/>
-```
-
----
-
-### 2. `src/components/channel/OrderDrawer.tsx`
-
-**Обновить интерфейс props:**
+**Добавить состояние для отслеживания выбранного типа:**
 
 ```typescript
-interface OrderDrawerProps {
-  isOpen: boolean;
-  onClose: () => void;
-  channelId: string;
-  channelName: string;
-  price1Post: number;
-  price2Plus: number;
-  minHoursBeforePost?: number;
-  acceptedCampaignTypes?: string;  // новое: 'prompt' | 'ready_post' | 'both'
-}
+const [selectedCampaignType, setSelectedCampaignType] = useState<string | null>(null);
 ```
 
-**Добавить фильтрацию кампаний:**
+**Вычислить динамический requiredCount:**
 
 ```typescript
-const { data: userCampaigns = [] } = useUserCampaigns();
+// Для промпта нужна только 1 кампания, для ready_post — по количеству постов
+const requiredCampaignsCount = selectedCampaignType === 'prompt' ? 1 : quantity;
+```
 
-// Фильтруем кампании по типу, который принимает канал
+**Обновить фильтрацию кампаний:**
+
+```typescript
+// Фильтруем кампании
 const filteredUserCampaigns = userCampaigns.filter(c => {
+  // Если уже выбран тип — показываем только этот тип
+  if (selectedCampaignType) {
+    return c.campaign_type === selectedCampaignType;
+  }
+  // Иначе фильтруем по настройкам канала
   if (acceptedCampaignTypes === 'both') return true;
   return c.campaign_type === acceptedCampaignTypes;
 });
-
-const campaigns = filteredUserCampaigns.map(c => {
-  // ... existing mapping
-});
 ```
 
-**Передать тип в CampaignSelector:**
+**Обновить handleSelectionChange для определения типа:**
 
-```tsx
-<CampaignSelector
-  campaigns={campaigns}
-  selectedCampaigns={selectedCampaigns}
-  requiredCount={quantity}
-  onSelectionChange={setSelectedCampaigns}
-  onCreateNew={handleCreateNewCampaign}
-  acceptedCampaignTypes={acceptedCampaignTypes}  // новое
-/>
+```typescript
+const handleCampaignSelectionChange = (ids: string[]) => {
+  setSelectedCampaigns(ids);
+  
+  if (ids.length === 0) {
+    // Сбросить тип если ничего не выбрано
+    setSelectedCampaignType(null);
+  } else if (ids.length === 1 && selectedCampaignType === null) {
+    // Определить тип по первой выбранной кампании
+    const selectedCampaign = userCampaigns.find(c => c.id === ids[0]);
+    if (selectedCampaign) {
+      setSelectedCampaignType(selectedCampaign.campaign_type);
+    }
+  }
+};
+```
+
+**Обновить canProceed для шага 3:**
+
+```typescript
+case 3:
+  return selectedCampaigns.length === requiredCampaignsCount;
+```
+
+**Обновить subtitle для шага 3:**
+
+```typescript
+3: selectedCampaignType === 'prompt' 
+  ? 'Выберите 1 кампанию (промпт)'
+  : quantity > 1 
+    ? `Выберите ${quantity} кампании` 
+    : 'Выберите кампанию',
+```
+
+**Сбросить тип при возврате на шаг 3:**
+
+```typescript
+const handleBack = () => {
+  if (currentStep > 1) {
+    setCurrentStep(currentStep - 1);
+    if (currentStep === 4) {
+      setEscrowAddress(null);
+      setDealId(null);
+    }
+    // Сбросить выбор кампаний при возврате на шаг 2
+    if (currentStep === 3) {
+      setSelectedCampaigns([]);
+      setSelectedCampaignType(null);
+    }
+  }
+};
 ```
 
 ---
 
-### 3. `src/components/channel/CampaignSelector.tsx`
+### 2. `src/components/channel/CampaignSelector.tsx`
 
 **Обновить интерфейс:**
 
@@ -118,63 +147,65 @@ interface CampaignSelectorProps {
   requiredCount: number;
   onSelectionChange: (ids: string[]) => void;
   onCreateNew: () => void;
-  acceptedCampaignTypes?: string;  // новое
+  acceptedCampaignTypes?: string;
+  selectedCampaignType?: string | null;  // новое
+  isPromptMode?: boolean;  // новое: для UI подсказок
 }
 ```
 
-**Добавить функцию для отображения типа:**
+**Обновить handleToggleCampaign:**
 
 ```typescript
-const getAcceptedTypeLabel = (type: string | undefined) => {
-  switch (type) {
-    case 'prompt':
-      return 'промпт (нативная реклама)';
-    case 'ready_post':
-      return 'готовый пост';
-    default:
-      return null;
+const handleToggleCampaign = (campaignId: string) => {
+  if (selectedCampaigns.includes(campaignId)) {
+    // Снять выбор
+    onSelectionChange(selectedCampaigns.filter((id) => id !== campaignId));
+  } else {
+    // Если промпт — только 1 кампания
+    if (requiredCount === 1) {
+      onSelectionChange([campaignId]);
+    } else if (selectedCampaigns.length < requiredCount) {
+      onSelectionChange([...selectedCampaigns, campaignId]);
+    }
   }
 };
 ```
 
-**Обновить empty state с указанием нужного типа:**
+**Добавить информационное сообщение о правилах:**
 
 ```tsx
-{/* Empty State - с учётом требований канала */}
-{campaigns.length === 0 && (
-  <div className="text-center py-8">
-    {acceptedCampaignTypes && acceptedCampaignTypes !== 'both' ? (
-      <>
-        <p className="text-muted-foreground">
-          Нет подходящих кампаний
-        </p>
-        <p className="text-sm text-muted-foreground mt-1">
-          Этот канал принимает только кампании типа: <br />
-          <span className="font-medium text-primary">
-            {getAcceptedTypeLabel(acceptedCampaignTypes)}
-          </span>
-        </p>
-      </>
-    ) : (
-      <>
-        <p className="text-muted-foreground">У вас пока нет кампаний</p>
-        <p className="text-sm text-muted-foreground mt-1">Создайте первую кампанию</p>
-      </>
-    )}
+{/* Info about prompt mode */}
+{isPromptMode && (
+  <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-center">
+    <p className="text-sm text-muted-foreground">
+      Для промпт-рекламы нужна только <span className="font-medium text-blue-500">1 кампания</span> независимо от количества постов
+    </p>
+  </div>
+)}
+
+{/* Info when type is locked */}
+{selectedCampaignType && acceptedCampaignTypes === 'both' && (
+  <div className="bg-primary/10 border border-primary/20 rounded-xl p-3 text-center">
+    <p className="text-sm text-muted-foreground">
+      Выбран тип: <span className="font-medium text-primary">{getAcceptedTypeLabel(selectedCampaignType)}</span>
+    </p>
   </div>
 )}
 ```
 
-**Добавить информационное сообщение если канал принимает только определённый тип:**
+**Обновить Selection Info:**
 
 ```tsx
-{/* Info about accepted types */}
-{acceptedCampaignTypes && acceptedCampaignTypes !== 'both' && campaigns.length > 0 && (
-  <div className="bg-primary/10 border border-primary/20 rounded-xl p-3 text-center">
-    <p className="text-sm text-muted-foreground">
-      Канал принимает только: <span className="font-medium text-primary">{getAcceptedTypeLabel(acceptedCampaignTypes)}</span>
-    </p>
-  </div>
+{/* Selection Info */}
+{requiredCount > 1 && (
+  <p className="text-sm text-muted-foreground text-center">
+    Выбрано {selectedCampaigns.length} из {requiredCount} кампаний
+  </p>
+)}
+{requiredCount === 1 && selectedCampaigns.length === 0 && (
+  <p className="text-sm text-muted-foreground text-center">
+    Выберите кампанию
+  </p>
 )}
 ```
 
@@ -182,30 +213,50 @@ const getAcceptedTypeLabel = (type: string | undefined) => {
 
 ## Визуальный результат
 
-**Если канал принимает только промпт:**
+**Канал принимает оба типа, выбрано 3 поста:**
 
 ```
+Шаг 1: [3 поста]
+Шаг 2: [дата/время]
+Шаг 3:
 ┌─────────────────────────────────────────┐
-│   Канал принимает только:               │
-│   промпт (нативная реклама)             │
-├─────────────────────────────────────────┤
-│   [ Кампания 1 (промпт) ]               │
-│   [ Кампания 2 (промпт) ]               │
-├─────────────────────────────────────────┤
-│   [ + Создать новую кампанию ]          │
+│   [ Промпт кампания 1 ]  ← кликаем      │
+│   [ Промпт кампания 2 ]                 │
+│   [ Ready Post 1 ]                      │
+│   [ Ready Post 2 ]                      │
 └─────────────────────────────────────────┘
 ```
 
-**Если нет подходящих кампаний:**
+**После выбора промпт-кампании:**
 
 ```
 ┌─────────────────────────────────────────┐
-│           Нет подходящих кампаний       │
-│                                         │
-│   Этот канал принимает только кампании  │
-│   типа: готовый пост                    │
+│   Выбран тип: промпт (нативная реклама) │
+│   Для промпт-рекламы нужна только       │
+│   1 кампания независимо от кол-ва постов│
 ├─────────────────────────────────────────┤
-│   [ + Создать новую кампанию ]          │
+│   [✓] Промпт кампания 1  ← выбрана      │
+│   [ ] Промпт кампания 2  ← можно        │
+│                          поменять выбор │
+│   (Ready Post скрыты)                   │
+├─────────────────────────────────────────┤
+│   Выбрано 1 из 1 кампаний               │
+│   [Далее →]                             │
+└─────────────────────────────────────────┘
+```
+
+**Если вместо этого выбрали Ready Post:**
+
+```
+┌─────────────────────────────────────────┐
+│   Выбран тип: готовый пост              │
+├─────────────────────────────────────────┤
+│   [✓] Ready Post 1  ← выбрана           │
+│   [ ] Ready Post 2  ← можно добавить    │
+│   (Промпт кампании скрыты)              │
+├─────────────────────────────────────────┤
+│   Выбрано 1 из 3 кампаний               │
+│   [Далее →] (неактивна, нужно ещё 2)    │
 └─────────────────────────────────────────┘
 ```
 
@@ -213,8 +264,9 @@ const getAcceptedTypeLabel = (type: string | undefined) => {
 
 ## Результат
 
-- Кампании фильтруются по типу, который принимает канал
-- Если канал принимает только определённый тип — показывается информационное сообщение
-- Если подходящих кампаний нет — показывается пояснение какой тип нужен
-- Кнопка "Создать новую кампанию" всегда доступна
+- Промпт-кампании: всегда 1 кампания независимо от количества постов
+- Ready Post кампании: количество кампаний = количеству постов
+- Нельзя смешивать типы кампаний в одном заказе
+- После выбора первой кампании — список фильтруется по её типу
+- Понятные UI-подсказки о текущих правилах
 
