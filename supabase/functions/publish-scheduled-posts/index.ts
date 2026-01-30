@@ -11,16 +11,28 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+interface DraftItem {
+  index: number;
+  text: string | null;
+  entities: object[];
+  media: MediaItem[];
+  approved: boolean | null;
+  message_id?: number;
+  chat_id?: number;
+}
+
 interface Deal {
   id: string;
   campaign_id: string;
   channel_id: string;
   advertiser_id: string;
   scheduled_at: string;
+  posts_count: number;
   author_draft?: string;
   author_draft_entities?: object[];
   author_draft_media?: MediaItem[];
   author_draft_media_urls?: string[];
+  author_drafts?: DraftItem[];
 }
 
 interface Campaign {
@@ -288,34 +300,70 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; error?: stri
       console.error("Failed to get advertiser:", advertiserError);
     }
 
-    let messageId: number;
     const isPromptCampaign = campaign.campaign_type === "prompt";
+    const messageIds: number[] = [];
 
-    // For prompt campaigns, use author's draft with file_id and entities
-    if (isPromptCampaign && deal.author_draft) {
-      console.log(`Publishing prompt campaign draft for deal ${deal.id} with file_id and entities`);
+    // For prompt campaigns with multiple drafts, publish all approved drafts
+    if (isPromptCampaign && deal.author_drafts && deal.author_drafts.length > 0) {
+      console.log(`Publishing ${deal.author_drafts.length} prompt campaign drafts for deal ${deal.id}`);
       
-      messageId = await publishDraftToChannel(
+      for (const draft of deal.author_drafts) {
+        if (draft.approved !== true) {
+          console.log(`Skipping unapproved draft ${draft.index} for deal ${deal.id}`);
+          continue;
+        }
+        
+        const messageId = await publishDraftToChannel(
+          channel.telegram_chat_id,
+          draft.text || "",
+          draft.entities || [],
+          draft.media || [],
+          null, // Prompt campaigns don't use buttons (link is embedded in text)
+          null
+        );
+        messageIds.push(messageId);
+        
+        console.log(`Published draft ${draft.index + 1} with message_id ${messageId}`);
+        
+        // Small delay between posts
+        if (deal.author_drafts.indexOf(draft) < deal.author_drafts.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+    } 
+    // Legacy: single draft using old fields
+    else if (isPromptCampaign && deal.author_draft) {
+      console.log(`Publishing prompt campaign draft (legacy) for deal ${deal.id}`);
+      
+      const messageId = await publishDraftToChannel(
         channel.telegram_chat_id,
         deal.author_draft,
         deal.author_draft_entities || [],
         deal.author_draft_media || [],
-        null, // Prompt campaigns don't use buttons (link is embedded in text)
+        null,
         null
       );
-    } else {
-      // For ready_post campaigns, use campaign content with URLs
+      messageIds.push(messageId);
+    } 
+    // For ready_post campaigns, use campaign content with URLs
+    else {
       console.log(`Publishing ready_post campaign for deal ${deal.id}`);
       
-      messageId = await publishToChannel(channel.telegram_chat_id, campaign);
+      const messageId = await publishToChannel(channel.telegram_chat_id, campaign);
+      messageIds.push(messageId);
     }
 
-    // Update deal - keep in_progress, set posted_at and telegram_message_id
+    if (messageIds.length === 0) {
+      throw new Error("No posts were published");
+    }
+
+    // Update deal with all message IDs
     const { error: updateError } = await supabase
       .from("deals")
       .update({
         posted_at: new Date().toISOString(),
-        telegram_message_id: messageId,
+        telegram_message_id: messageIds[0], // First for backwards compatibility
+        telegram_message_ids: messageIds,   // All message IDs
       })
       .eq("id", deal.id);
 
@@ -333,7 +381,7 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; error?: stri
       );
     }
 
-    console.log(`Deal ${deal.id} published successfully with message_id ${messageId}`);
+    console.log(`Deal ${deal.id} published successfully with ${messageIds.length} posts, message_ids: ${messageIds.join(', ')}`);
     return { success: true };
   } catch (error) {
     console.error(`Error processing deal ${deal.id}:`, error);
@@ -352,7 +400,7 @@ Deno.serve(async (req) => {
     // Get all in_progress deals where scheduled_at has passed
     const { data: deals, error: dealsError } = await supabase
       .from("deals")
-      .select("id, campaign_id, channel_id, advertiser_id, scheduled_at, author_draft, author_draft_entities, author_draft_media, author_draft_media_urls")
+      .select("id, campaign_id, channel_id, advertiser_id, scheduled_at, posts_count, author_draft, author_draft_entities, author_draft_media, author_draft_media_urls, author_drafts")
       .eq("status", "in_progress")
       .is("posted_at", null)
       .not("scheduled_at", "is", null)

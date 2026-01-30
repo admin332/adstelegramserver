@@ -59,18 +59,29 @@ function isVideoUrl(url: string): boolean {
 }
 
 // Send prompt brief to channel owner (for prompt campaigns)
-async function sendPromptBrief(telegramId: number, campaign: Deal['campaign']) {
+async function sendPromptBrief(
+  telegramId: number, 
+  campaign: Deal['campaign'],
+  postsCount: number
+) {
   if (!campaign) return;
   
   const { text, button_url } = campaign;
+  const postsWord = getPostsWord(postsCount);
   
   let briefMessage = `📋 <b>Бриф от рекламодателя:</b>\n\n${text}`;
   
   if (button_url) {
-    briefMessage += `\n\n🔗 <b>Референс:</b> ${button_url}`;
+    briefMessage += `\n\n🔗 <b>Ссылка на продукт:</b> ${button_url}`;
   }
   
-  briefMessage += `\n\n✍️ <b>Напишите пост по этому брифу</b>\nОтправьте текст и медиа в этот чат.`;
+  if (postsCount > 1) {
+    briefMessage += `\n\n📝 <b>Нужно написать ${postsCount} ${postsWord}</b>`;
+    briefMessage += `\nОтправляйте готовые посты по одному в этот чат.`;
+    briefMessage += `\n\n<i>После каждого поста рекламодатель проверит и одобрит его.</i>`;
+  } else {
+    briefMessage += `\n\n✍️ <b>Напишите пост по этому брифу</b>\nОтправьте текст и медиа в этот чат.`;
+  }
   
   await sendTelegramRequest("sendMessage", {
     chat_id: telegramId,
@@ -306,7 +317,7 @@ serve(async (req) => {
     
     // 1. Send campaign preview or brief based on campaign type
     if (isPromptCampaign) {
-      await sendPromptBrief(ownerTelegramId, typedDeal.campaign);
+      await sendPromptBrief(ownerTelegramId, typedDeal.campaign, typedDeal.posts_count);
     } else {
       await sendCampaignPreview(ownerTelegramId, typedDeal.campaign);
     }

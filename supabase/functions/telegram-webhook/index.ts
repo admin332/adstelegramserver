@@ -248,6 +248,28 @@ function extractMedia(message: Record<string, unknown>): MediaItem[] {
   return media;
 }
 
+// Draft item structure for multi-draft support
+interface DraftItem {
+  index: number;
+  text: string | null;
+  entities: object[];
+  media: MediaItem[];
+  approved: boolean | null;
+  message_id: number;
+  chat_id: number;
+}
+
+// Get Russian plural form for "пост"
+function getPostsWord(count: number): string {
+  const lastTwo = count % 100;
+  const lastOne = count % 10;
+  
+  if (lastTwo >= 11 && lastTwo <= 19) return "постов";
+  if (lastOne === 1) return "пост";
+  if (lastOne >= 2 && lastOne <= 4) return "поста";
+  return "постов";
+}
+
 // Handle incoming message from channel owner (draft submission)
 async function handleDraftMessage(telegramUserId: number, message: Record<string, unknown>) {
   // Get user from DB
@@ -275,34 +297,41 @@ async function handleDraftMessage(telegramUserId: number, message: Record<string
     return;
   }
 
-  // Find escrow deal with prompt campaign waiting for draft
+  // Find escrow deal with prompt campaign waiting for drafts
+  // Now we check author_drafts array length vs posts_count
   const { data: deals } = await supabase
     .from("deals")
     .select(`
       id,
       channel_id,
       advertiser_id,
-      author_draft,
-      is_draft_approved,
+      posts_count,
+      author_drafts,
       campaign:campaigns(campaign_type)
     `)
     .in("channel_id", channelIds)
-    .eq("status", "escrow")
-    .is("author_draft", null);
+    .eq("status", "escrow");
 
-  // Filter for prompt campaigns only
+  // Filter for prompt campaigns that still need drafts
   const promptDeals = deals?.filter(d => {
     const campaign = Array.isArray(d.campaign) ? d.campaign[0] : d.campaign;
-    return campaign?.campaign_type === "prompt";
+    if (campaign?.campaign_type !== "prompt") return false;
+    
+    // Check if more drafts are needed
+    const currentDrafts = (d.author_drafts as DraftItem[]) || [];
+    return currentDrafts.length < d.posts_count;
   }) || [];
 
   if (promptDeals.length === 0) {
-    await sendTelegramMessage(telegramUserId, "📭 Нет сделок, ожидающих черновика.\n\nЕсли у вас есть активные заказы по брифу, черновик уже был отправлен.");
+    await sendTelegramMessage(telegramUserId, "📭 Нет сделок, ожидающих черновика.\n\nЕсли у вас есть активные заказы по брифу, все посты уже были отправлены.");
     return;
   }
 
   // Take the first pending deal
   const deal = promptDeals[0];
+  const currentDrafts = (deal.author_drafts as DraftItem[]) || [];
+  const requiredCount = deal.posts_count;
+  const submittedCount = currentDrafts.length;
 
   // Extract message content with native Telegram data
   const text = (message.text || message.caption || "") as string;
@@ -314,16 +343,23 @@ async function handleDraftMessage(telegramUserId: number, message: Record<string
     return;
   }
 
-  // Save draft to database with file_id and entities
+  // Add new draft to array
+  const newDraft: DraftItem = {
+    index: submittedCount,
+    text: text || null,
+    entities,
+    media,
+    approved: null,
+    message_id: message.message_id as number,
+    chat_id: (message.chat as { id: number }).id,
+  };
+
+  const updatedDrafts = [...currentDrafts, newDraft];
+
+  // Save to database
   const { error: updateError } = await supabase
     .from("deals")
-    .update({
-      author_draft: text || null,
-      author_draft_entities: entities,
-      author_draft_media: media,
-      author_draft_media_urls: [], // Clear legacy field
-      is_draft_approved: null, // Waiting for review
-    })
+    .update({ author_drafts: updatedDrafts })
     .eq("id", deal.id);
 
   if (updateError) {
@@ -352,13 +388,15 @@ async function handleDraftMessage(telegramUserId: number, message: Record<string
     .single();
 
   const channelName = channel?.title || `@${channel?.username}` || "канала";
+  const draftNumber = submittedCount + 1;
 
   // Forward the draft to advertiser
-  // First, send intro message
-  await sendTelegramMessage(
-    advertiser.telegram_id,
-    `📝 <b>Черновик поста от ${channelName}</b>\n\nАвтор канала написал пост по вашему брифу. Проверьте его ниже:`
-  );
+  // For multiple posts, show which draft number
+  const introText = requiredCount > 1
+    ? `📝 <b>Черновик ${draftNumber} из ${requiredCount} от ${channelName}</b>\n\nАвтор канала отправил пост. Проверьте его ниже:`
+    : `📝 <b>Черновик поста от ${channelName}</b>\n\nАвтор канала написал пост по вашему брифу. Проверьте его ниже:`;
+
+  await sendTelegramMessage(advertiser.telegram_id, introText);
 
   await new Promise(resolve => setTimeout(resolve, 300));
 
@@ -370,31 +408,47 @@ async function handleDraftMessage(telegramUserId: number, message: Record<string
 
   await new Promise(resolve => setTimeout(resolve, 300));
 
-  // Send approval buttons
+  // Send approval buttons with draft index
+  const approvalText = requiredCount > 1
+    ? `👆 <b>Проверьте черновик ${draftNumber}</b>`
+    : "👆 <b>Проверьте черновик выше</b>\n\nНажмите «Одобрить» для публикации или «На доработку» с комментарием.";
+
   await sendTelegramMessage(
     advertiser.telegram_id,
-    "👆 <b>Проверьте черновик выше</b>\n\nНажмите «Одобрить» для публикации или «На доработку» с комментарием.",
+    approvalText,
     {
       inline_keyboard: [
         [
-          { text: "✅ Одобрить", callback_data: `approve_draft:${deal.id}` },
-          { text: "✏️ На доработку", callback_data: `revise_draft:${deal.id}` }
+          { text: "✅ Одобрить", callback_data: `approve_draft:${deal.id}:${draftNumber - 1}` },
+          { text: "✏️ На доработку", callback_data: `revise_draft:${deal.id}:${draftNumber - 1}` }
         ]
       ]
     }
   );
 
   // Confirm to owner
-  await sendTelegramMessage(
-    telegramUserId,
-    "✅ <b>Черновик отправлен рекламодателю!</b>\n\nОжидайте проверки. Вы получите уведомление о результате."
-  );
+  const remaining = requiredCount - draftNumber;
+  let ownerMessage = `✅ <b>Черновик ${draftNumber} из ${requiredCount} отправлен!</b>`;
+  
+  if (remaining > 0) {
+    ownerMessage += `\n\nОсталось отправить: ${remaining} ${getPostsWord(remaining)}`;
+  } else {
+    ownerMessage += `\n\n🎉 Все посты отправлены! Ожидайте проверки рекламодателем.`;
+  }
 
-  console.log(`Draft submitted for deal ${deal.id} with ${media.length} media items and ${entities.length} entities`);
+  await sendTelegramMessage(telegramUserId, ownerMessage);
+
+  console.log(`Draft ${draftNumber}/${requiredCount} submitted for deal ${deal.id} with ${media.length} media items`);
 }
 
-// Handle callback query for draft approval
-async function handleDraftApproval(callbackQueryId: string, dealId: string, from: { id: number }, message: { chat: { id: number }; message_id: number }) {
+// Handle callback query for draft approval (now with draft index)
+async function handleDraftApproval(
+  callbackQueryId: string, 
+  dealId: string, 
+  draftIndex: number,
+  from: { id: number }, 
+  message: { chat: { id: number }; message_id: number }
+) {
   // Get user
   const { data: user } = await supabase
     .from("users")
@@ -407,10 +461,10 @@ async function handleDraftApproval(callbackQueryId: string, dealId: string, from
     return;
   }
 
-  // Get deal
+  // Get deal with drafts array
   const { data: deal, error: dealError } = await supabase
     .from("deals")
-    .select("id, status, advertiser_id, channel_id, author_draft")
+    .select("id, status, advertiser_id, channel_id, posts_count, author_drafts")
     .eq("id", dealId)
     .single();
 
@@ -430,18 +484,41 @@ async function handleDraftApproval(callbackQueryId: string, dealId: string, from
     return;
   }
 
-  if (!deal.author_draft) {
-    await answerCallbackQuery(callbackQueryId, "Черновик ещё не отправлен");
+  const drafts = (deal.author_drafts as DraftItem[]) || [];
+  
+  if (draftIndex >= drafts.length) {
+    await answerCallbackQuery(callbackQueryId, "Черновик не найден");
     return;
   }
 
-  // Approve draft
+  if (drafts[draftIndex].approved === true) {
+    await answerCallbackQuery(callbackQueryId, "Черновик уже одобрен");
+    return;
+  }
+
+  // Update specific draft in array
+  drafts[draftIndex].approved = true;
+
+  // Check if all required drafts are submitted and approved
+  const allSubmitted = drafts.length === deal.posts_count;
+  const allApproved = allSubmitted && drafts.every(d => d.approved === true);
+
+  // Update deal
+  const updateData: Record<string, unknown> = { author_drafts: drafts };
+  if (allApproved) {
+    updateData.status = "in_progress";
+    updateData.is_draft_approved = true;
+    // For backwards compatibility, copy first draft to legacy fields
+    if (drafts.length > 0) {
+      updateData.author_draft = drafts[0].text;
+      updateData.author_draft_entities = drafts[0].entities;
+      updateData.author_draft_media = drafts[0].media;
+    }
+  }
+
   const { error: updateError } = await supabase
     .from("deals")
-    .update({
-      is_draft_approved: true,
-      status: "in_progress",
-    })
+    .update(updateData)
     .eq("id", dealId);
 
   if (updateError) {
@@ -466,27 +543,48 @@ async function handleDraftApproval(callbackQueryId: string, dealId: string, from
     .eq("id", channel?.owner_id)
     .single();
 
-  // Notify owner
-  if (owner?.telegram_id) {
-    const channelName = channel?.title || `@${channel?.username}`;
+  const channelName = channel?.title || `@${channel?.username}`;
+  const draftNumber = draftIndex + 1;
+  const approvedCount = drafts.filter(d => d.approved === true).length;
+
+  if (allApproved) {
+    // All drafts approved - notify both parties
+    const postsWord = getPostsWord(deal.posts_count);
+    
     await sendTelegramMessage(
-      owner.telegram_id,
-      `✅ <b>Черновик одобрен!</b>\n\nРекламодатель принял ваш пост для канала <b>${channelName}</b>.\n\nПубликация будет выполнена автоматически по расписанию.`
+      from.id,
+      `✅ <b>Все ${deal.posts_count} ${postsWord} одобрены!</b>\n\nПубликация будет выполнена автоматически по расписанию.`
     );
+
+    if (owner?.telegram_id) {
+      await sendTelegramMessage(
+        owner.telegram_id,
+        `🎉 <b>Все посты одобрены!</b>\n\nРекламодатель принял все ${deal.posts_count} ${postsWord} для канала <b>${channelName}</b>.\n\nПубликация будет выполнена автоматически по расписанию.`
+      );
+    }
+
+    await answerCallbackQuery(callbackQueryId, "Все черновики одобрены ✅");
+    console.log(`All ${deal.posts_count} drafts approved for deal ${dealId}`);
+  } else {
+    // Partial approval
+    await sendTelegramMessage(
+      from.id,
+      `✅ Черновик ${draftNumber} одобрен!\n\nОдобрено: ${approvedCount} из ${deal.posts_count}`
+    );
+
+    await answerCallbackQuery(callbackQueryId, `Черновик ${draftNumber} одобрен ✅`);
+    console.log(`Draft ${draftNumber}/${deal.posts_count} approved for deal ${dealId}`);
   }
-
-  // Confirm to advertiser
-  await sendTelegramMessage(
-    from.id,
-    "✅ <b>Черновик одобрен!</b>\n\nПост будет опубликован автоматически по расписанию."
-  );
-
-  await answerCallbackQuery(callbackQueryId, "Черновик одобрен ✅");
-  console.log(`Draft approved for deal ${dealId}`);
 }
 
-// Handle callback query for draft revision request
-async function handleDraftRevision(callbackQueryId: string, dealId: string, from: { id: number }, message: { chat: { id: number }; message_id: number }) {
+// Handle callback query for draft revision request (now with draft index)
+async function handleDraftRevision(
+  callbackQueryId: string, 
+  dealId: string,
+  draftIndex: number,
+  from: { id: number }, 
+  message: { chat: { id: number }; message_id: number }
+) {
   // Get user
   const { data: user } = await supabase
     .from("users")
@@ -559,10 +657,10 @@ async function handleRevisionComment(telegramUserId: number, text: string) {
   const dealId = state.dealId;
   userStates.delete(telegramUserId);
 
-  // Get deal
+  // Get deal with posts_count for multi-draft support
   const { data: deal } = await supabase
     .from("deals")
-    .select("id, channel_id, revision_count")
+    .select("id, channel_id, revision_count, posts_count, author_drafts")
     .eq("id", dealId)
     .single();
 
@@ -571,7 +669,8 @@ async function handleRevisionComment(telegramUserId: number, text: string) {
     return true;
   }
 
-  // Update deal - clear all draft fields including new ones
+  // For multi-draft: reset all drafts back to empty
+  // Clear all draft fields including new ones
   const { error: updateError } = await supabase
     .from("deals")
     .update({
@@ -579,7 +678,8 @@ async function handleRevisionComment(telegramUserId: number, text: string) {
       author_draft: null,
       author_draft_entities: [],
       author_draft_media: [],
-      author_draft_media_urls: [], // Clear legacy field
+      author_draft_media_urls: [],
+      author_drafts: [], // Clear the new drafts array
       revision_count: (deal.revision_count || 0) + 1,
     })
     .eq("id", dealId);
@@ -604,20 +704,20 @@ async function handleRevisionComment(telegramUserId: number, text: string) {
     .single();
 
   const channelName = channel?.title || `@${channel?.username}`;
+  const postsCount = deal.posts_count || 1;
+  const postsWord = getPostsWord(postsCount);
 
-  // Notify owner
+  // Notify owner with info about how many posts needed
   if (owner?.telegram_id) {
-    await sendTelegramMessage(
-      owner.telegram_id,
-      `✏️ <b>Требуется доработка</b>
-
-Рекламодатель просит изменить черновик для канала <b>${channelName}</b>.
-
-<b>Комментарий:</b>
-${text}
-
-Отправьте новый черновик (текст + медиа) в этот чат.`
-    );
+    let revisionMessage = `✏️ <b>Требуется доработка</b>\n\nРекламодатель просит изменить черновик для канала <b>${channelName}</b>.\n\n<b>Комментарий:</b>\n${text}`;
+    
+    if (postsCount > 1) {
+      revisionMessage += `\n\n📝 Нужно отправить ${postsCount} ${postsWord} заново.`;
+    } else {
+      revisionMessage += `\n\nОтправьте новый черновик (текст + медиа) в этот чат.`;
+    }
+    
+    await sendTelegramMessage(owner.telegram_id, revisionMessage);
   }
 
   // Confirm to advertiser
@@ -626,7 +726,7 @@ ${text}
     `✅ <b>Комментарий отправлен!</b>\n\nАвтор канала получил ваши замечания и подготовит новый черновик.`
   );
 
-  console.log(`Revision comment sent for deal ${dealId}`);
+  console.log(`Revision comment sent for deal ${dealId}, all drafts cleared`);
   return true;
 }
 
@@ -986,9 +1086,11 @@ Deno.serve(async (req) => {
 
       // Handle draft approval/revision
       if (action === "approve_draft") {
-        await handleDraftApproval(callbackQueryId, parts[1], from, message);
+        const draftIndex = parts.length > 2 ? parseInt(parts[2], 10) : 0;
+        await handleDraftApproval(callbackQueryId, parts[1], draftIndex, from, message);
       } else if (action === "revise_draft") {
-        await handleDraftRevision(callbackQueryId, parts[1], from, message);
+        const draftIndex = parts.length > 2 ? parseInt(parts[2], 10) : 0;
+        await handleDraftRevision(callbackQueryId, parts[1], draftIndex, from, message);
       } else if (action === "cancel_revision") {
         await handleCancelRevision(callbackQueryId, parts[1], from);
       }
