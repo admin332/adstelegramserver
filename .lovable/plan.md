@@ -1,271 +1,287 @@
 
 
-## Редизайн окна настроек канала
+## Переход от диалога к полноценной странице настроек канала
 
-Переделаю диалог настроек, чтобы он полностью соответствовал стилю страницы канала.
-
----
-
-## Текущие проблемы
-
-| Элемент | Сейчас | Должно быть |
-|---------|--------|-------------|
-| Заголовок | DialogHeader стандартный | Hero секция с аватаром канала |
-| Секции | Разделены `<Separator>` | Отдельные карточки `bg-secondary/50 rounded-2xl` |
-| Анимации | Нет | `motion.div` с задержками как на странице канала |
-| Стиль | Тусклый модальный диалог | Яркий, с градиентами и акцентами |
-| Layout | Тесный grid | Просторные секции как на Channel.tsx |
+Создадим отдельную страницу `/channel/:id/settings`, которая будет выглядеть идентично странице канала с Telegram BackButton.
 
 ---
 
-## Новый дизайн
+## Архитектура изменений
 
-### Структура
+| Компонент | Сейчас | После |
+|-----------|--------|-------|
+| Настройки | `ChannelSettingsDialog.tsx` (диалог) | `ChannelSettings.tsx` (страница) |
+| Навигация | `onClose()` callback | `navigate(-1)` + Telegram BackButton |
+| Маршрут | Нет | `/channel/:id/settings` |
+| Вызов | `setSettingsChannel(channel)` | `navigate(`/channel/${id}/settings`)` |
+
+---
+
+## Новые/изменённые файлы
+
+### 1. Новая страница: `src/pages/ChannelSettings.tsx`
+
+Полноэкранная страница с той же структурой что и `Channel.tsx`:
 
 ```text
 ┌────────────────────────────────────────┐
+│ [Telegram BackButton ←]               │
+├────────────────────────────────────────┤
 │ ┌──────────────────────────────────┐   │
 │ │      [Фон аватара канала]        │   │
 │ │      ┌─────┐                     │   │
-│ │      │ 🖼️ │  ← Аватар           │   │
+│ │      │ 🖼️ │  ← Аватар h-40      │   │
 │ │      └─────┘                     │   │
 │ │      Название канала ✓           │   │
 │ │      @username                   │   │
 │ └──────────────────────────────────┘   │
 │                                        │
 │ ┌─────────┐ ┌─────────┐                │
-│ │  ❤️ 42   │ │  ✅ 15   │  ← Статистика │
+│ │  ❤️ 42   │ │  ✅ 15   │              │
 │ │Избранное│ │ Сделок  │                │
 │ └─────────┘ └─────────┘                │
 │                                        │
 │ ┌──────────────────────────────────┐   │
 │ │ 💰 Цены                           │   │
-│ │ 24 часа    ┌────────┐            │   │
-│ │            │ 1.5    │ TON        │   │
-│ │ 48 часов   └────────┘            │   │
+│ │ ...                              │   │
 │ └──────────────────────────────────┘   │
 │                                        │
 │ ┌──────────────────────────────────┐   │
 │ │ 📝 Типы кампаний                  │   │
-│ │ ○ Промпт  ○ Готовый  ● Любой     │   │
+│ │ ...                              │   │
 │ └──────────────────────────────────┘   │
 │                                        │
 │ ┌──────────────────────────────────┐   │
 │ │ ⏰ Минимальное время              │   │
-│ │ ━━━━━━━━●━━━━━━━━ +6ч             │   │
+│ │ ...                              │   │
 │ └──────────────────────────────────┘   │
 │                                        │
 │ ┌──────────────────────────────────┐   │
 │ │ 🗑️ Автоудаление       [Switch]   │   │
+│ │ ...                              │   │
 │ └──────────────────────────────────┘   │
 │                                        │
+├────────────────────────────────────────┤
 │ ┌──────────────────────────────────┐   │
-│ │       Сохранить изменения        │   │
+│ │       Сохранить изменения        │   │ ← Fixed bottom
 │ └──────────────────────────────────┘   │
 └────────────────────────────────────────┘
 ```
 
----
+**Ключевые элементы (как в Channel.tsx):**
 
-## Технические изменения
+```typescript
+// Telegram BackButton integration
+const handleBack = useCallback(() => {
+  navigate(-1);
+}, [navigate]);
 
-### Файл: `src/components/create/ChannelSettingsDialog.tsx`
+useEffect(() => {
+  if (isTelegramMiniApp()) {
+    const webapp = getTelegramWebApp();
+    if (webapp?.BackButton) {
+      webapp.BackButton.onClick(handleBack);
+      webapp.BackButton.show();
+      
+      return () => {
+        webapp.BackButton.offClick(handleBack);
+        webapp.BackButton.hide();
+      };
+    }
+  }
+}, [handleBack]);
+```
 
-**1. Hero секция с аватаром канала**
-
-Как в `ChannelHero.tsx`:
+**Hero секция (h-40 как в Channel.tsx):**
 
 ```tsx
-{/* Hero Section */}
 <div className="relative">
-  <div className="h-24 overflow-hidden rounded-t-lg">
-    <img
-      src={channel.avatar_url || '/placeholder.svg'}
-      alt={channel.title}
-      className="w-full h-full object-cover"
-    />
+  <div className="h-40 overflow-hidden">
+    <img src={channel.avatar_url} className="w-full h-full object-cover" />
     <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-background" />
   </div>
   
-  <div className="relative -mt-8 flex flex-col items-center">
-    <Avatar className="h-16 w-16 border-4 border-background shadow-lg">
-      <AvatarImage src={channel.avatar_url} />
-      <AvatarFallback>{channel.title?.charAt(0)}</AvatarFallback>
+  <div className="relative -mt-12 flex flex-col items-center px-4">
+    <Avatar className="h-24 w-24 border-4 border-background shadow-lg">
+      ...
     </Avatar>
-    
-    <div className="flex items-center gap-2 mt-2">
-      <h2 className="text-lg font-bold">{channel.title}</h2>
-      {channel.verified && <BadgeCheck className="w-4 h-4 text-primary" />}
+    <h1 className="text-xl font-bold">{channel.title}</h1>
+    <p className="text-muted-foreground">@{channel.username}</p>
+  </div>
+</div>
+```
+
+**Skeleton loader (как в Channel.tsx):**
+
+```tsx
+if (isLoading) {
+  return (
+    <div className="min-h-screen bg-background pb-24">
+      <div className="relative h-48 bg-gradient-to-b from-primary/20 to-background">
+        <div className="absolute -bottom-12 left-1/2 -translate-x-1/2">
+          <Skeleton className="w-24 h-24 rounded-full" />
+        </div>
+      </div>
+      <div className="mt-16 px-4 space-y-4">
+        <Skeleton className="h-6 w-48 mx-auto" />
+        <Skeleton className="h-4 w-32 mx-auto" />
+        <div className="grid grid-cols-2 gap-3 mt-6">
+          <Skeleton className="h-20 rounded-xl" />
+          <Skeleton className="h-20 rounded-xl" />
+        </div>
+      </div>
     </div>
-    <p className="text-sm text-muted-foreground">@{channel.username}</p>
-  </div>
-</div>
-```
-
-**2. Статистика как ChannelStats**
-
-Grid 2 колонки с motion анимациями:
-
-```tsx
-<div className="grid grid-cols-2 gap-3 px-4 mt-4">
-  <motion.div
-    initial={{ opacity: 0, y: 20 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ delay: 0.1 }}
-    className="bg-secondary/50 rounded-2xl p-4 text-center"
-  >
-    <Heart className="h-5 w-5 mx-auto mb-2 text-red-400" />
-    <p className="text-2xl font-bold">{stats.favorites_count}</p>
-    <p className="text-xs text-muted-foreground">В избранном</p>
-  </motion.div>
-  
-  <motion.div
-    initial={{ opacity: 0, y: 20 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ delay: 0.2 }}
-    className="bg-secondary/50 rounded-2xl p-4 text-center"
-  >
-    <CheckCircle className="h-5 w-5 mx-auto mb-2 text-green-400" />
-    <p className="text-2xl font-bold">{stats.completed_deals_count}</p>
-    <p className="text-xs text-muted-foreground">Сделок</p>
-  </motion.div>
-</div>
-```
-
-**3. Секции настроек как карточки**
-
-Каждая секция — отдельная карточка с анимацией:
-
-```tsx
-{/* Prices Section */}
-<motion.div
-  initial={{ opacity: 0, y: 20 }}
-  animate={{ opacity: 1, y: 0 }}
-  transition={{ delay: 0.3 }}
-  className="px-4 mt-4"
->
-  <h3 className="text-lg font-semibold text-foreground mb-2">Цены</h3>
-  <div className="bg-secondary/50 rounded-2xl p-4 space-y-4">
-    {/* Price inputs */}
-  </div>
-</motion.div>
-```
-
-**4. Секция типов кампаний с карточками выбора**
-
-Визуальные карточки вместо RadioGroup:
-
-```tsx
-<div className="grid grid-cols-3 gap-2">
-  {['prompt', 'ready_post', 'both'].map((type) => (
-    <button
-      key={type}
-      onClick={() => handleSettingChange('accepted_campaign_types', type)}
-      className={cn(
-        "p-3 rounded-xl text-center transition-all",
-        localSettings.accepted_campaign_types === type
-          ? "bg-primary text-primary-foreground"
-          : "bg-secondary/50 hover:bg-secondary"
-      )}
-    >
-      <span className="text-sm">{typeLabels[type]}</span>
-    </button>
-  ))}
-</div>
-```
-
-**5. Slider с визуальными метками**
-
-Как в ChannelAnalytics:
-
-```tsx
-<div className="bg-secondary/50 rounded-2xl p-4">
-  <Slider ... />
-  <div className="flex justify-between mt-3">
-    {[0, 6, 12, 24, 48, 72].map((h) => (
-      <span 
-        key={h}
-        className={cn(
-          "text-xs",
-          localSettings.min_hours_before_post === h 
-            ? "text-primary font-bold" 
-            : "text-muted-foreground"
-        )}
-      >
-        {h}ч
-      </span>
-    ))}
-  </div>
-</div>
-```
-
-**6. Автоудаление с описанием**
-
-Карточка с border-dashed как описание на странице канала:
-
-```tsx
-<div className="bg-secondary/50 rounded-2xl p-4">
-  <div className="flex items-center justify-between">
-    <div className="flex items-center gap-3">
-      <Trash2 className="h-5 w-5 text-primary" />
-      <span className="font-medium">Автоудаление</span>
-    </div>
-    <Switch ... />
-  </div>
-  
-  {localSettings.auto_delete_posts && (
-    <div className="mt-3 p-3 rounded-xl border-2 border-dashed border-amber-500/50 bg-amber-500/10">
-      <p className="text-xs text-amber-400">
-        Пост будет удалён автоматически после окончания срока размещения
-      </p>
-    </div>
-  )}
-</div>
-```
-
-**7. Кнопка сохранения**
-
-Fixed внизу как на странице канала:
-
-```tsx
-<div className="sticky bottom-0 p-4 bg-gradient-to-t from-background via-background to-transparent">
-  <motion.div
-    initial={{ opacity: 0, y: 20 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ delay: 0.6 }}
-  >
-    <Button
-      onClick={handleSave}
-      disabled={!hasChanges || updateSettings.isPending}
-      className="w-full h-12 text-base font-semibold rounded-2xl"
-    >
-      Сохранить изменения
-    </Button>
-  </motion.div>
-</div>
+  );
+}
 ```
 
 ---
 
-## Визуальные улучшения
+### 2. Обновление `src/App.tsx`
 
-| Элемент | Изменение |
-|---------|-----------|
-| Анимации | Все секции с `motion.div` и задержками 0.1-0.6с |
-| Карточки | `bg-secondary/50 rounded-2xl` вместо разделителей |
-| Отступы | Единообразные `px-4 mt-4` |
-| Акценты | Primary цвет для активных элементов |
-| Предупреждения | Border-dashed стиль как описание |
-| Скролл | Плавный overflow с градиентом |
+Добавить новый маршрут:
+
+```tsx
+import ChannelSettings from "./pages/ChannelSettings";
+
+<Route path="/channel/:id/settings" element={<ChannelSettings />} />
+```
+
+---
+
+### 3. Обновление `src/components/create/MyChannelsList.tsx`
+
+Заменить открытие диалога на навигацию:
+
+```tsx
+import { useNavigate } from 'react-router-dom';
+
+// Убрать:
+// const [settingsChannel, setSettingsChannel] = useState<UserChannel | null>(null);
+// import { ChannelSettingsDialog } from "./ChannelSettingsDialog";
+
+// Добавить:
+const navigate = useNavigate();
+
+// Заменить onClick:
+<button
+  onClick={() => navigate(`/channel/${channel.id}/settings`)}
+  className="p-2 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors"
+  title="Настройки канала"
+>
+  <Settings className="w-4 h-4 text-muted-foreground" />
+</button>
+
+// Убрать ChannelSettingsDialog из render
+```
+
+---
+
+### 4. Удаление `src/components/create/ChannelSettingsDialog.tsx`
+
+Файл больше не нужен — вся логика переносится в новую страницу.
+
+---
+
+## Технические детали страницы ChannelSettings
+
+**Структура файла:**
+
+```typescript
+import React, { useState, useEffect, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { Heart, CheckCircle, Clock, Trash2, Loader2, BadgeCheck, Crown } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Slider } from '@/components/ui/slider';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { getTelegramWebApp, isTelegramMiniApp } from '@/lib/telegram';
+import { useChannelStats, useUpdateChannelSettings, ChannelSettings } from '@/hooks/useChannelSettings';
+import { useUserChannels } from '@/hooks/useUserChannels';
+import { cn } from '@/lib/utils';
+
+const ChannelSettingsPage: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  
+  // Загрузка данных канала и статистики
+  const { data: channels } = useUserChannels();
+  const channel = channels?.find(c => c.id === id);
+  const { data, isLoading } = useChannelStats(id || null);
+  const updateSettings = useUpdateChannelSettings();
+  
+  // Состояние настроек
+  const [localSettings, setLocalSettings] = useState<Partial<ChannelSettings>>({});
+  const [hasChanges, setHasChanges] = useState(false);
+
+  // Telegram BackButton
+  const handleBack = useCallback(() => {
+    navigate(-1);
+  }, [navigate]);
+
+  useEffect(() => {
+    if (isTelegramMiniApp()) {
+      const webapp = getTelegramWebApp();
+      if (webapp?.BackButton) {
+        webapp.BackButton.onClick(handleBack);
+        webapp.BackButton.show();
+        return () => {
+          webapp.BackButton.offClick(handleBack);
+          webapp.BackButton.hide();
+        };
+      }
+    }
+  }, [handleBack]);
+
+  // Синхронизация настроек
+  useEffect(() => {
+    if (data?.settings) {
+      setLocalSettings({ ... });
+      setHasChanges(false);
+    }
+  }, [data?.settings]);
+
+  // Handlers...
+  
+  return (
+    <div className="min-h-screen bg-background pb-24">
+      {/* Hero Section - h-40 как на странице канала */}
+      {/* Statistics Grid */}
+      {/* Settings Sections */}
+      {/* Fixed Save Button */}
+    </div>
+  );
+};
+
+export default ChannelSettingsPage;
+```
+
+---
+
+## Визуальное соответствие странице Channel.tsx
+
+| Элемент | Channel.tsx | ChannelSettings (новая) |
+|---------|-------------|-------------------------|
+| Hero высота | `h-40` | `h-40` |
+| Аватар размер | `h-24 w-24` | `h-24 w-24` |
+| Аватар позиция | `-mt-12` | `-mt-12` |
+| Заголовок | `text-xl font-bold` | `text-xl font-bold` |
+| Секции отступ | `px-4 mt-6` | `px-4 mt-6` |
+| Карточки стиль | `bg-secondary/50 rounded-2xl` | `bg-secondary/50 rounded-2xl` |
+| Кнопка внизу | `fixed bottom-0` | `fixed bottom-0` |
+| Анимации | `motion.div` с delay | `motion.div` с delay |
+| Telegram Back | `webapp.BackButton` | `webapp.BackButton` |
 
 ---
 
 ## Результат
 
-Окно настроек будет выглядеть как мини-версия страницы канала:
-- Hero с аватаром
-- Статистика в карточках
-- Настройки в секциях
-- Анимации появления
-- Единый визуальный стиль
+- Полноэкранная страница настроек
+- Нативная кнопка "Назад" в Telegram
+- Идентичный дизайн со страницей канала
+- Без кнопки закрытия (X)
+- Плавные анимации появления секций
 
