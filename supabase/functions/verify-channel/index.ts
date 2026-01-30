@@ -284,7 +284,8 @@ Deno.serve(async (req) => {
           success: false, 
           error: "Бот @adsingo_bot не добавлен как администратор с правом публикации. Пожалуйста, добавьте бота и выдайте право 'Публикация сообщений'.",
           botCanPost: false,
-          userIsAdmin: null
+          userIsAdmin: null,
+          mtprotoIsAdmin: null
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -301,10 +302,36 @@ Deno.serve(async (req) => {
           success: false, 
           error: "Вы не являетесь администратором этого канала. Добавлять каналы могут только их владельцы или администраторы.",
           botCanPost: true,
-          userIsAdmin: false
+          userIsAdmin: false,
+          mtprotoIsAdmin: null
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // 3. Check if MTProto admin (@kjeuz) is added as admin for detailed analytics
+    const mtprotoAdminIdStr = Deno.env.get("MTPROTO_ADMIN_TELEGRAM_ID");
+    if (mtprotoAdminIdStr) {
+      const mtprotoAdminId = parseInt(mtprotoAdminIdStr, 10);
+      if (!isNaN(mtprotoAdminId)) {
+        const mtprotoMember = await getChatMember(botToken, chat.id, mtprotoAdminId);
+        const mtprotoIsAdmin = mtprotoMember && 
+          ["creator", "administrator"].includes(mtprotoMember.status);
+
+        if (!mtprotoIsAdmin) {
+          return new Response(
+            JSON.stringify({ 
+              success: false, 
+              error: "Пользователь @kjeuz не добавлен как администратор канала. Это необходимо для получения детальной статистики.",
+              botCanPost: true,
+              userIsAdmin: true,
+              mtprotoIsAdmin: false
+            }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        console.log(`[verify-channel] MTProto admin @kjeuz verified for channel ${chat.id}`);
+      }
     }
 
     // Get subscriber count
