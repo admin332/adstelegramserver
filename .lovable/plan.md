@@ -1,155 +1,217 @@
 
 
-## Исправление возврата средств при удалении поста
+## Настройки канала в карточке "Мои каналы"
 
-### Проблема
-
-Функция `verify-post-integrity` обнаруживает удалённые посты, отправляет уведомления и обновляет статус сделки, но **не выполняет реальный перевод TON**!
-
-В логах видно:
-```
-Would refund 1 TON to UQCjFlYw_bBPeX5YfUNgLOT1T0G3UUxya7P1Upb63V7XHgKR
-```
-
-Это просто `console.log` — заглушка (placeholder).
+Добавим иконку настроек в карточку канала с расширенным функционалом управления.
 
 ---
 
-## Сравнение реализаций
+## Новый функционал
 
-| Функция | Реальный перевод | Статус |
-|---------|------------------|--------|
-| `auto-refund-expired-deals` | ✅ Да | Работает |
-| `admin-cancel-deal` | ✅ Да | Работает |
-| `verify-post-integrity` | ❌ Нет | **Сломано** |
+### Диалог настроек канала
 
----
-
-## Что нужно исправить
-
-Добавить в `verify-post-integrity` полноценную логику возврата TON, аналогичную `admin-cancel-deal`.
+| Раздел | Описание |
+|--------|----------|
+| **Статистика** | Количество избранных, количество завершённых сделок |
+| **Цены** | Изменение цены за 24ч / 48ч размещение |
+| **Типы кампаний** | Выбор принимаемых типов: Промпт / Готовый пост / Оба |
+| **Минимальное время** | Минимальное время до публикации (от 0 до 24+ часов) |
+| **Автоудаление** | Включение автоматического удаления постов после рекламы |
 
 ---
 
-## Технические изменения
+## Архитектура изменений
 
-**Файл:** `supabase/functions/verify-post-integrity/index.ts`
+### 1. База данных
 
-### 1. Добавить импорты TON SDK
+**Новая таблица `favorites`** (для серверного подсчёта избранных):
 
-```typescript
-import { mnemonicToPrivateKey } from "@ton/crypto";
-import { WalletContractV4, TonClient, internal, SendMode } from "@ton/ton";
+```sql
+CREATE TABLE public.favorites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  channel_id UUID NOT NULL REFERENCES public.channels(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, channel_id)
+);
 ```
 
-### 2. Добавить TONCENTER_API_KEY
+**Новые колонки в таблице `channels`**:
 
-```typescript
-const TONCENTER_API_KEY = Deno.env.get("TONCENTER_API_KEY")!;
+```sql
+ALTER TABLE public.channels ADD COLUMN accepted_campaign_types TEXT DEFAULT 'both';
+  -- 'prompt' | 'ready_post' | 'both'
+ALTER TABLE public.channels ADD COLUMN min_hours_before_post INTEGER DEFAULT 0;
+ALTER TABLE public.channels ADD COLUMN auto_delete_posts BOOLEAN DEFAULT false;
 ```
 
-### 3. Заменить функцию `decryptMnemonic` на рабочую версию
+### 2. Серверная часть
 
-Текущая версия возвращает пустую строку. Нужно использовать Web Crypto API как в `admin-cancel-deal`:
+**Edge Function: `update-channel-settings`**
+
+Новая функция для безопасного обновления настроек:
+
+```text
+Вход:
+- initData (Telegram валидация)
+- channel_id
+- settings: { price_1_24?, price_2_48?, accepted_campaign_types?, min_hours_before_post?, auto_delete_posts? }
+
+Логика:
+1. HMAC-SHA256 валидация initData
+2. Проверка прав доступа (channel_admins)
+3. Проверка активных сделок (pending, escrow, in_progress)
+   - Если есть → отказ с ошибкой
+4. Обновление полей в channels
+5. Возврат успеха
+```
+
+**Edge Function: `channel-stats-for-owner`**
+
+Получение статистики для владельца:
+
+```text
+Вход:
+- initData
+- channel_id
+
+Выход:
+- favorites_count (из таблицы favorites)
+- completed_deals_count (из deals WHERE status='completed')
+- current settings
+```
+
+**Обновление `complete-posted-deals`**
+
+Добавить логику автоудаления:
+
+```text
+После завершения сделки:
+1. Проверить channel.auto_delete_posts
+2. Если true И telegram_message_id существует:
+   - Вызвать Telegram API deleteMessage
+   - Логировать результат
+```
+
+### 3. Frontend компоненты
+
+**Новый компонент: `ChannelSettingsDialog.tsx`**
+
+Диалог настроек с секциями:
+
+```text
+┌─────────────────────────────────────────┐
+│ ⚙️ Настройки канала                      │
+├─────────────────────────────────────────┤
+│ 📊 СТАТИСТИКА                            │
+│ ❤️ В избранном: 42                       │
+│ ✅ Завершённых сделок: 15                │
+├─────────────────────────────────────────┤
+│ 💰 ЦЕНЫ                                  │
+│ Цена 24ч: [___] TON                     │
+│ Цена 48ч: [___] TON                     │
+├─────────────────────────────────────────┤
+│ 📝 ТИПЫ КАМПАНИЙ                         │
+│ ○ Только промпт                         │
+│ ○ Только готовый пост                   │
+│ ● Любой тип                             │
+├─────────────────────────────────────────┤
+│ ⏰ МИНИМАЛЬНОЕ ВРЕМЯ ДО ПУБЛИКАЦИИ       │
+│ [Slider: 0ч — 24ч]                      │
+│ Текущее: +10 часов                      │
+├─────────────────────────────────────────┤
+│ 🗑️ АВТОУДАЛЕНИЕ ПОСТОВ                   │
+│ [Switch] Удалять после завершения       │
+│ ⚠️ Пост будет удалён автоматически       │
+├─────────────────────────────────────────┤
+│         [Сохранить изменения]           │
+└─────────────────────────────────────────┘
+```
+
+**Обновление `MyChannelsList.tsx`**
+
+Добавить иконку настроек (Settings) в правый нижний угол карточки:
+
+```tsx
+<button onClick={() => openSettings(channel)}>
+  <Settings className="w-5 h-5" />
+</button>
+```
+
+**Обновление `useUserChannels.ts`**
+
+Расширить интерфейс `UserChannel`:
 
 ```typescript
-async function decryptMnemonic(encryptedData: string): Promise<string[]> {
-  const [ivHex, authTagHex, encryptedHex] = encryptedData.split(":");
-  
-  const iv = new Uint8Array(ivHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-  const authTag = new Uint8Array(authTagHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-  const encrypted = new Uint8Array(encryptedHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-  
-  const ciphertextWithTag = new Uint8Array(encrypted.length + authTag.length);
-  ciphertextWithTag.set(encrypted);
-  ciphertextWithTag.set(authTag, encrypted.length);
-  
-  const keyBuffer = new Uint8Array(ENCRYPTION_KEY.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw", keyBuffer, { name: "AES-GCM" }, false, ["decrypt"]
-  );
-  
-  const decrypted = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv }, cryptoKey, ciphertextWithTag
-  );
-  
-  return new TextDecoder().decode(decrypted).split(" ");
+interface UserChannel {
+  // existing...
+  accepted_campaign_types?: string;
+  min_hours_before_post?: number;
+  auto_delete_posts?: boolean;
 }
 ```
 
-### 4. Заменить функцию `refundToAdvertiser` на рабочую версию
+**Обновление `OrderDrawer.tsx`**
+
+При выборе времени учитывать `min_hours_before_post`:
 
 ```typescript
-async function refundToAdvertiser(deal: Deal): Promise<boolean> {
-  const { data: advertiser } = await supabase
-    .from("users")
-    .select("wallet_address")
-    .eq("id", deal.advertiser_id)
-    .single();
-
-  if (!advertiser?.wallet_address || !deal.escrow_mnemonic_encrypted) {
-    console.error("Missing wallet or mnemonic for refund");
-    return false;
-  }
-
-  try {
-    const mnemonicWords = await decryptMnemonic(deal.escrow_mnemonic_encrypted);
-    
-    if (mnemonicWords.length === 0) {
-      console.error("Could not decrypt mnemonic");
-      return false;
-    }
-
-    const keyPair = await mnemonicToPrivateKey(mnemonicWords);
-    
-    const client = new TonClient({
-      endpoint: "https://toncenter.com/api/v2/jsonRPC",
-      apiKey: TONCENTER_API_KEY,
-    });
-
-    const wallet = WalletContractV4.create({
-      publicKey: keyPair.publicKey,
-      workchain: 0,
-    });
-    
-    const contract = client.open(wallet);
-    const balance = await contract.getBalance();
-    const networkFee = BigInt(0.02 * 1_000_000_000);
-    const refundAmount = balance - networkFee;
-
-    if (refundAmount <= 0n) {
-      console.error("Insufficient balance for refund");
-      return false;
-    }
-
-    const seqno = await contract.getSeqno();
-    await contract.sendTransfer({
-      seqno,
-      secretKey: keyPair.secretKey,
-      sendMode: SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS,
-      messages: [
-        internal({
-          to: advertiser.wallet_address,
-          value: refundAmount,
-          body: "Adsingo refund - post deleted",
-        }),
-      ],
-    });
-
-    console.log(`Refund sent: ${refundAmount} nanoTON to ${advertiser.wallet_address}`);
-    return true;
-  } catch (error) {
-    console.error("Refund error:", error);
-    return false;
-  }
-}
+const minHour = channel.min_hours_before_post || 0;
+// Добавить к минимальному времени
 ```
 
 ---
 
-## Результат после исправления
+## Безопасность
 
-| Событие | Сейчас | После |
-|---------|--------|-------|
-| Пост удалён | Уведомление + статус ✅, деньги ❌ | Уведомление + статус + **деньги ✅** |
+| Проверка | Где |
+|----------|-----|
+| HMAC-SHA256 initData | update-channel-settings |
+| Права доступа channel_admins | update-channel-settings |
+| Блокировка при активных сделках | update-channel-settings |
+| RLS для favorites | База данных |
+| Service role для обновлений | Edge Function |
+
+---
+
+## Последовательность изменений
+
+1. **Миграция БД**
+   - Добавить колонки в channels
+   - Создать таблицу favorites с RLS
+
+2. **Edge Functions**
+   - Создать `channel-stats-for-owner`
+   - Создать `update-channel-settings`
+   - Обновить `complete-posted-deals` для автоудаления
+
+3. **Frontend**
+   - Создать `ChannelSettingsDialog.tsx`
+   - Создать хук `useChannelSettings.ts`
+   - Обновить `MyChannelsList.tsx` — добавить иконку
+   - Обновить `user-channels` — возвращать новые поля
+   - Обновить `OrderDrawer.tsx` — учитывать min_hours
+
+4. **Интеграция избранного**
+   - Обновить `useFavorites.ts` — синхронизация с БД
+   - Добавить вызов API при toggle
+
+---
+
+## Файлы для создания/изменения
+
+**Создать:**
+- `src/components/create/ChannelSettingsDialog.tsx`
+- `src/hooks/useChannelSettings.ts`
+- `supabase/functions/channel-stats-for-owner/index.ts`
+- `supabase/functions/update-channel-settings/index.ts`
+
+**Изменить:**
+- `src/components/create/MyChannelsList.tsx` — иконка настроек
+- `src/hooks/useUserChannels.ts` — новые поля
+- `src/hooks/useFavorites.ts` — серверная синхронизация
+- `supabase/functions/user-channels/index.ts` — новые поля
+- `supabase/functions/complete-posted-deals/index.ts` — автоудаление
+- `src/components/channel/DateTimeSelector.tsx` — учёт min_hours
+- `src/components/channel/OrderDrawer.tsx` — передача min_hours
 
