@@ -221,7 +221,8 @@ const Channel: React.FC = () => {
         onClose={() => setIsOrderDrawerOpen(false)}
         channelId={id!}
         channelName={channel.name}
-        pricePerPost={channel.tonPrice}
+        price1Post={channel.tonPrice}
+        price2Plus={channel.tonPrice2Plus || channel.tonPrice}
         minHoursBeforePost={channel.minHoursBeforePost || 0}
       />
     </div>

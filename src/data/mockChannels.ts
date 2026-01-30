@@ -24,6 +24,7 @@ export interface Channel {
   category: string;
   price: number;
   tonPrice: number;
+  tonPrice2Plus?: number;
   rating: number;
   reviewsCount?: number;
   verified: boolean;

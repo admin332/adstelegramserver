@@ -106,6 +106,7 @@ function parseTopHours(data: Json | null): TopHourStat[] | undefined {
 
 function mapDatabaseToChannel(dbChannel: DatabaseChannel): Channel {
   const tonPrice = Number(dbChannel.price_1_24) || 0;
+  const tonPrice2Plus = Number(dbChannel.price_2_48) || tonPrice; // fallback to price_1_24
   const usdPrice = Math.round(tonPrice * 3.5); // Approximate USD conversion
   
   return {
@@ -118,6 +119,7 @@ function mapDatabaseToChannel(dbChannel: DatabaseChannel): Channel {
     category: dbChannel.category,
     price: usdPrice,
     tonPrice: tonPrice,
+    tonPrice2Plus: tonPrice2Plus,
     rating: Number(dbChannel.rating) || 4.5,
     reviewsCount: dbChannel.reviews_count || 0,
     verified: dbChannel.verified || false,

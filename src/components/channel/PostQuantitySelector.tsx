@@ -8,6 +8,8 @@ import { useTonPrice } from '@/hooks/useTonPrice';
 interface PostQuantitySelectorProps {
   quantity: number;
   pricePerPost: number;
+  price1Post: number;
+  price2Plus: number;
   onQuantityChange: (quantity: number) => void;
   minQuantity?: number;
   maxQuantity?: number;
@@ -16,6 +18,8 @@ interface PostQuantitySelectorProps {
 const PostQuantitySelector: React.FC<PostQuantitySelectorProps> = ({
   quantity,
   pricePerPost,
+  price1Post,
+  price2Plus,
   onQuantityChange,
   minQuantity = 1,
   maxQuantity = 10,
@@ -112,6 +116,17 @@ const PostQuantitySelector: React.FC<PostQuantitySelectorProps> = ({
             </span>
           )}
         </div>
+        
+        {/* Savings indicator */}
+        {quantity >= 2 && price2Plus < price1Post && (
+          <motion.div
+            initial={{ opacity: 0, y: -5 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center mt-3 text-sm font-medium text-green-500"
+          >
+            💰 Экономия: {(price1Post - price2Plus) * quantity} TON
+          </motion.div>
+        )}
       </div>
     </div>
   );

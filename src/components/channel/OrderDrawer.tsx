@@ -27,7 +27,8 @@ interface OrderDrawerProps {
   onClose: () => void;
   channelId: string;
   channelName: string;
-  pricePerPost: number;
+  price1Post: number;
+  price2Plus: number;
   minHoursBeforePost?: number;
 }
 
@@ -36,7 +37,8 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   onClose,
   channelId,
   channelName,
-  pricePerPost,
+  price1Post,
+  price2Plus,
   minHoursBeforePost = 0,
 }) => {
   const navigate = useNavigate();
@@ -76,6 +78,9 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
 
   const totalSteps = 4;
   const progressValue = (currentStep / totalSteps) * 100;
+  
+  // Dynamic price based on quantity
+  const pricePerPost = quantity >= 2 ? price2Plus : price1Post;
   const totalPrice = quantity * pricePerPost;
 
   const stepTitles: Record<number, string> = {
@@ -228,6 +233,8 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
                 <PostQuantitySelector
                   quantity={quantity}
                   pricePerPost={pricePerPost}
+                  price1Post={price1Post}
+                  price2Plus={price2Plus}
                   onQuantityChange={setQuantity}
                 />
               </motion.div>
