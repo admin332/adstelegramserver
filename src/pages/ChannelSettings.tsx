@@ -260,21 +260,21 @@ const ChannelSettingsPage: React.FC = () => {
           <div className="flex items-center gap-3 mb-4">
             <Clock className="h-5 w-5 text-primary" />
             <span className="text-2xl font-bold text-foreground">
-              +{localSettings.min_hours_before_post || 0}ч
+              +{localSettings.min_hours_before_post || 2}ч
             </span>
           </div>
           
           <Slider
-            value={[localSettings.min_hours_before_post || 0]}
+            value={[localSettings.min_hours_before_post || 2]}
             onValueChange={([value]) => handleSettingChange('min_hours_before_post', value)}
             max={72}
-            min={0}
+            min={2}
             step={1}
             className="w-full"
           />
           
           <div className="flex justify-between mt-3">
-            {[0, 6, 12, 24, 48, 72].map((h) => (
+            {[2, 6, 12, 24, 48, 72].map((h) => (
               <span 
                 key={h}
                 className={cn(
