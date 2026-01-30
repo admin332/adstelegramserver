@@ -39,6 +39,9 @@ export interface Channel {
   growthRate?: number;
   notificationsEnabled?: number;
   topHours?: TopHourStat[];
+  acceptedCampaignTypes?: string;
+  minHoursBeforePost?: number;
+  autoDeletePosts?: boolean;
 }
 
 export const mockChannels: Channel[] = [

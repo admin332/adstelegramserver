@@ -193,6 +193,8 @@ export type Database = {
       }
       channels: {
         Row: {
+          accepted_campaign_types: string | null
+          auto_delete_posts: boolean | null
           avatar_url: string | null
           avg_views: number | null
           bot_is_admin: boolean | null
@@ -205,6 +207,7 @@ export type Database = {
           is_active: boolean | null
           is_premium: boolean | null
           language_stats: Json | null
+          min_hours_before_post: number | null
           notifications_enabled: number | null
           owner_id: string
           premium_percentage: number | null
@@ -227,6 +230,8 @@ export type Database = {
           views_per_post: number | null
         }
         Insert: {
+          accepted_campaign_types?: string | null
+          auto_delete_posts?: boolean | null
           avatar_url?: string | null
           avg_views?: number | null
           bot_is_admin?: boolean | null
@@ -239,6 +244,7 @@ export type Database = {
           is_active?: boolean | null
           is_premium?: boolean | null
           language_stats?: Json | null
+          min_hours_before_post?: number | null
           notifications_enabled?: number | null
           owner_id: string
           premium_percentage?: number | null
@@ -261,6 +267,8 @@ export type Database = {
           views_per_post?: number | null
         }
         Update: {
+          accepted_campaign_types?: string | null
+          auto_delete_posts?: boolean | null
           avatar_url?: string | null
           avg_views?: number | null
           bot_is_admin?: boolean | null
@@ -273,6 +281,7 @@ export type Database = {
           is_active?: boolean | null
           is_premium?: boolean | null
           language_stats?: Json | null
+          min_hours_before_post?: number | null
           notifications_enabled?: number | null
           owner_id?: string
           premium_percentage?: number | null
@@ -415,6 +424,42 @@ export type Database = {
             columns: ["channel_id"]
             isOneToOne: false
             referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      favorites: {
+        Row: {
+          channel_id: string
+          created_at: string | null
+          id: string
+          user_id: string
+        }
+        Insert: {
+          channel_id: string
+          created_at?: string | null
+          id?: string
+          user_id: string
+        }
+        Update: {
+          channel_id?: string
+          created_at?: string | null
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "favorites_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "favorites_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]

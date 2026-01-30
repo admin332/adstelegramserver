@@ -23,6 +23,7 @@ interface DateTimeSelectorProps {
   selectedHour: number;
   onDateChange: (date: Date) => void;
   onHourChange: (hour: number) => void;
+  minHoursBeforePost?: number;
 }
 
 const DateTimeSelector: React.FC<DateTimeSelectorProps> = ({
@@ -30,13 +31,17 @@ const DateTimeSelector: React.FC<DateTimeSelectorProps> = ({
   selectedHour,
   onDateChange,
   onHourChange,
+  minHoursBeforePost = 0,
 }) => {
   const hours = Array.from({ length: 24 }, (_, i) => i);
 
   const getMinAvailableHour = () => {
     const now = new Date();
-    // Минимум через 2 часа от текущего (чтобы был зазор больше часа)
-    return now.getHours() + 2;
+    // Base minimum: 2 hours from now
+    const baseMinHour = now.getHours() + 2;
+    // Add channel's min_hours_before_post requirement
+    const requiredMinHour = now.getHours() + Math.max(2, minHoursBeforePost);
+    return Math.max(baseMinHour, requiredMinHour);
   };
 
   const getAvailableHours = () => {
@@ -44,6 +49,22 @@ const DateTimeSelector: React.FC<DateTimeSelectorProps> = ({
       const minHour = getMinAvailableHour();
       // Если minHour >= 24, значит на сегодня слотов нет
       return hours.filter(hour => hour >= minHour);
+    }
+    // For future dates, still apply minHoursBeforePost
+    if (minHoursBeforePost > 0) {
+      const now = new Date();
+      const selectedDay = new Date(selectedDate);
+      selectedDay.setHours(0, 0, 0, 0);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const daysDiff = Math.floor((selectedDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      const hoursAlreadyCovered = daysDiff * 24;
+      const remainingMinHours = minHoursBeforePost - hoursAlreadyCovered;
+      
+      if (remainingMinHours > 0) {
+        return hours.filter(hour => hour >= now.getHours() + remainingMinHours);
+      }
     }
     return hours;
   };

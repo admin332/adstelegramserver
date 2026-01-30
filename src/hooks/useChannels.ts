@@ -40,6 +40,9 @@ interface DatabaseChannel {
   growth_rate: number | null;
   notifications_enabled: number | null;
   top_hours: Json | null;
+  accepted_campaign_types: string | null;
+  min_hours_before_post: number | null;
+  auto_delete_posts: boolean | null;
 }
 
 function parseRecentPostsStats(data: Json | null): PostStatRaw[] {
@@ -129,6 +132,9 @@ function mapDatabaseToChannel(dbChannel: DatabaseChannel): Channel {
     growthRate: dbChannel.growth_rate ?? undefined,
     notificationsEnabled: dbChannel.notifications_enabled ?? undefined,
     topHours: parseTopHours(dbChannel.top_hours),
+    acceptedCampaignTypes: dbChannel.accepted_campaign_types || 'both',
+    minHoursBeforePost: dbChannel.min_hours_before_post || 0,
+    autoDeletePosts: dbChannel.auto_delete_posts || false,
   };
 }
 

@@ -28,6 +28,7 @@ interface OrderDrawerProps {
   channelId: string;
   channelName: string;
   pricePerPost: number;
+  minHoursBeforePost?: number;
 }
 
 const OrderDrawer: React.FC<OrderDrawerProps> = ({
@@ -36,6 +37,7 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   channelId,
   channelName,
   pricePerPost,
+  minHoursBeforePost = 0,
 }) => {
   const navigate = useNavigate();
   const { data: userCampaigns = [] } = useUserCampaigns();
@@ -46,7 +48,7 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedHour, setSelectedHour] = useState(() => {
     const now = new Date();
-    const minHour = now.getHours() + 2;
+    const minHour = now.getHours() + Math.max(2, minHoursBeforePost);
     return minHour > 23 ? 0 : minHour;
   });
   const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>([]);
@@ -170,7 +172,7 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
     setSelectedDate(date);
     
     if (isToday(date)) {
-      const minHour = new Date().getHours() + 2;
+      const minHour = new Date().getHours() + Math.max(2, minHoursBeforePost);
       if (selectedHour < minHour) {
         setSelectedHour(minHour > 23 ? 0 : minHour);
       }
@@ -243,6 +245,7 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
                   selectedHour={selectedHour}
                   onDateChange={handleDateChange}
                   onHourChange={setSelectedHour}
+                  minHoursBeforePost={minHoursBeforePost}
                 />
               </motion.div>
             )}

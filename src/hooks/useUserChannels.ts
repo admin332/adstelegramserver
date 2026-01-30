@@ -14,6 +14,9 @@ export interface UserChannel {
   verified: boolean | null;
   price_1_24: number | null;
   price_2_48: number | null;
+  accepted_campaign_types?: string;
+  min_hours_before_post?: number;
+  auto_delete_posts?: boolean;
   created_at: string | null;
   userRole?: 'owner' | 'manager';
 }
