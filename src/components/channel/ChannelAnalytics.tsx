@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, Eye, BarChart3, Globe, Crown, CheckCircle, AlertTriangle, Clock, Bell } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface PostStat {
   messageId: number;
@@ -84,9 +85,13 @@ const getEngagementLevel = (er: number): {
   };
 };
 
-// Format hour for display
-const formatHour = (hour: number): string => {
-  return `${hour.toString().padStart(2, '0')}:00`;
+// Shift hours from UTC to UTC+3 and sort for chart display
+const prepareHoursData = (hours: TopHourStat[]) => {
+  const shifted = hours.map(h => ({
+    ...h,
+    displayHour: (h.hour + 3) % 24,
+  }));
+  return shifted.sort((a, b) => a.displayHour - b.displayHour);
 };
 
 const ChannelAnalytics: React.FC<ChannelAnalyticsProps> = ({
@@ -102,11 +107,6 @@ const ChannelAnalytics: React.FC<ChannelAnalyticsProps> = ({
 }) => {
   const engagementLevel = getEngagementLevel(engagement);
   const maxViews = recentPosts.length > 0 ? Math.max(...recentPosts.map(p => p.views)) : 0;
-  
-  // Find max value for top hours heatmap
-  const maxHourValue = topHours && topHours.length > 0 
-    ? Math.max(...topHours.map(h => h.value)) 
-    : 0;
 
   return (
     <div className="space-y-4">
@@ -247,55 +247,89 @@ const ChannelAnalytics: React.FC<ChannelAnalyticsProps> = ({
         </motion.div>
       )}
 
-      {/* Top Hours Heatmap */}
-      {topHours && topHours.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="bg-secondary/50 rounded-2xl p-4"
-        >
-          <div className="flex items-center gap-2 mb-3">
-            <Clock className="h-5 w-5 text-primary" />
-            <span className="font-medium text-foreground">Пиковая активность</span>
-          </div>
-          
-          <div className="grid grid-cols-6 gap-1.5 mb-2">
-            {topHours.slice(0, 12).map((hourStat, index) => {
-              const intensity = maxHourValue > 0 ? hourStat.value / maxHourValue : 0;
-              return (
-                <motion.div
-                  key={hourStat.hour}
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.2, delay: 0.35 + index * 0.02 }}
-                  className="flex flex-col items-center"
-                >
-                  <div
-                    className={cn(
-                      "w-full aspect-square rounded-lg flex items-center justify-center text-xs font-medium transition-colors",
-                      intensity >= 0.8 ? "bg-primary text-primary-foreground" :
-                      intensity >= 0.5 ? "bg-primary/60 text-primary-foreground" :
-                      intensity >= 0.3 ? "bg-primary/30 text-foreground" :
-                      "bg-secondary text-muted-foreground"
-                    )}
-                    title={`${formatHour(hourStat.hour)}: ${hourStat.value} постов`}
-                  >
-                    {hourStat.value}
-                  </div>
-                  <span className="text-[10px] text-muted-foreground mt-1">
-                    {hourStat.hour}h
-                  </span>
-                </motion.div>
-              );
-            })}
-          </div>
-          
-          <p className="text-xs text-muted-foreground text-center mt-2">
-            Часы с наибольшей активностью аудитории (UTC+3)
-          </p>
-        </motion.div>
-      )}
+      {/* Peak Activity Area Chart */}
+      {topHours && topHours.length > 0 && (() => {
+        const chartData = prepareHoursData(topHours);
+        const peakHour = chartData.reduce((max, h) => 
+          h.value > max.value ? h : max, chartData[0]);
+        
+        return (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="bg-secondary/50 rounded-2xl p-4"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Clock className="h-5 w-5 text-primary" />
+                <span className="font-medium text-foreground">Пиковая активность</span>
+              </div>
+              <div className="flex items-center gap-1 text-primary text-sm">
+                <span>🎯</span>
+                <span className="font-semibold">
+                  {peakHour.displayHour.toString().padStart(2,'0')}:00
+                </span>
+              </div>
+            </div>
+            
+            {/* Area Chart */}
+            <div className="h-32">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorActivity" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <XAxis 
+                    dataKey="displayHour" 
+                    tickFormatter={(h) => `${h}h`}
+                    stroke="hsl(var(--muted-foreground))"
+                    fontSize={10}
+                    tickLine={false}
+                    axisLine={false}
+                    interval={3}
+                  />
+                  <YAxis hide />
+                  <Tooltip 
+                    content={({ active, payload }) => {
+                      if (active && payload?.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div className="bg-background border rounded-lg px-3 py-2 shadow-lg">
+                            <p className="font-semibold text-foreground">
+                              {data.displayHour.toString().padStart(2,'0')}:00
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              Активность: {data.value}
+                            </p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="value" 
+                    stroke="hsl(var(--primary))" 
+                    strokeWidth={2}
+                    fillOpacity={1} 
+                    fill="url(#colorActivity)" 
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            
+            <p className="text-xs text-muted-foreground text-center mt-2">
+              Активность аудитории по часам (UTC+3)
+            </p>
+          </motion.div>
+        );
+      })()}
 
       {/* Recent Posts Bar Chart */}
       {recentPosts.length > 0 && (
