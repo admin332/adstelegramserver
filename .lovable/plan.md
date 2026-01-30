@@ -1,150 +1,83 @@
 
 
-## Обзор
+## Адаптация Edge Functions под обновлённый VPS
 
-После обновления VPS-сервиса на Railway, формат данных изменился. Нужно адаптировать Edge Functions и фронтенд для корректной обработки нового формата.
+После обновления VPS-сервиса на Railway, формат данных для `topHours` изменился — теперь используются динамические ключи вместо фиксированного `y0`.
 
 ---
 
-## Изменения в формате данных VPS
+## Проблема
 
-| Поле | Было | Стало |
-|------|------|-------|
-| **notifications** | `enabledNotifications.part` (число) | `notificationsRaw: { part, total }` |
-| **languages** | `languageStats: []` (пустой) | `languageStats: [{ label, value }, ...]` |
-| **growth** | `followers.growthRate` | `growthRate` (напрямую) |
-| **premium** | `premiumPercentage` (undefined) | `premiumStats: [{ x, y0 }, ...]` (график) |
-| **topHours** | `topHours: [{ hour, value }]` | `topHours: [{ x, y0 }, ...]` (формат графика) |
+| Поле | Старый формат VPS | Новый формат VPS |
+|------|-------------------|------------------|
+| **topHours** | `[{ x, y0: 150 }]` | `[{ x, "Top Hours": 150 }]` или `[{ x, y0: 150 }]` |
+
+Текущий код Edge Functions ищет `h.y0` или `h['y0']`, но VPS может вернуть любое имя из `names[col[0]]` (например `"Top Hours"`, `"Views"` и т.д.)
+
+---
+
+## Решение
+
+Изменить парсинг `topHours` для извлечения значения из **первого не-x ключа** объекта:
+
+```typescript
+// Было (фиксированный ключ):
+value: h.y0 || h['y0'] || 0
+
+// Станет (динамический ключ):
+const keys = Object.keys(h).filter(k => k !== 'x');
+value: keys.length > 0 ? (h[keys[0]] || 0) : 0
+```
 
 ---
 
 ## Изменения
 
-### 1. verify-channel/index.ts (строки 504-536)
+### 1. verify-channel/index.ts (строки 530-535)
 
-Адаптировать парсинг нового формата:
+Обновить парсинг `topHours`:
 
 ```typescript
-if (mtprotoData.success && mtprotoData.stats) {
-  const stats = mtprotoData.stats;
-  const updateData: Record<string, unknown> = {};
-  
-  // Language stats: новый формат { label, value } → { language, percentage }
-  if (stats.languageStats && Array.isArray(stats.languageStats) && stats.languageStats.length > 0) {
-    const totalLang = stats.languageStats.reduce((sum, l) => sum + (l.value || 0), 0);
-    updateData.language_stats = stats.languageStats.map(l => ({
-      language: l.label || 'Unknown',
-      percentage: totalLang > 0 ? Math.round((l.value / totalLang) * 100) : 0
-    }));
-  }
-  
-  // Growth rate: теперь напрямую
-  if (stats.growthRate !== undefined) {
-    updateData.growth_rate = stats.growthRate;
-  }
-  
-  // Notifications: новый формат с part/total для точного расчета %
-  if (stats.notificationsRaw) {
-    const { part, total } = stats.notificationsRaw;
-    const percentage = total > 0 ? Math.round((part / total) * 10000) / 100 : 0;
-    updateData.notifications_enabled = percentage;
-  }
-  
-  // Top hours: формат графика { x, y0 } → { hour, value }
-  if (stats.topHours && Array.isArray(stats.topHours) && stats.topHours.length > 0) {
-    updateData.top_hours = stats.topHours.map((h, idx) => ({
-      hour: idx,
-      value: h.y0 || h['y0'] || 0
-    }));
-  }
-  
-  // Premium stats: это график активности, не процент подписчиков
-  // Можно сохранить для будущего отображения
-  if (stats.premiumStats && Array.isArray(stats.premiumStats)) {
-    // Пока не сохраняем - это данные графика, не % премиум подписчиков
-  }
-  
-  // ... остальной код сохранения
+// Top hours: формат графика с динамическими ключами { x, [label]: value } → { hour, value }
+if (stats.topHours && Array.isArray(stats.topHours) && stats.topHours.length > 0) {
+  updateData.top_hours = stats.topHours.map((h: Record<string, unknown>, idx: number) => {
+    // Найти первый ключ не равный 'x' — это и есть значение активности
+    const valueKey = Object.keys(h).find(k => k !== 'x');
+    const value = valueKey ? (Number(h[valueKey]) || 0) : 0;
+    return { hour: idx, value };
+  });
+}
+```
+
+### 2. refresh-channel-stats/index.ts (строки 356-362)
+
+Аналогичное изменение:
+
+```typescript
+// Top hours: { x, [label]: value } → { hour, value }
+if (mtprotoData.stats.topHours?.length > 0) {
+  topHours = mtprotoData.stats.topHours.map((h: Record<string, unknown>, idx: number) => {
+    const valueKey = Object.keys(h).find(k => k !== 'x');
+    const value = valueKey ? (Number(h[valueKey]) || 0) : 0;
+    return { hour: idx, value };
+  });
+  console.log(`[refresh] Got top hours data`);
 }
 ```
 
 ---
 
-### 2. refresh-channel-stats/index.ts (строки 331-355)
+## Что останется без изменений
 
-Аналогичные изменения для обработки нового формата:
-
-```typescript
-if (mtprotoData.stats) {
-  // Languages: { label, value } → { language, percentage }
-  if (mtprotoData.stats.languageStats?.length > 0) {
-    const total = mtprotoData.stats.languageStats.reduce((s, l) => s + (l.value || 0), 0);
-    languageStats = mtprotoData.stats.languageStats.map(l => ({
-      language: l.label || 'Unknown',
-      percentage: total > 0 ? Math.round((l.value / total) * 100) : 0
-    }));
-  }
-  
-  // Growth rate: теперь напрямую
-  if (mtprotoData.stats.growthRate !== undefined) {
-    growthRate = mtprotoData.stats.growthRate;
-  }
-  
-  // Notifications: part/total → percentage
-  if (mtprotoData.stats.notificationsRaw) {
-    const { part, total } = mtprotoData.stats.notificationsRaw;
-    notificationsEnabled = total > 0 ? Math.round((part / total) * 10000) / 100 : 0;
-  }
-  
-  // Top hours: { x, y0 } → { hour, value }
-  if (mtprotoData.stats.topHours?.length > 0) {
-    topHours = mtprotoData.stats.topHours.map((h, idx) => ({
-      hour: idx,
-      value: h.y0 || h['y0'] || 0
-    }));
-  }
-}
-```
+- **languageStats** — текущий код уже корректен для формата `[{ label, value }]`. Если VPS возвращает пустой массив — значит Telegram не отдаёт эти данные для канала.
+- **notificationsRaw** — формат `{ part, total }` уже обрабатывается правильно.
+- **growthRate** — прямой маппинг работает.
 
 ---
 
-### 3. ChannelAnalytics.tsx
+## После применения
 
-Добавить защиту от некорректных значений:
-
-```typescript
-// Строка 218-226: ограничить до 100%
-const safeNotifications = Math.min(notificationsEnabled ?? 0, 100);
-// Использовать safeNotifications вместо notificationsEnabled в анимации
-```
-
----
-
-### 4. Обновить данные @slixone
-
-После деплоя Edge Functions вызвать `refresh-channel-stats` принудительно для @slixone:
-- Сбросить `stats_updated_at` на старую дату чтобы lazy-update сработал
-- Или вызвать напрямую с параметром force
-
----
-
-## Порядок действий
-
-| # | Файл | Действие |
-|---|------|----------|
-| 1 | `supabase/functions/verify-channel/index.ts` | Адаптировать парсинг нового формата VPS |
-| 2 | `supabase/functions/refresh-channel-stats/index.ts` | Адаптировать парсинг нового формата VPS |
-| 3 | `src/components/channel/ChannelAnalytics.tsx` | Добавить защиту от >100% |
-| 4 | База данных | Сбросить stats_updated_at для @slixone |
-
----
-
-## Итоговый формат данных в БД
-
-| Поле | Формат | Пример |
-|------|--------|--------|
-| `notifications_enabled` | `number` (процент 0-100) | `4.69` |
-| `language_stats` | `[{ language, percentage }]` | `[{ "language": "Russian", "percentage": 75 }]` |
-| `growth_rate` | `number` (процент) | `-0.23` |
-| `top_hours` | `[{ hour, value }]` | `[{ "hour": 0, "value": 5 }, ...]` |
+1. Деплой Edge Functions
+2. Сбросить `stats_updated_at` для @slixone чтобы триггернуть обновление
+3. Открыть страницу канала и проверить что `topHours` теперь показывает реальные значения
 
