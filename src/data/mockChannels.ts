@@ -9,6 +9,11 @@ export interface LanguageStat {
   percentage: number;
 }
 
+export interface TopHourStat {
+  hour: number;
+  value: number;
+}
+
 export interface Channel {
   id: string;
   name: string;
@@ -31,6 +36,9 @@ export interface Channel {
   languageStats?: LanguageStat[];
   premiumPercentage?: number;
   statsUpdatedAt?: string;
+  growthRate?: number;
+  notificationsEnabled?: number;
+  topHours?: TopHourStat[];
 }
 
 export const mockChannels: Channel[] = [

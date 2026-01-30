@@ -188,6 +188,9 @@ const Channel: React.FC = () => {
           recentPosts={channel.recentPostsStats}
           languageStats={channel.languageStats}
           premiumPercentage={channel.premiumPercentage}
+          growthRate={channel.growthRate}
+          notificationsEnabled={channel.notificationsEnabled}
+          topHours={channel.topHours}
         />
       </motion.div>
 

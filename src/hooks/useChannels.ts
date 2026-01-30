@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Channel } from '@/data/mockChannels';
+import { Channel, TopHourStat } from '@/data/mockChannels';
 import type { Json } from '@/integrations/supabase/types';
 
 interface PostStatRaw {
@@ -37,6 +37,9 @@ interface DatabaseChannel {
   recent_posts_stats: Json | null;
   language_stats: Json | null;
   premium_percentage: number | null;
+  growth_rate: number | null;
+  notifications_enabled: number | null;
+  top_hours: Json | null;
 }
 
 function parseRecentPostsStats(data: Json | null): PostStatRaw[] {
@@ -79,6 +82,25 @@ function parseLanguageStats(data: Json | null): LanguageStatRaw[] | undefined {
   return result.length > 0 ? result : undefined;
 }
 
+function parseTopHours(data: Json | null): TopHourStat[] | undefined {
+  if (!data || !Array.isArray(data)) return undefined;
+  const result: TopHourStat[] = [];
+  for (const item of data) {
+    if (
+      typeof item === 'object' && 
+      item !== null && 
+      'hour' in item && 
+      'value' in item
+    ) {
+      result.push({
+        hour: Number((item as Record<string, unknown>).hour),
+        value: Number((item as Record<string, unknown>).value),
+      });
+    }
+  }
+  return result.length > 0 ? result : undefined;
+}
+
 function mapDatabaseToChannel(dbChannel: DatabaseChannel): Channel {
   const tonPrice = Number(dbChannel.price_1_24) || 0;
   const usdPrice = Math.round(tonPrice * 3.5); // Approximate USD conversion
@@ -104,6 +126,9 @@ function mapDatabaseToChannel(dbChannel: DatabaseChannel): Channel {
     recentPostsStats: parseRecentPostsStats(dbChannel.recent_posts_stats),
     languageStats: parseLanguageStats(dbChannel.language_stats),
     premiumPercentage: dbChannel.premium_percentage ?? undefined,
+    growthRate: dbChannel.growth_rate ?? undefined,
+    notificationsEnabled: dbChannel.notifications_enabled ?? undefined,
+    topHours: parseTopHours(dbChannel.top_hours),
   };
 }
 
