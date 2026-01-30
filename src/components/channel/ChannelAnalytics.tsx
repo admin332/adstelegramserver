@@ -42,6 +42,17 @@ const formatNumber = (num: number): string => {
   return num.toString();
 };
 
+// Smart percentage formatting for language stats
+const formatPercentage = (percentage: number): string => {
+  if (percentage === 0) {
+    return '<0.01%';
+  }
+  if (percentage < 1) {
+    return `${percentage.toFixed(2)}%`;
+  }
+  return `${Math.round(percentage)}%`;
+};
+
 // Get engagement level and color
 const getEngagementLevel = (er: number): { 
   label: string; 
@@ -351,9 +362,9 @@ const ChannelAnalytics: React.FC<ChannelAnalyticsProps> = ({
               <div key={lang.language} className="space-y-1">
                 <div className="flex justify-between text-sm">
                   <span className="text-foreground">{lang.language}</span>
-                  <span className="text-muted-foreground">{lang.percentage}%</span>
+                  <span className="text-muted-foreground">{formatPercentage(lang.percentage)}</span>
                 </div>
-                <Progress value={lang.percentage} className="h-2" />
+                <Progress value={Math.max(lang.percentage, 0.5)} className="h-2" />
               </div>
             ))}
           </div>

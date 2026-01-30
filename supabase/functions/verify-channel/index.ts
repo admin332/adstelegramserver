@@ -505,12 +505,12 @@ Deno.serve(async (req) => {
           const stats = mtprotoData.stats;
           const updateData: Record<string, unknown> = {};
           
-          // Language stats: новый формат { label, value } → { language, percentage }
+          // Language stats: новый формат { label, value } → { language, percentage } (2 decimal places)
           if (stats.languageStats && Array.isArray(stats.languageStats) && stats.languageStats.length > 0) {
             const totalLang = stats.languageStats.reduce((sum: number, l: { value?: number }) => sum + (l.value || 0), 0);
             updateData.language_stats = stats.languageStats.map((l: { label?: string; value?: number }) => ({
               language: l.label || 'Unknown',
-              percentage: totalLang > 0 ? Math.round((l.value || 0) / totalLang * 100) : 0
+              percentage: totalLang > 0 ? Math.round((l.value || 0) / totalLang * 10000) / 100 : 0
             }));
           }
           

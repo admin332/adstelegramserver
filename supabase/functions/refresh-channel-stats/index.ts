@@ -334,12 +334,12 @@ Deno.serve(async (req) => {
             if (mtprotoData.stats) {
               console.log(`[refresh] MTProto stats keys:`, Object.keys(mtprotoData.stats));
               
-              // Languages: { label, value } → { language, percentage }
+              // Languages: { label, value } → { language, percentage } (2 decimal places)
               if (mtprotoData.stats.languageStats?.length > 0) {
                 const total = mtprotoData.stats.languageStats.reduce((s: number, l: { value?: number }) => s + (l.value || 0), 0);
                 languageStats = mtprotoData.stats.languageStats.map((l: { label?: string; value?: number }) => ({
                   language: l.label || 'Unknown',
-                  percentage: total > 0 ? Math.round((l.value || 0) / total * 100) : 0
+                  percentage: total > 0 ? Math.round((l.value || 0) / total * 10000) / 100 : 0
                 }));
                 console.log(`[refresh] Languages: ${languageStats.length} entries`);
               }
