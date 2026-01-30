@@ -210,6 +210,7 @@ const Index = () => {
                     {...channel} 
                     isLiked={isFavorite(channel.id)}
                     onLikeToggle={toggleFavorite}
+                    acceptedCampaignTypes={channel.acceptedCampaignTypes}
                   />
                 </div>
               ))

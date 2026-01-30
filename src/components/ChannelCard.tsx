@@ -22,7 +22,19 @@ interface ChannelCardProps {
   premium?: boolean;
   isLiked?: boolean;
   onLikeToggle?: (id: string) => void;
+  acceptedCampaignTypes?: string;
 }
+
+const getCampaignTypeLabel = (type: string | undefined): string => {
+  switch (type) {
+    case 'prompt':
+      return 'По промту';
+    case 'ready_post':
+      return 'Готовый пост';
+    default:
+      return 'Все кампании';
+  }
+};
 
 const formatNumber = (num: number): string => {
   if (num >= 1000000) {
@@ -48,6 +60,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   premium,
   isLiked = false,
   onLikeToggle,
+  acceptedCampaignTypes,
 }) => {
   const navigate = useNavigate();
 
@@ -109,13 +122,16 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
 
 
       {/* Category & Views Badge - Left */}
-      <div className="absolute top-3 left-3 flex items-center gap-2">
+      <div className="absolute top-3 left-3 flex items-center gap-2 flex-wrap">
         <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1">
           <Eye className="w-3 h-3" />
           <span>{formatNumber(avgViews)}</span>
         </div>
         <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full">
           {getCategoryById(category)?.name || category}
+        </div>
+        <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full">
+          {getCampaignTypeLabel(acceptedCampaignTypes)}
         </div>
       </div>
 

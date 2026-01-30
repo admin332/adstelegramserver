@@ -62,6 +62,7 @@ export const mockChannels: Channel[] = [
     description: "Канал о криптовалютах и блокчейне. Ежедневные новости, аналитика рынка и обзоры перспективных проектов.",
     successfulAds: 156,
     engagement: 36,
+    acceptedCampaignTypes: "both",
   },
   {
     id: "2",
@@ -78,6 +79,7 @@ export const mockChannels: Channel[] = [
     description: "Всё о видеоиграх: обзоры, новости, стримы и гайды. Лучший контент для геймеров!",
     successfulAds: 89,
     engagement: 36,
+    acceptedCampaignTypes: "prompt",
   },
   {
     id: "3",
@@ -95,6 +97,7 @@ export const mockChannels: Channel[] = [
     description: "Технологические новости каждый день. Гаджеты, софт, стартапы и инновации.",
     successfulAds: 234,
     engagement: 37,
+    acceptedCampaignTypes: "ready_post",
   },
   {
     id: "4",
