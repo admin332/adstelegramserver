@@ -20,6 +20,7 @@ interface CampaignSelectorProps {
   onSelectionChange: (ids: string[]) => void;
   onCreateNew: () => void;
   acceptedCampaignTypes?: string;
+  selectedCampaignType?: string | null;
 }
 
 const CampaignSelector: React.FC<CampaignSelectorProps> = ({
@@ -29,7 +30,9 @@ const CampaignSelector: React.FC<CampaignSelectorProps> = ({
   onSelectionChange,
   onCreateNew,
   acceptedCampaignTypes = 'both',
+  selectedCampaignType,
 }) => {
+  const isPromptMode = selectedCampaignType === 'prompt';
   const getAcceptedTypeLabel = (type: string | undefined) => {
     switch (type) {
       case 'prompt':
@@ -56,6 +59,24 @@ const CampaignSelector: React.FC<CampaignSelectorProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* Info about prompt mode */}
+      {isPromptMode && (
+        <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-center">
+          <p className="text-sm text-muted-foreground">
+            Для промпт-рекламы нужна только <span className="font-medium text-blue-500">1 кампания</span> независимо от количества постов
+          </p>
+        </div>
+      )}
+
+      {/* Info when type is locked (for channels accepting both types) */}
+      {selectedCampaignType && acceptedCampaignTypes === 'both' && !isPromptMode && (
+        <div className="bg-primary/10 border border-primary/20 rounded-xl p-3 text-center">
+          <p className="text-sm text-muted-foreground">
+            Выбран тип: <span className="font-medium text-primary">{getAcceptedTypeLabel(selectedCampaignType)}</span>
+          </p>
+        </div>
+      )}
+
       {/* Selection Info */}
       {requiredCount > 1 && (
         <p className="text-sm text-muted-foreground text-center">
@@ -63,8 +84,8 @@ const CampaignSelector: React.FC<CampaignSelectorProps> = ({
         </p>
       )}
 
-      {/* Info about accepted types */}
-      {acceptedCampaignTypes && acceptedCampaignTypes !== 'both' && campaigns.length > 0 && (
+      {/* Info about accepted types (when no selection yet) */}
+      {!selectedCampaignType && acceptedCampaignTypes && acceptedCampaignTypes !== 'both' && campaigns.length > 0 && (
         <div className="bg-primary/10 border border-primary/20 rounded-xl p-3 text-center">
           <p className="text-sm text-muted-foreground">
             Канал принимает только: <span className="font-medium text-primary">{getAcceptedTypeLabel(acceptedCampaignTypes)}</span>

@@ -61,17 +61,26 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
       : minPublishTime.getHours();
   });
   const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>([]);
+  const [selectedCampaignType, setSelectedCampaignType] = useState<string | null>(null);
   
   // Payment step state
   const [isCreatingDeal, setIsCreatingDeal] = useState(false);
   const [escrowAddress, setEscrowAddress] = useState<string | null>(null);
   const [dealId, setDealId] = useState<string | null>(null);
 
-  // Фильтруем кампании по типу, который принимает канал
+  // Фильтруем кампании по типу
   const filteredUserCampaigns = userCampaigns.filter(c => {
+    // Если уже выбран тип — показываем только этот тип
+    if (selectedCampaignType) {
+      return c.campaign_type === selectedCampaignType;
+    }
+    // Иначе фильтруем по настройкам канала
     if (acceptedCampaignTypes === 'both') return true;
     return c.campaign_type === acceptedCampaignTypes;
   });
+
+  // Для промпта нужна только 1 кампания, для ready_post — по количеству постов
+  const requiredCampaignsCount = selectedCampaignType === 'prompt' ? 1 : quantity;
 
   const campaigns = filteredUserCampaigns.map(c => {
     const mediaUrls = (c as { media_urls?: string[] }).media_urls;
@@ -106,7 +115,11 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   const stepSubtitles: Record<number, string> = {
     1: `Реклама в канале ${channelName}`,
     2: `Реклама в канале ${channelName}`,
-    3: quantity > 1 ? `Выберите ${quantity} кампании` : `Выберите кампанию`,
+    3: selectedCampaignType === 'prompt' 
+      ? 'Выберите 1 кампанию (промпт)'
+      : requiredCampaignsCount > 1 
+        ? `Выберите ${requiredCampaignsCount} кампании` 
+        : 'Выберите кампанию',
     4: `К оплате: ${totalPrice} TON`,
   };
 
@@ -167,6 +180,26 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
         setEscrowAddress(null);
         setDealId(null);
       }
+      // Reset campaign selection when going back from step 3
+      if (currentStep === 3) {
+        setSelectedCampaigns([]);
+        setSelectedCampaignType(null);
+      }
+    }
+  };
+
+  const handleCampaignSelectionChange = (ids: string[]) => {
+    setSelectedCampaigns(ids);
+    
+    if (ids.length === 0) {
+      // Reset type if nothing selected
+      setSelectedCampaignType(null);
+    } else if (ids.length === 1 && selectedCampaignType === null) {
+      // Determine type from first selected campaign
+      const selectedCampaign = userCampaigns.find(c => c.id === ids[0]);
+      if (selectedCampaign) {
+        setSelectedCampaignType(selectedCampaign.campaign_type);
+      }
     }
   };
 
@@ -217,7 +250,7 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
       case 2:
         return selectedDate && selectedHour !== undefined;
       case 3:
-        return selectedCampaigns.length === quantity;
+        return selectedCampaigns.length === requiredCampaignsCount;
       case 4:
         return false; // Payment step has its own button
       default:
@@ -293,10 +326,11 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
               <CampaignSelector
                   campaigns={campaigns}
                   selectedCampaigns={selectedCampaigns}
-                  requiredCount={quantity}
-                  onSelectionChange={setSelectedCampaigns}
+                  requiredCount={requiredCampaignsCount}
+                  onSelectionChange={handleCampaignSelectionChange}
                   onCreateNew={handleCreateNewCampaign}
                   acceptedCampaignTypes={acceptedCampaignTypes}
+                  selectedCampaignType={selectedCampaignType}
                 />
               </motion.div>
             )}
