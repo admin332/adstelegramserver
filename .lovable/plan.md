@@ -1,83 +1,60 @@
 
 
-## Адаптация Edge Functions под обновлённый VPS
+## Добавление детального логирования в refresh-channel-stats
 
-После обновления VPS-сервиса на Railway, формат данных для `topHours` изменился — теперь используются динамические ключи вместо фиксированного `y0`.
-
----
-
-## Проблема
-
-| Поле | Старый формат VPS | Новый формат VPS |
-|------|-------------------|------------------|
-| **topHours** | `[{ x, y0: 150 }]` | `[{ x, "Top Hours": 150 }]` или `[{ x, y0: 150 }]` |
-
-Текущий код Edge Functions ищет `h.y0` или `h['y0']`, но VPS может вернуть любое имя из `names[col[0]]` (например `"Top Hours"`, `"Views"` и т.д.)
-
----
-
-## Решение
-
-Изменить парсинг `topHours` для извлечения значения из **первого не-x ключа** объекта:
-
-```typescript
-// Было (фиксированный ключ):
-value: h.y0 || h['y0'] || 0
-
-// Станет (динамический ключ):
-const keys = Object.keys(h).filter(k => k !== 'x');
-value: keys.length > 0 ? (h[keys[0]] || 0) : 0
-```
+Цель: увидеть сырые данные `topHours` и `languageStats` от VPS перед парсингом, чтобы понять что именно приходит.
 
 ---
 
 ## Изменения
 
-### 1. verify-channel/index.ts (строки 530-535)
+### 1. refresh-channel-stats/index.ts (после строки 331)
 
-Обновить парсинг `topHours`:
-
-```typescript
-// Top hours: формат графика с динамическими ключами { x, [label]: value } → { hour, value }
-if (stats.topHours && Array.isArray(stats.topHours) && stats.topHours.length > 0) {
-  updateData.top_hours = stats.topHours.map((h: Record<string, unknown>, idx: number) => {
-    // Найти первый ключ не равный 'x' — это и есть значение активности
-    const valueKey = Object.keys(h).find(k => k !== 'x');
-    const value = valueKey ? (Number(h[valueKey]) || 0) : 0;
-    return { hour: idx, value };
-  });
-}
-```
-
-### 2. refresh-channel-stats/index.ts (строки 356-362)
-
-Аналогичное изменение:
+Добавить логирование raw данных сразу после получения `mtprotoData.stats`:
 
 ```typescript
-// Top hours: { x, [label]: value } → { hour, value }
-if (mtprotoData.stats.topHours?.length > 0) {
-  topHours = mtprotoData.stats.topHours.map((h: Record<string, unknown>, idx: number) => {
-    const valueKey = Object.keys(h).find(k => k !== 'x');
-    const value = valueKey ? (Number(h[valueKey]) || 0) : 0;
-    return { hour: idx, value };
-  });
-  console.log(`[refresh] Got top hours data`);
+if (mtprotoData.stats) {
+  // === ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ RAW ДАННЫХ ===
+  console.log(`[refresh] RAW languageStats:`, JSON.stringify(mtprotoData.stats.languageStats));
+  console.log(`[refresh] RAW topHours:`, JSON.stringify(mtprotoData.stats.topHours));
+  console.log(`[refresh] RAW stats keys:`, Object.keys(mtprotoData.stats));
+  
+  // Если topHours есть, показать структуру первого элемента
+  if (mtprotoData.stats.topHours?.length > 0) {
+    const firstItem = mtprotoData.stats.topHours[0];
+    console.log(`[refresh] topHours[0] keys:`, Object.keys(firstItem));
+    console.log(`[refresh] topHours[0] full:`, JSON.stringify(firstItem));
+  }
+  // === КОНЕЦ ЛОГИРОВАНИЯ ===
+  
+  // Languages: { label, value } → { language, percentage }
+  // ... остальной код парсинга
 }
 ```
 
 ---
 
-## Что останется без изменений
+## Действия после применения
 
-- **languageStats** — текущий код уже корректен для формата `[{ label, value }]`. Если VPS возвращает пустой массив — значит Telegram не отдаёт эти данные для канала.
-- **notificationsRaw** — формат `{ part, total }` уже обрабатывается правильно.
-- **growthRate** — прямой маппинг работает.
+1. Деплой Edge Function `refresh-channel-stats`
+2. Сбросить `stats_updated_at = NULL` для канала @slixone
+3. Открыть страницу канала чтобы триггернуть обновление
+4. Проверить логи — теперь будет видно:
+   - Какие ключи приходят от VPS
+   - Полная структура `topHours[0]`
+   - Содержимое `languageStats`
 
 ---
 
-## После применения
+## Техническая информация
 
-1. Деплой Edge Functions
-2. Сбросить `stats_updated_at` для @slixone чтобы триггернуть обновление
-3. Открыть страницу канала и проверить что `topHours` теперь показывает реальные значения
+Логи покажут один из следующих сценариев:
+
+| Сценарий | Что увидим в логах |
+|----------|-------------------|
+| VPS отдаёт данные | `RAW topHours: [{"x":1234567890,"Top Hours":150},...]` |
+| Telegram не отдаёт | `RAW topHours: []` или `RAW topHours: null` |
+| VPS парсит неверно | `RAW topHours: [{"x":123}]` (без value-ключей) |
+
+Это позволит точно диагностировать проблему.
 
