@@ -187,7 +187,7 @@ const ChannelSettingsPage: React.FC = () => {
         <h2 className="text-lg font-semibold text-foreground mb-2">Цены</h2>
         <div className="bg-secondary/50 rounded-2xl p-4 space-y-4">
           <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">24 часа</span>
+            <span className="text-muted-foreground">24 часа / 1 пост</span>
             <div className="flex items-center gap-2">
               <Input
                 type="number"
@@ -203,7 +203,7 @@ const ChannelSettingsPage: React.FC = () => {
           </div>
           
           <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">48 часов</span>
+            <span className="text-muted-foreground">24 часа / 2+ поста</span>
             <div className="flex items-center gap-2">
               <Input
                 type="number"
