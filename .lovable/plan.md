@@ -1,217 +1,271 @@
 
 
-## Настройки канала в карточке "Мои каналы"
+## Редизайн окна настроек канала
 
-Добавим иконку настроек в карточку канала с расширенным функционалом управления.
-
----
-
-## Новый функционал
-
-### Диалог настроек канала
-
-| Раздел | Описание |
-|--------|----------|
-| **Статистика** | Количество избранных, количество завершённых сделок |
-| **Цены** | Изменение цены за 24ч / 48ч размещение |
-| **Типы кампаний** | Выбор принимаемых типов: Промпт / Готовый пост / Оба |
-| **Минимальное время** | Минимальное время до публикации (от 0 до 24+ часов) |
-| **Автоудаление** | Включение автоматического удаления постов после рекламы |
+Переделаю диалог настроек, чтобы он полностью соответствовал стилю страницы канала.
 
 ---
 
-## Архитектура изменений
+## Текущие проблемы
 
-### 1. База данных
+| Элемент | Сейчас | Должно быть |
+|---------|--------|-------------|
+| Заголовок | DialogHeader стандартный | Hero секция с аватаром канала |
+| Секции | Разделены `<Separator>` | Отдельные карточки `bg-secondary/50 rounded-2xl` |
+| Анимации | Нет | `motion.div` с задержками как на странице канала |
+| Стиль | Тусклый модальный диалог | Яркий, с градиентами и акцентами |
+| Layout | Тесный grid | Просторные секции как на Channel.tsx |
 
-**Новая таблица `favorites`** (для серверного подсчёта избранных):
+---
 
-```sql
-CREATE TABLE public.favorites (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-  channel_id UUID NOT NULL REFERENCES public.channels(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(user_id, channel_id)
-);
-```
+## Новый дизайн
 
-**Новые колонки в таблице `channels`**:
-
-```sql
-ALTER TABLE public.channels ADD COLUMN accepted_campaign_types TEXT DEFAULT 'both';
-  -- 'prompt' | 'ready_post' | 'both'
-ALTER TABLE public.channels ADD COLUMN min_hours_before_post INTEGER DEFAULT 0;
-ALTER TABLE public.channels ADD COLUMN auto_delete_posts BOOLEAN DEFAULT false;
-```
-
-### 2. Серверная часть
-
-**Edge Function: `update-channel-settings`**
-
-Новая функция для безопасного обновления настроек:
+### Структура
 
 ```text
-Вход:
-- initData (Telegram валидация)
-- channel_id
-- settings: { price_1_24?, price_2_48?, accepted_campaign_types?, min_hours_before_post?, auto_delete_posts? }
-
-Логика:
-1. HMAC-SHA256 валидация initData
-2. Проверка прав доступа (channel_admins)
-3. Проверка активных сделок (pending, escrow, in_progress)
-   - Если есть → отказ с ошибкой
-4. Обновление полей в channels
-5. Возврат успеха
+┌────────────────────────────────────────┐
+│ ┌──────────────────────────────────┐   │
+│ │      [Фон аватара канала]        │   │
+│ │      ┌─────┐                     │   │
+│ │      │ 🖼️ │  ← Аватар           │   │
+│ │      └─────┘                     │   │
+│ │      Название канала ✓           │   │
+│ │      @username                   │   │
+│ └──────────────────────────────────┘   │
+│                                        │
+│ ┌─────────┐ ┌─────────┐                │
+│ │  ❤️ 42   │ │  ✅ 15   │  ← Статистика │
+│ │Избранное│ │ Сделок  │                │
+│ └─────────┘ └─────────┘                │
+│                                        │
+│ ┌──────────────────────────────────┐   │
+│ │ 💰 Цены                           │   │
+│ │ 24 часа    ┌────────┐            │   │
+│ │            │ 1.5    │ TON        │   │
+│ │ 48 часов   └────────┘            │   │
+│ └──────────────────────────────────┘   │
+│                                        │
+│ ┌──────────────────────────────────┐   │
+│ │ 📝 Типы кампаний                  │   │
+│ │ ○ Промпт  ○ Готовый  ● Любой     │   │
+│ └──────────────────────────────────┘   │
+│                                        │
+│ ┌──────────────────────────────────┐   │
+│ │ ⏰ Минимальное время              │   │
+│ │ ━━━━━━━━●━━━━━━━━ +6ч             │   │
+│ └──────────────────────────────────┘   │
+│                                        │
+│ ┌──────────────────────────────────┐   │
+│ │ 🗑️ Автоудаление       [Switch]   │   │
+│ └──────────────────────────────────┘   │
+│                                        │
+│ ┌──────────────────────────────────┐   │
+│ │       Сохранить изменения        │   │
+│ └──────────────────────────────────┘   │
+└────────────────────────────────────────┘
 ```
 
-**Edge Function: `channel-stats-for-owner`**
+---
 
-Получение статистики для владельца:
+## Технические изменения
 
-```text
-Вход:
-- initData
-- channel_id
+### Файл: `src/components/create/ChannelSettingsDialog.tsx`
 
-Выход:
-- favorites_count (из таблицы favorites)
-- completed_deals_count (из deals WHERE status='completed')
-- current settings
-```
+**1. Hero секция с аватаром канала**
 
-**Обновление `complete-posted-deals`**
-
-Добавить логику автоудаления:
-
-```text
-После завершения сделки:
-1. Проверить channel.auto_delete_posts
-2. Если true И telegram_message_id существует:
-   - Вызвать Telegram API deleteMessage
-   - Логировать результат
-```
-
-### 3. Frontend компоненты
-
-**Новый компонент: `ChannelSettingsDialog.tsx`**
-
-Диалог настроек с секциями:
-
-```text
-┌─────────────────────────────────────────┐
-│ ⚙️ Настройки канала                      │
-├─────────────────────────────────────────┤
-│ 📊 СТАТИСТИКА                            │
-│ ❤️ В избранном: 42                       │
-│ ✅ Завершённых сделок: 15                │
-├─────────────────────────────────────────┤
-│ 💰 ЦЕНЫ                                  │
-│ Цена 24ч: [___] TON                     │
-│ Цена 48ч: [___] TON                     │
-├─────────────────────────────────────────┤
-│ 📝 ТИПЫ КАМПАНИЙ                         │
-│ ○ Только промпт                         │
-│ ○ Только готовый пост                   │
-│ ● Любой тип                             │
-├─────────────────────────────────────────┤
-│ ⏰ МИНИМАЛЬНОЕ ВРЕМЯ ДО ПУБЛИКАЦИИ       │
-│ [Slider: 0ч — 24ч]                      │
-│ Текущее: +10 часов                      │
-├─────────────────────────────────────────┤
-│ 🗑️ АВТОУДАЛЕНИЕ ПОСТОВ                   │
-│ [Switch] Удалять после завершения       │
-│ ⚠️ Пост будет удалён автоматически       │
-├─────────────────────────────────────────┤
-│         [Сохранить изменения]           │
-└─────────────────────────────────────────┘
-```
-
-**Обновление `MyChannelsList.tsx`**
-
-Добавить иконку настроек (Settings) в правый нижний угол карточки:
+Как в `ChannelHero.tsx`:
 
 ```tsx
-<button onClick={() => openSettings(channel)}>
-  <Settings className="w-5 h-5" />
-</button>
+{/* Hero Section */}
+<div className="relative">
+  <div className="h-24 overflow-hidden rounded-t-lg">
+    <img
+      src={channel.avatar_url || '/placeholder.svg'}
+      alt={channel.title}
+      className="w-full h-full object-cover"
+    />
+    <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-background" />
+  </div>
+  
+  <div className="relative -mt-8 flex flex-col items-center">
+    <Avatar className="h-16 w-16 border-4 border-background shadow-lg">
+      <AvatarImage src={channel.avatar_url} />
+      <AvatarFallback>{channel.title?.charAt(0)}</AvatarFallback>
+    </Avatar>
+    
+    <div className="flex items-center gap-2 mt-2">
+      <h2 className="text-lg font-bold">{channel.title}</h2>
+      {channel.verified && <BadgeCheck className="w-4 h-4 text-primary" />}
+    </div>
+    <p className="text-sm text-muted-foreground">@{channel.username}</p>
+  </div>
+</div>
 ```
 
-**Обновление `useUserChannels.ts`**
+**2. Статистика как ChannelStats**
 
-Расширить интерфейс `UserChannel`:
+Grid 2 колонки с motion анимациями:
 
-```typescript
-interface UserChannel {
-  // existing...
-  accepted_campaign_types?: string;
-  min_hours_before_post?: number;
-  auto_delete_posts?: boolean;
-}
+```tsx
+<div className="grid grid-cols-2 gap-3 px-4 mt-4">
+  <motion.div
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ delay: 0.1 }}
+    className="bg-secondary/50 rounded-2xl p-4 text-center"
+  >
+    <Heart className="h-5 w-5 mx-auto mb-2 text-red-400" />
+    <p className="text-2xl font-bold">{stats.favorites_count}</p>
+    <p className="text-xs text-muted-foreground">В избранном</p>
+  </motion.div>
+  
+  <motion.div
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ delay: 0.2 }}
+    className="bg-secondary/50 rounded-2xl p-4 text-center"
+  >
+    <CheckCircle className="h-5 w-5 mx-auto mb-2 text-green-400" />
+    <p className="text-2xl font-bold">{stats.completed_deals_count}</p>
+    <p className="text-xs text-muted-foreground">Сделок</p>
+  </motion.div>
+</div>
 ```
 
-**Обновление `OrderDrawer.tsx`**
+**3. Секции настроек как карточки**
 
-При выборе времени учитывать `min_hours_before_post`:
+Каждая секция — отдельная карточка с анимацией:
 
-```typescript
-const minHour = channel.min_hours_before_post || 0;
-// Добавить к минимальному времени
+```tsx
+{/* Prices Section */}
+<motion.div
+  initial={{ opacity: 0, y: 20 }}
+  animate={{ opacity: 1, y: 0 }}
+  transition={{ delay: 0.3 }}
+  className="px-4 mt-4"
+>
+  <h3 className="text-lg font-semibold text-foreground mb-2">Цены</h3>
+  <div className="bg-secondary/50 rounded-2xl p-4 space-y-4">
+    {/* Price inputs */}
+  </div>
+</motion.div>
+```
+
+**4. Секция типов кампаний с карточками выбора**
+
+Визуальные карточки вместо RadioGroup:
+
+```tsx
+<div className="grid grid-cols-3 gap-2">
+  {['prompt', 'ready_post', 'both'].map((type) => (
+    <button
+      key={type}
+      onClick={() => handleSettingChange('accepted_campaign_types', type)}
+      className={cn(
+        "p-3 rounded-xl text-center transition-all",
+        localSettings.accepted_campaign_types === type
+          ? "bg-primary text-primary-foreground"
+          : "bg-secondary/50 hover:bg-secondary"
+      )}
+    >
+      <span className="text-sm">{typeLabels[type]}</span>
+    </button>
+  ))}
+</div>
+```
+
+**5. Slider с визуальными метками**
+
+Как в ChannelAnalytics:
+
+```tsx
+<div className="bg-secondary/50 rounded-2xl p-4">
+  <Slider ... />
+  <div className="flex justify-between mt-3">
+    {[0, 6, 12, 24, 48, 72].map((h) => (
+      <span 
+        key={h}
+        className={cn(
+          "text-xs",
+          localSettings.min_hours_before_post === h 
+            ? "text-primary font-bold" 
+            : "text-muted-foreground"
+        )}
+      >
+        {h}ч
+      </span>
+    ))}
+  </div>
+</div>
+```
+
+**6. Автоудаление с описанием**
+
+Карточка с border-dashed как описание на странице канала:
+
+```tsx
+<div className="bg-secondary/50 rounded-2xl p-4">
+  <div className="flex items-center justify-between">
+    <div className="flex items-center gap-3">
+      <Trash2 className="h-5 w-5 text-primary" />
+      <span className="font-medium">Автоудаление</span>
+    </div>
+    <Switch ... />
+  </div>
+  
+  {localSettings.auto_delete_posts && (
+    <div className="mt-3 p-3 rounded-xl border-2 border-dashed border-amber-500/50 bg-amber-500/10">
+      <p className="text-xs text-amber-400">
+        Пост будет удалён автоматически после окончания срока размещения
+      </p>
+    </div>
+  )}
+</div>
+```
+
+**7. Кнопка сохранения**
+
+Fixed внизу как на странице канала:
+
+```tsx
+<div className="sticky bottom-0 p-4 bg-gradient-to-t from-background via-background to-transparent">
+  <motion.div
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ delay: 0.6 }}
+  >
+    <Button
+      onClick={handleSave}
+      disabled={!hasChanges || updateSettings.isPending}
+      className="w-full h-12 text-base font-semibold rounded-2xl"
+    >
+      Сохранить изменения
+    </Button>
+  </motion.div>
+</div>
 ```
 
 ---
 
-## Безопасность
+## Визуальные улучшения
 
-| Проверка | Где |
-|----------|-----|
-| HMAC-SHA256 initData | update-channel-settings |
-| Права доступа channel_admins | update-channel-settings |
-| Блокировка при активных сделках | update-channel-settings |
-| RLS для favorites | База данных |
-| Service role для обновлений | Edge Function |
-
----
-
-## Последовательность изменений
-
-1. **Миграция БД**
-   - Добавить колонки в channels
-   - Создать таблицу favorites с RLS
-
-2. **Edge Functions**
-   - Создать `channel-stats-for-owner`
-   - Создать `update-channel-settings`
-   - Обновить `complete-posted-deals` для автоудаления
-
-3. **Frontend**
-   - Создать `ChannelSettingsDialog.tsx`
-   - Создать хук `useChannelSettings.ts`
-   - Обновить `MyChannelsList.tsx` — добавить иконку
-   - Обновить `user-channels` — возвращать новые поля
-   - Обновить `OrderDrawer.tsx` — учитывать min_hours
-
-4. **Интеграция избранного**
-   - Обновить `useFavorites.ts` — синхронизация с БД
-   - Добавить вызов API при toggle
+| Элемент | Изменение |
+|---------|-----------|
+| Анимации | Все секции с `motion.div` и задержками 0.1-0.6с |
+| Карточки | `bg-secondary/50 rounded-2xl` вместо разделителей |
+| Отступы | Единообразные `px-4 mt-4` |
+| Акценты | Primary цвет для активных элементов |
+| Предупреждения | Border-dashed стиль как описание |
+| Скролл | Плавный overflow с градиентом |
 
 ---
 
-## Файлы для создания/изменения
+## Результат
 
-**Создать:**
-- `src/components/create/ChannelSettingsDialog.tsx`
-- `src/hooks/useChannelSettings.ts`
-- `supabase/functions/channel-stats-for-owner/index.ts`
-- `supabase/functions/update-channel-settings/index.ts`
-
-**Изменить:**
-- `src/components/create/MyChannelsList.tsx` — иконка настроек
-- `src/hooks/useUserChannels.ts` — новые поля
-- `src/hooks/useFavorites.ts` — серверная синхронизация
-- `supabase/functions/user-channels/index.ts` — новые поля
-- `supabase/functions/complete-posted-deals/index.ts` — автоудаление
-- `src/components/channel/DateTimeSelector.tsx` — учёт min_hours
-- `src/components/channel/OrderDrawer.tsx` — передача min_hours
+Окно настроек будет выглядеть как мини-версия страницы канала:
+- Hero с аватаром
+- Статистика в карточках
+- Настройки в секциях
+- Анимации появления
+- Единый визуальный стиль
 
