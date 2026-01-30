@@ -45,27 +45,40 @@ const DateTimeSelector: React.FC<DateTimeSelectorProps> = ({
   };
 
   const getAvailableHours = () => {
-    if (isToday(selectedDate)) {
-      const minHour = getMinAvailableHour();
-      // Если minHour >= 24, значит на сегодня слотов нет
-      return hours.filter(hour => hour >= minHour);
+    const now = new Date();
+    
+    // Минимальный час = текущий час + minHoursBeforePost (минимум 2)
+    const minTotalHours = Math.max(2, minHoursBeforePost);
+    
+    // Рассчитываем абсолютное время минимальной публикации
+    const minPublishTime = new Date(now.getTime() + minTotalHours * 60 * 60 * 1000);
+    
+    // Получаем начало выбранного дня
+    const selectedDayStart = new Date(selectedDate);
+    selectedDayStart.setHours(0, 0, 0, 0);
+    
+    // Получаем начало сегодняшнего дня
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    
+    // Получаем начало дня минимальной публикации
+    const minPublishDayStart = new Date(minPublishTime);
+    minPublishDayStart.setHours(0, 0, 0, 0);
+    
+    // Если выбранный день раньше дня минимальной публикации - нет слотов
+    if (selectedDayStart.getTime() < minPublishDayStart.getTime()) {
+      return [];
     }
-    // For future dates, still apply minHoursBeforePost
-    if (minHoursBeforePost > 0) {
-      const now = new Date();
-      const selectedDay = new Date(selectedDate);
-      selectedDay.setHours(0, 0, 0, 0);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      const daysDiff = Math.floor((selectedDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-      const hoursAlreadyCovered = daysDiff * 24;
-      const remainingMinHours = minHoursBeforePost - hoursAlreadyCovered;
-      
-      if (remainingMinHours > 0) {
-        return hours.filter(hour => hour >= now.getHours() + remainingMinHours);
-      }
+    
+    // Если выбранный день = день минимальной публикации
+    if (selectedDayStart.getTime() === minPublishDayStart.getTime()) {
+      const minHour = minPublishTime.getHours();
+      // Если есть минуты, округляем вверх до следующего часа
+      const adjustedMinHour = minPublishTime.getMinutes() > 0 ? minHour + 1 : minHour;
+      return hours.filter(hour => hour >= adjustedMinHour);
     }
+    
+    // Выбранный день позже минимального - все часы доступны
     return hours;
   };
 
