@@ -23,11 +23,29 @@ export function openExternalWalletApp(tonConnectUI: TonConnectUI): boolean {
       return false;
     }
 
-    // Получаем ссылку из walletInfo (правильный источник)
+    // Получаем ссылки из walletInfo (правильный источник)
     const universalLink = walletInfo?.universalLink;
     const deepLink = walletInfo?.deepLink;
     
-    const walletUrl = deepLink || universalLink;
+    // Проверяем платформу
+    const tgWebApp = window.Telegram?.WebApp;
+    const platform = tgWebApp?.platform?.toLowerCase() || '';
+    const isIOS = platform === 'ios';
+    
+    console.log('[TonWallet] Platform:', platform, 'isIOS:', isIOS);
+    console.log('[TonWallet] universalLink:', universalLink);
+    console.log('[TonWallet] deepLink:', deepLink);
+    
+    // iOS: используем deepLink (custom scheme) через window.location.href
+    // Это обходит ограничение iOS, где openLink() открывает Safari вместо приложения
+    if (isIOS && deepLink) {
+      console.log('[TonWallet] iOS detected, using window.location.href with deepLink:', deepLink);
+      window.location.href = deepLink;
+      return true;
+    }
+    
+    // Android/Desktop: используем openLink с universalLink или deepLink
+    const walletUrl = universalLink || deepLink;
     
     if (!walletUrl) {
       console.log('[TonWallet] No wallet URL found in walletInfo');
@@ -36,12 +54,7 @@ export function openExternalWalletApp(tonConnectUI: TonConnectUI): boolean {
 
     console.log('[TonWallet] Opening wallet URL:', walletUrl);
     
-    // Проверяем, находимся ли мы в Telegram Mini App
-    const tgWebApp = window.Telegram?.WebApp;
-    
     if (tgWebApp && typeof tgWebApp.openLink === 'function') {
-      // Используем Telegram WebApp API для корректного открытия внешнего приложения
-      // Это самый надёжный способ в Telegram WebView
       console.log('[TonWallet] Using Telegram.WebApp.openLink');
       tgWebApp.openLink(walletUrl);
       return true;
