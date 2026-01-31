@@ -344,17 +344,24 @@ Deno.serve(async (req) => {
         // Check if @kjeuz is added as admin for analytics
         let hasAnalyticsAdmin = false;
         try {
-          const kjeuzResponse = await fetch(
-            `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${chatId}&user_id=@${ANALYTICS_BOT_USERNAME}`
+          // Get all channel administrators
+          const adminsResponse = await fetch(
+            `https://api.telegram.org/bot${botToken}/getChatAdministrators?chat_id=${chatId}`
           );
-          const kjeuzData = await kjeuzResponse.json();
+          const adminsData = await adminsResponse.json();
           
-          if (kjeuzData.ok) {
-            const kjeuzStatus = kjeuzData.result.status;
-            hasAnalyticsAdmin = kjeuzStatus === 'administrator' || kjeuzStatus === 'creator';
+          if (adminsData.ok && Array.isArray(adminsData.result)) {
+            // Find @kjeuz among administrators by username
+            hasAnalyticsAdmin = adminsData.result.some(
+              (admin: { user?: { username?: string } }) => 
+                admin.user?.username?.toLowerCase() === ANALYTICS_BOT_USERNAME.toLowerCase()
+            );
+            
+            console.log(`Channel ${chatId} admins: ${adminsData.result.map((a: { user?: { username?: string; id?: number } }) => a.user?.username || a.user?.id).join(', ')}`);
+            console.log(`@${ANALYTICS_BOT_USERNAME} found: ${hasAnalyticsAdmin}`);
           }
-        } catch {
-          console.log(`Could not check @${ANALYTICS_BOT_USERNAME} status in channel ${chatId}`);
+        } catch (error) {
+          console.error(`Could not check @${ANALYTICS_BOT_USERNAME} status in channel ${chatId}:`, error);
         }
 
         // Calculate recommended price
