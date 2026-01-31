@@ -1,71 +1,56 @@
 
 
-## Добавление иконки категории и ограничение длины названия
+## Изменение затемнения изображения на карточке канала
 
 ---
 
-## Изменения
+## Текущее состояние
 
-### 1. `src/components/ChannelCard.tsx`
-
-**Добавить иконку категории в бейдж:**
-
-Функция `getCategoryById` уже возвращает объект с `icon` (LucideIcon). Нужно использовать его:
-
+Строка 120:
 ```tsx
-// Строка 135-137, заменить:
-<div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full w-fit">
-  {getCategoryById(category)?.name || category}
-</div>
-
-// На:
-<div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full w-fit flex items-center gap-1">
-  {(() => {
-    const cat = getCategoryById(category);
-    const Icon = cat?.icon;
-    return (
-      <>
-        {Icon && <Icon className="w-3 h-3" />}
-        <span>{cat?.name || category}</span>
-      </>
-    );
-  })()}
-</div>
+<div className="absolute inset-0 bg-gradient-to-r from-transparent via-black/30 to-black/70" />
 ```
 
-**Ограничить длину названия канала:**
+Сейчас градиент идёт слева направо: прозрачный → 30% чёрный → 70% чёрный. Затемнение усиливается к правому краю.
 
-Сейчас используется `truncate` для обрезки (строка 182), но можно добавить явное ограничение с `max-w-[...]` или программную обрезку текста.
+---
 
-Текущий класс:
+## Изменение
+
+### `src/components/ChannelCard.tsx`
+
+**Заменить градиент на равномерное затемнение (строка 120):**
+
 ```tsx
-className="text-white font-bold text-lg truncate"
+// Было:
+<div className="absolute inset-0 bg-gradient-to-r from-transparent via-black/30 to-black/70" />
+
+// Станет:
+<div className="absolute inset-0 bg-black/50" />
 ```
 
-Добавить `max-w-[140px]` для ограничения ширины (примерно на 4 символа меньше):
-```tsx
-className="text-white font-bold text-lg truncate max-w-[140px]"
-```
+- `bg-black/50` — равномерное затемнение 50% по всему блоку изображения
+- Можно увеличить до `bg-black/60` или `bg-black/70` если нужно ещё темнее
 
 ---
 
 ## Визуальный результат
 
-**Категория с иконкой:**
+**Было:**
 ```
-[❤️ Лайфстайл]
+[Изображение: светлый левый край → тёмный правый край]
 ```
 
-**Название канала:**
+**Станет:**
 ```
-FitLife Rus...  (вместо FitLife Russia...)
+[Изображение: равномерно затемнённое на 50%]
 ```
 
 ---
 
-## Файлы для изменения
+## Файл для изменения
 
-| Файл | Изменение |
-|------|-----------|
-| `src/components/ChannelCard.tsx` | Добавить иконку в бейдж категории, добавить `max-w-[140px]` к названию |
+| Файл | Строка | Изменение |
+|------|--------|-----------|
+| `src/components/ChannelCard.tsx` | 120 | Заменить градиент на `bg-black/50` |
 
