@@ -65,8 +65,12 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
     };
     
     try {
-      // skipRedirectToWallet: 'never' — принудительно открывать внешний кошелёк
+      // Полная конфигурация для открытия внешнего кошелька в TMA
       await tonConnectUI.sendTransaction(transaction, {
+        modals: ['before', 'success', 'error'],
+        notifications: ['before', 'success', 'error'],
+        returnStrategy: window.Telegram?.WebApp?.initData ? 'tg://resolve' : 'back',
+        twaReturnUrl: 'https://t.me/adsingo_bot/open',
         skipRedirectToWallet: 'never',
       });
       toast.success('Транзакция отправлена!');
