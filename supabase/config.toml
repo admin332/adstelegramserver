@@ -98,3 +98,6 @@ verify_jwt = false
 
 [functions.channel-stats-for-owner]
 verify_jwt = false
+
+[functions.detect-bot-channels]
+verify_jwt = false
