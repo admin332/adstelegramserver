@@ -1,62 +1,71 @@
 
 
-## Исправление проверки оплаты (баланс меньше из-за комиссии)
-
-Проблема найдена! Рекламодатель отправил 1 TON, но из-за сетевой комиссии на кошелёк пришло только 0.999999999 TON. Система ждёт ровно 1 TON и не засчитывает оплату.
+## Добавление иконки категории и ограничение длины названия
 
 ---
 
-## Диагностика
+## Изменения
 
-| Параметр | Значение |
-|----------|----------|
-| Deal ID | `2e24a604-90e6-4c56-bb47-3c326a024c61` |
-| Эскроу-адрес | `UQDpBC1gh8MC8Gcx0iAAJbvibtCx5AeBKjSlmwZoY9canrei` |
-| Требуемая сумма | 1 TON |
-| Фактический баланс | 0.999999999 TON |
-| Разница | ~0.000000001 TON (комиссия сети) |
+### 1. `src/components/ChannelCard.tsx`
 
----
+**Добавить иконку категории в бейдж:**
 
-## Решение
+Функция `getCategoryById` уже возвращает объект с `icon` (LucideIcon). Нужно использовать его:
 
-Добавить допуск (tolerance) на сетевую комиссию при проверке оплаты.
+```tsx
+// Строка 135-137, заменить:
+<div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full w-fit">
+  {getCategoryById(category)?.name || category}
+</div>
 
-### Изменение в `supabase/functions/check-escrow-payments/index.ts`
-
-**Текущая логика (строка 485):**
-
-```typescript
-if (balanceNano >= requiredNano) {
+// На:
+<div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full w-fit flex items-center gap-1">
+  {(() => {
+    const cat = getCategoryById(category);
+    const Icon = cat?.icon;
+    return (
+      <>
+        {Icon && <Icon className="w-3 h-3" />}
+        <span>{cat?.name || category}</span>
+      </>
+    );
+  })()}
+</div>
 ```
 
-**Новая логика с допуском ~1%:**
+**Ограничить длину названия канала:**
 
-```typescript
-// Allow 1% tolerance for network fees
-const tolerance = requiredNano * 0.01;
+Сейчас используется `truncate` для обрезки (строка 182), но можно добавить явное ограничение с `max-w-[...]` или программную обрезку текста.
 
-if (balanceNano >= (requiredNano - tolerance)) {
+Текущий класс:
+```tsx
+className="text-white font-bold text-lg truncate"
+```
+
+Добавить `max-w-[140px]` для ограничения ширины (примерно на 4 символа меньше):
+```tsx
+className="text-white font-bold text-lg truncate max-w-[140px]"
 ```
 
 ---
 
-## Почему 1%?
+## Визуальный результат
 
-- Комиссия TON обычно ~0.01-0.05 TON
-- При сделке в 1 TON: допуск = 0.01 TON
-- При сделке в 10 TON: допуск = 0.1 TON
-- Это покрывает любые стандартные комиссии сети
+**Категория с иконкой:**
+```
+[❤️ Лайфстайл]
+```
+
+**Название канала:**
+```
+FitLife Rus...  (вместо FitLife Russia...)
+```
 
 ---
 
-## Результат
+## Файлы для изменения
 
-После исправления:
-- Баланс: 0.999999999 TON
-- Требуется: 1 TON
-- Допуск: 0.01 TON
-- Проверка: 0.999999999 >= (1 - 0.01) = 0.999999999 >= 0.99 = **TRUE**
-
-Оплата будет засчитана автоматически при следующей проверке (каждые 5 минут).
+| Файл | Изменение |
+|------|-----------|
+| `src/components/ChannelCard.tsx` | Добавить иконку в бейдж категории, добавить `max-w-[140px]` к названию |
 
