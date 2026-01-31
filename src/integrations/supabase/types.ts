@@ -470,6 +470,39 @@ export type Database = {
           },
         ]
       }
+      pending_channel_verifications: {
+        Row: {
+          added_by_telegram_id: number
+          bot_status: string
+          chat_title: string | null
+          chat_username: string | null
+          detected_at: string
+          id: string
+          processed: boolean | null
+          telegram_chat_id: number
+        }
+        Insert: {
+          added_by_telegram_id: number
+          bot_status?: string
+          chat_title?: string | null
+          chat_username?: string | null
+          detected_at?: string
+          id?: string
+          processed?: boolean | null
+          telegram_chat_id: number
+        }
+        Update: {
+          added_by_telegram_id?: number
+          bot_status?: string
+          chat_title?: string | null
+          chat_username?: string | null
+          detected_at?: string
+          id?: string
+          processed?: boolean | null
+          telegram_chat_id?: number
+        }
+        Relationships: []
+      }
       reviews: {
         Row: {
           channel_id: string

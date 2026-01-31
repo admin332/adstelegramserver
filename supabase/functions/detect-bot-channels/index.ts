@@ -225,51 +225,61 @@ Deno.serve(async (req) => {
       console.log("Using fallback TON price");
     }
 
-    // Get recent updates from bot
-    const updatesResponse = await fetch(
-      `https://api.telegram.org/bot${botToken}/getUpdates?offset=-100&allowed_updates=["my_chat_member"]`
-    );
-    const updatesData = await updatesResponse.json();
+    // Get pending channel verifications from database (saved by webhook)
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error("Supabase configuration missing");
+    }
 
-    if (!updatesData.ok) {
-      console.error("Failed to get updates:", updatesData);
+    const pendingResponse = await fetch(
+      `${supabaseUrl}/rest/v1/pending_channel_verifications?added_by_telegram_id=eq.${userTelegramId}&processed=eq.false&select=*`,
+      {
+        headers: {
+          "apikey": supabaseKey,
+          "Authorization": `Bearer ${supabaseKey}`,
+        }
+      }
+    );
+    
+    if (!pendingResponse.ok) {
+      console.error("Failed to fetch pending verifications:", await pendingResponse.text());
       return new Response(
-        JSON.stringify({ channels: [], message: "Не удалось получить обновления" }),
+        JSON.stringify({ channels: [], message: "Не удалось получить данные о каналах" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const updates: TelegramUpdate[] = updatesData.result || [];
-    console.log(`Found ${updates.length} total updates`);
+    interface PendingVerification {
+      id: string;
+      telegram_chat_id: number;
+      chat_title: string | null;
+      chat_username: string | null;
+      added_by_telegram_id: number;
+      bot_status: string;
+      detected_at: string;
+      processed: boolean;
+    }
 
-    // Find channels where bot was added as admin
+    const pendingChannels: PendingVerification[] = await pendingResponse.json();
+    console.log(`Found ${pendingChannels.length} pending verifications for user ${userTelegramId}`);
+
+    // Build potential channels map from pending verifications
     const potentialChannels = new Map<number, { title: string; username: string | null; fromUserId: number }>();
     
-    for (const update of updates) {
-      if (update.my_chat_member) {
-        const { chat, new_chat_member, from } = update.my_chat_member;
-        
-        // Only process channels
-        if (chat.type !== 'channel') continue;
-        
-        // Check if bot was added as admin
-        if (new_chat_member.user.is_bot && 
-            (new_chat_member.status === 'administrator' || new_chat_member.status === 'creator')) {
-          potentialChannels.set(chat.id, {
-            title: chat.title || 'Unnamed Channel',
-            username: chat.username || null,
-            fromUserId: from.id
-          });
-        }
-      }
+    for (const pending of pendingChannels) {
+      potentialChannels.set(pending.telegram_chat_id, {
+        title: pending.chat_title || 'Unnamed Channel',
+        username: pending.chat_username || null,
+        fromUserId: pending.added_by_telegram_id
+      });
     }
 
     console.log(`Found ${potentialChannels.size} potential channels`);
 
     // Check each channel to see if user is also admin
     const detectedChannels: DetectedChannel[] = [];
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     for (const [chatId, channelInfo] of potentialChannels) {
       try {

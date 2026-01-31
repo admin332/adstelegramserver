@@ -1072,6 +1072,56 @@ Deno.serve(async (req) => {
     const body = await req.json();
     console.log("Received webhook:", JSON.stringify(body, null, 2));
 
+    // Handle my_chat_member (bot added/removed from channel)
+    if (body.my_chat_member) {
+      const { chat, new_chat_member, from } = body.my_chat_member;
+      
+      // Only process channels where bot became administrator
+      if (chat.type === 'channel' && 
+          new_chat_member.user?.is_bot && 
+          (new_chat_member.status === 'administrator' || new_chat_member.status === 'creator')) {
+        
+        console.log(`Bot added to channel ${chat.id} (${chat.title}) by user ${from.id}`);
+        
+        // Save to pending_channel_verifications
+        const { error: upsertError } = await supabase
+          .from('pending_channel_verifications')
+          .upsert({
+            telegram_chat_id: chat.id,
+            chat_title: chat.title || null,
+            chat_username: chat.username || null,
+            added_by_telegram_id: from.id,
+            bot_status: new_chat_member.status,
+            detected_at: new Date().toISOString(),
+            processed: false,
+          }, {
+            onConflict: 'telegram_chat_id,added_by_telegram_id'
+          });
+        
+        if (upsertError) {
+          console.error("Failed to save channel verification:", upsertError);
+        } else {
+          console.log(`Saved pending verification for channel ${chat.id}`);
+        }
+      }
+      
+      // Handle bot removal
+      if (chat.type === 'channel' && 
+          new_chat_member.user?.is_bot && 
+          (new_chat_member.status === 'left' || new_chat_member.status === 'kicked')) {
+        
+        console.log(`Bot removed from channel ${chat.id} by user ${from.id}`);
+        
+        // Mark as processed
+        await supabase
+          .from('pending_channel_verifications')
+          .update({ processed: true })
+          .eq('telegram_chat_id', chat.id);
+      }
+      
+      return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders });
+    }
+
     // Handle callback_query (inline button press)
     if (body.callback_query) {
       const { id: callbackQueryId, data, from, message } = body.callback_query;
