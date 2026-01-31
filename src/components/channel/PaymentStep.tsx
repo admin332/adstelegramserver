@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
-import { Copy, ExternalLink, CheckCircle, Loader2, Wallet, ArrowUpRight } from 'lucide-react';
+import { Copy, ExternalLink, CheckCircle, Loader2, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTonWallet } from '@/hooks/useTonWallet';
 import { useTonPrice } from '@/hooks/useTonPrice';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { toast } from 'sonner';
 import tonIcon from '@/assets/ton-icon.svg';
-import { openExternalWalletApp, getWalletName, isExternalWallet } from '@/lib/tonWalletUtils';
 
 interface PaymentStepProps {
   totalPriceTon: number;
@@ -26,11 +25,8 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
   const [tonConnectUI] = useTonConnectUI();
   const [copied, setCopied] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
-  const [showWalletHint, setShowWalletHint] = useState(false);
 
   const usdEquivalent = convertToUsd(totalPriceTon);
-  const walletName = getWalletName(tonConnectUI);
-  const isExternal = isExternalWallet(tonConnectUI);
 
   const copyAddress = async () => {
     if (!escrowAddress) return;
@@ -50,18 +46,10 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
     window.open(`https://tonviewer.com/${escrowAddress}`, '_blank');
   };
 
-  const handleOpenWallet = () => {
-    const opened = openExternalWalletApp(tonConnectUI);
-    if (!opened) {
-      toast.error('Не удалось открыть кошелёк');
-    }
-  };
-
   const handlePayViaWallet = async () => {
     if (!escrowAddress) return;
     
     setIsPaying(true);
-    setShowWalletHint(false);
     
     // Конвертация TON в nanoTON (1 TON = 10^9 nanoTON)
     const amountNano = Math.floor(totalPriceTon * 1_000_000_000).toString();
@@ -77,26 +65,11 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
     };
     
     try {
-      // Используем официальный callback onRequestSent для редиректа
-      // Это самый надёжный способ — SDK сам знает когда и как редиректить
-      const txPromise = tonConnectUI.sendTransaction(transaction, {
+      // skipRedirectToWallet: 'never' — принудительно открывать внешний кошелёк
+      await tonConnectUI.sendTransaction(transaction, {
         skipRedirectToWallet: 'never',
-        onRequestSent: (redirectToWallet: () => void) => {
-          console.log('[PaymentStep] Transaction request sent to bridge, redirecting...');
-          // Вызываем официальную функцию редиректа от SDK
-          redirectToWallet();
-          // Показываем подсказку через 2 секунды, если кошелёк не открылся
-          setTimeout(() => {
-            setShowWalletHint(true);
-          }, 2000);
-        },
       });
-      
-      // Ждём результат транзакции
-      await txPromise;
-      
       toast.success('Транзакция отправлена!');
-      setShowWalletHint(false);
       onPaymentComplete();
     } catch (error: any) {
       // Расширенное логирование для диагностики
@@ -227,22 +200,6 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
         Оплатить
       </Button>
 
-      {/* Подсказка: открыть кошелёк вручную */}
-      {(showWalletHint || isPaying) && isExternal && (
-        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 text-center space-y-3">
-          <p className="text-sm text-yellow-600 dark:text-yellow-400">
-            Если {walletName} не открылся автоматически:
-          </p>
-          <Button 
-            variant="outline" 
-            onClick={handleOpenWallet}
-            className="w-full border-yellow-500/30 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/10"
-          >
-            <ArrowUpRight className="w-4 h-4 mr-2" />
-            Открыть {walletName}
-          </Button>
-        </div>
-      )}
     </div>
   );
 };
