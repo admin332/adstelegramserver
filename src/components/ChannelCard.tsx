@@ -117,7 +117,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           alt={name}
           className="w-full h-full object-cover object-center"
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-black/30 to-black/70" />
+        <div className="absolute inset-0 bg-black/50" />
       </div>
 
 
