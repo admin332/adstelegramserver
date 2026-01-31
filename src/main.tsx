@@ -16,10 +16,7 @@ createRoot(document.getElementById("root")!).render(
     manifestUrl={manifestUrl}
     actionsConfiguration={{
       returnStrategy: returnStrategy as 'back' | 'tg://resolve',
-      twaReturnUrl: 'https://t.me/adsingo_bot/open',
-      modals: ['before', 'success', 'error'],
-      notifications: ['before', 'success', 'error'],
-      skipRedirectToWallet: 'never',
+      twaReturnUrl: 'https://t.me/adsingo_bot/open'
     }}
   >
     <App />

@@ -1,150 +1,40 @@
 
 
-## Исправление открытия кошелька при оплате в Telegram Mini App
+## Ограничение длины названия канала в DealCard
 
 ### Проблема
 
-При подключении кошелька через `TonConnectButton` всё работает правильно — открывается внешнее приложение (MyTonWallet, Tonkeeper). Но при оплате через `sendTransaction` кошелёк не открывается, хотя транзакция вызывается.
-
-### Найденная причина
-
-1. **`TonConnectButton`** — использует встроенную логику SDK с правильным deeplink/universal link для открытия внешнего кошелька
-
-2. **`sendTransaction`** — по умолчанию показывает только modal `['before']`, который отображает QR-код или ссылку для подключения, но может неправильно триггерить открытие внешнего приложения в Telegram WebView
-
-3. **Отсутствуют правильные опции modals/notifications** — нужно явно указать их для корректного поведения
-
-Согласно документации TonConnect:
-```typescript
-// Default configuration:
-const defaultBehaviour = {
-  modals: ['before'],
-  notifications: ['before', 'success', 'error']
-}
+На главной странице (ChannelCard) название канала отображается с ограничением ширины `max-w-[140px]` и обрезается с `truncate`:
+```
+ІНФО Київ | Но...
 ```
 
-Но для правильного открытия внешнего кошелька в Telegram Mini App нужно:
-- Использовать `modals: ['before', 'success', 'error']` для показа modal с ссылкой
-- Убедиться что `skipRedirectToWallet: 'never'` установлен правильно
-- Добавить `returnStrategy` в опции sendTransaction
+В карточках сделок (DealCard) название канала не имеет ограничения ширины — только `truncate`, который работает только когда контейнер переполнен. В результате длинные названия занимают слишком много места.
 
----
+### Решение
 
-### План изменений
+Добавить ограничение `max-w-[140px]` к названию в DealCard, как это сделано в ChannelCard.
 
-#### 1. `src/components/deals/PaymentDialog.tsx`
+### Изменения
 
-**Изменение опций sendTransaction:**
+| Файл | Строка | Изменение |
+|------|--------|-----------|
+| `src/components/DealCard.tsx` | 278 | Добавить `max-w-[140px]` к заголовку |
 
-```typescript
-// Было:
-await tonConnectUI.sendTransaction(
-  {
-    validUntil: Math.floor(Date.now() / 1000) + 600,
-    messages: [
-      {
-        address: escrowAddress,
-        amount: amountNano,
-      },
-    ],
-  },
-  {
-    skipRedirectToWallet: 'never',
-  }
-);
+### Код
 
-// Станет:
-await tonConnectUI.sendTransaction(
-  {
-    validUntil: Math.floor(Date.now() / 1000) + 600,
-    messages: [
-      {
-        address: escrowAddress,
-        amount: amountNano,
-      },
-    ],
-  },
-  {
-    modals: ['before', 'success', 'error'],
-    notifications: ['before', 'success', 'error'],
-    returnStrategy: window.Telegram?.WebApp?.initData ? 'tg://resolve' : 'back',
-    twaReturnUrl: 'https://t.me/adsingo_bot/open',
-    skipRedirectToWallet: 'never',
-  }
-);
+**Было:**
+```tsx
+<h3 className="font-semibold text-foreground truncate">{displayTitle}</h3>
 ```
 
----
-
-#### 2. `src/components/channel/PaymentStep.tsx`
-
-**Аналогичное изменение:**
-
-```typescript
-// Было:
-await tonConnectUI.sendTransaction(transaction, {
-  skipRedirectToWallet: 'never',
-});
-
-// Станет:
-await tonConnectUI.sendTransaction(transaction, {
-  modals: ['before', 'success', 'error'],
-  notifications: ['before', 'success', 'error'],
-  returnStrategy: window.Telegram?.WebApp?.initData ? 'tg://resolve' : 'back',
-  twaReturnUrl: 'https://t.me/adsingo_bot/open',
-  skipRedirectToWallet: 'never',
-});
+**Станет:**
+```tsx
+<h3 className="font-semibold text-foreground truncate max-w-[140px]">{displayTitle}</h3>
 ```
 
----
+### Результат
 
-#### 3. `src/main.tsx` — добавить глобальную конфигурацию для всех действий
-
-**Добавить `actionsConfiguration` с полными настройками:**
-
-```typescript
-// Станет:
-<TonConnectUIProvider 
-  manifestUrl={manifestUrl}
-  actionsConfiguration={{
-    returnStrategy: returnStrategy as 'back' | 'tg://resolve',
-    twaReturnUrl: 'https://t.me/adsingo_bot/open',
-    modals: ['before', 'success', 'error'],
-    notifications: ['before', 'success', 'error'],
-    skipRedirectToWallet: 'never',
-  }}
->
-```
-
----
-
-### Техническое объяснение
-
-| Параметр | Значение | Что делает |
-|----------|----------|------------|
-| `modals: ['before', 'success', 'error']` | Показывать модалки до, после и при ошибке | Modal "before" показывает кнопку/ссылку для открытия кошелька |
-| `notifications: ['before', 'success', 'error']` | Показывать уведомления | Информирует пользователя о статусе |
-| `returnStrategy: 'tg://resolve'` | Telegram protocol для возврата | Позволяет вернуться в Mini App после подписи |
-| `twaReturnUrl` | URL для возврата | Ссылка на Mini App |
-| `skipRedirectToWallet: 'never'` | Всегда пытаться открыть кошелёк | Принудительный редирект в кошелёк |
-
----
-
-### Ожидаемый результат
-
-1. При нажатии "Оплатить" появится модальное окно TonConnect
-2. В модальном окне будет кнопка для открытия кошелька (MyTonWallet, Tonkeeper)
-3. При клике на кнопку откроется внешнее приложение кошелька
-4. После подписи транзакции пользователь вернётся в Mini App
-5. Поведение будет аналогично подключению кошелька через `TonConnectButton`
-
----
-
-### Файлы для изменения
-
-| Файл | Изменение |
-|------|-----------|
-| `src/main.tsx` | Добавить `modals`, `notifications`, `skipRedirectToWallet` в actionsConfiguration |
-| `src/components/deals/PaymentDialog.tsx` | Добавить полные опции в sendTransaction |
-| `src/components/channel/PaymentStep.tsx` | Добавить полные опции в sendTransaction |
+Название канала в карточке сделки будет обрезаться так же, как на главной странице:
+- `ІНФО Київ | Новини Столиці` → `ІНФО Київ | Но...`
 

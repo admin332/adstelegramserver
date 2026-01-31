@@ -71,7 +71,7 @@ export function PaymentDialog({
     try {
       const amountNano = Math.floor(totalPrice * 1_000_000_000).toString();
       
-      // Полные опции для корректного открытия кошелька в Telegram Mini App
+      // skipRedirectToWallet: 'never' — принудительно открывать внешний кошелёк
       await tonConnectUI.sendTransaction(
         {
           validUntil: Math.floor(Date.now() / 1000) + 600,
@@ -83,10 +83,6 @@ export function PaymentDialog({
           ],
         },
         {
-          modals: ['before', 'success', 'error'],
-          notifications: ['before', 'success', 'error'],
-          returnStrategy: window.Telegram?.WebApp?.initData ? 'tg://resolve' : 'back',
-          twaReturnUrl: 'https://t.me/adsingo_bot/open',
           skipRedirectToWallet: 'never',
         }
       );
