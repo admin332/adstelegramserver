@@ -83,7 +83,7 @@ export function PaymentDialog({
     try {
       const amountNano = Math.floor(totalPrice * 1_000_000_000).toString();
       
-      // Запускаем транзакцию, но не ждём сразу
+      // Используем официальный callback onRequestSent для редиректа
       const txPromise = tonConnectUI.sendTransaction(
         {
           validUntil: Math.floor(Date.now() / 1000) + 600,
@@ -96,19 +96,17 @@ export function PaymentDialog({
         },
         {
           skipRedirectToWallet: 'never',
+          onRequestSent: (redirectToWallet: () => void) => {
+            console.log('[PaymentDialog] Transaction request sent to bridge, redirecting...');
+            // Вызываем официальную функцию редиректа от SDK
+            redirectToWallet();
+            // Показываем подсказку через 2 секунды
+            setTimeout(() => {
+              setShowWalletHint(true);
+            }, 2000);
+          },
         }
       );
-      
-      // Для внешних кошельков: принудительно открываем приложение через Telegram API
-      if (isExternal) {
-        console.log('[PaymentDialog] External wallet detected, forcing open...');
-        setTimeout(() => {
-          openExternalWalletApp(tonConnectUI);
-          setTimeout(() => {
-            setShowWalletHint(true);
-          }, 2000);
-        }, 300);
-      }
       
       // Ждём результат транзакции
       await txPromise;

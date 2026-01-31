@@ -77,24 +77,20 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
     };
     
     try {
-      // Запускаем транзакцию, но не ждём сразу
+      // Используем официальный callback onRequestSent для редиректа
+      // Это самый надёжный способ — SDK сам знает когда и как редиректить
       const txPromise = tonConnectUI.sendTransaction(transaction, {
         skipRedirectToWallet: 'never',
-      });
-      
-      // Для внешних кошельков: принудительно открываем приложение через Telegram API
-      // Это обходит ограничения WebView на iOS/Android
-      if (isExternal) {
-        console.log('[PaymentStep] External wallet detected, forcing open...');
-        // Небольшая задержка, чтобы SDK успел отправить запрос на bridge
-        setTimeout(() => {
-          openExternalWalletApp(tonConnectUI);
+        onRequestSent: (redirectToWallet: () => void) => {
+          console.log('[PaymentStep] Transaction request sent to bridge, redirecting...');
+          // Вызываем официальную функцию редиректа от SDK
+          redirectToWallet();
           // Показываем подсказку через 2 секунды, если кошелёк не открылся
           setTimeout(() => {
             setShowWalletHint(true);
           }, 2000);
-        }, 300);
-      }
+        },
+      });
       
       // Ждём результат транзакции
       await txPromise;
