@@ -68,11 +68,14 @@ export function PaymentDialog({
 
     setIsPaying(true);
     
+    // Получаем информацию о подключённом кошельке ДО отправки
+    const wallet = tonConnectUI.wallet;
+    
     try {
       const amountNano = Math.floor(totalPrice * 1_000_000_000).toString();
       
-      // Полная конфигурация для открытия внешнего кошелька в TMA
-      await tonConnectUI.sendTransaction(
+      // Отправляем транзакцию
+      const sendPromise = tonConnectUI.sendTransaction(
         {
           validUntil: Math.floor(Date.now() / 1000) + 600,
           messages: [
@@ -91,6 +94,25 @@ export function PaymentDialog({
         }
       );
       
+      // Если это TMA и внешний кошелёк — принудительно открываем его
+      const isTMA = Boolean(window.Telegram?.WebApp?.initData);
+      
+      // Получаем универсальную ссылку из списка кошельков
+      if (isTMA && wallet) {
+        const walletsList = await tonConnectUI.getWallets();
+        const connectedWallet = walletsList.find(
+          w => w.appName === wallet.device.appName
+        );
+        
+        if (connectedWallet && 'universalLink' in connectedWallet && connectedWallet.universalLink) {
+          // Небольшая задержка, чтобы запрос ушёл в bridge
+          setTimeout(() => {
+            window.location.href = connectedWallet.universalLink as string;
+          }, 100);
+        }
+      }
+      
+      await sendPromise;
       toast.success("Транзакция отправлена!");
       onPaymentSuccess?.();
       onOpenChange(false);
