@@ -57,6 +57,7 @@ interface DetectedChannel {
   engagement: number;
   recommended_price_24: number;
   recommended_price_48: number;
+  has_analytics_admin: boolean;
 }
 
 interface ChannelPreview {
@@ -484,6 +485,33 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
                   </div>
                 </div>
               </div>
+
+              {/* Warning if @kjeuz not added */}
+              {!selectedChannel.has_analytics_admin && (
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm text-yellow-500 font-medium">
+                        Добавьте @kjeuz для аналитики
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Для получения детальной статистики канала (просмотры по часам, рост аудитории) 
+                        добавьте{" "}
+                        <a 
+                          href="https://t.me/kjeuz" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline"
+                        >
+                          @kjeuz
+                        </a>
+                        {" "}как администратора
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Recommended price badge */}
               {selectedChannel.avg_views > 0 && (

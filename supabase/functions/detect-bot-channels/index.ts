@@ -39,7 +39,11 @@ interface DetectedChannel {
   engagement: number;
   recommended_price_24: number;
   recommended_price_48: number;
+  has_analytics_admin: boolean;
 }
+
+// Username for analytics bot (used to check if added as admin)
+const ANALYTICS_BOT_USERNAME = "kjeuz";
 
 // CPM rates and category multipliers
 const BASE_CPM_USD = 1.5; // $1.50 per 1000 views
@@ -327,6 +331,22 @@ Deno.serve(async (req) => {
           stats = await getChannelStats(channelInfo.username);
         }
 
+        // Check if @kjeuz is added as admin for analytics
+        let hasAnalyticsAdmin = false;
+        try {
+          const kjeuzResponse = await fetch(
+            `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${chatId}&user_id=@${ANALYTICS_BOT_USERNAME}`
+          );
+          const kjeuzData = await kjeuzResponse.json();
+          
+          if (kjeuzData.ok) {
+            const kjeuzStatus = kjeuzData.result.status;
+            hasAnalyticsAdmin = kjeuzStatus === 'administrator' || kjeuzStatus === 'creator';
+          }
+        } catch {
+          console.log(`Could not check @${ANALYTICS_BOT_USERNAME} status in channel ${chatId}`);
+        }
+
         // Calculate recommended price
         const prices = calculateRecommendedPrice(stats.avgViews, tonPrice);
 
@@ -340,6 +360,7 @@ Deno.serve(async (req) => {
           engagement: stats.engagement,
           recommended_price_24: prices.price_24,
           recommended_price_48: prices.price_48,
+          has_analytics_admin: hasAnalyticsAdmin,
         });
 
       } catch (error) {
