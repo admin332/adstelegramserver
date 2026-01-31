@@ -55,7 +55,24 @@ export function PaymentDialog({
     }
   };
 
-  const handlePayViaWallet = async () => {
+  // Открывает ссылку кошелька — СИНХРОННО, в рамках клика
+  const openWalletLink = (url: string) => {
+    // Для TMA используем openLink (для внешних HTTPS ссылок), не openTelegramLink!
+    if (window.Telegram?.WebApp?.openLink) {
+      window.Telegram.WebApp.openLink(url);
+    } else {
+      window.location.href = url;
+    }
+  };
+
+  // Получает universal link из подключённого кошелька СИНХРОННО
+  const getConnectedWalletLink = (): string | null => {
+    const wallet = tonConnectUI.wallet;
+    const walletInfo = (wallet as any)?.walletInfo;
+    return walletInfo?.universalLink || null;
+  };
+
+  const handlePayViaWallet = () => {
     if (!escrowAddress) {
       toast.error("Адрес эскроу не найден");
       return;
@@ -68,78 +85,49 @@ export function PaymentDialog({
 
     setIsPaying(true);
     
-    // Получаем информацию о подключённом кошельке ДО отправки
-    const wallet = tonConnectUI.wallet;
+    // 1. Конвертация TON в nanoTON
+    const amountNano = Math.floor(totalPrice * 1_000_000_000).toString();
     
-    try {
-      const amountNano = Math.floor(totalPrice * 1_000_000_000).toString();
-      
-      // Получаем универсальную ссылку из списка кошельков ЗАРАНЕЕ
-      const walletsList = await tonConnectUI.getWallets();
-      const connectedWallet = walletsList.find(
-        w => w.appName === wallet?.device.appName
-      );
-      
-      // Отправляем транзакцию БЕЗ модалки 'before' — она ломается в TMA
-      tonConnectUI.sendTransaction(
+    const transaction = {
+      validUntil: Math.floor(Date.now() / 1000) + 600,
+      messages: [
         {
-          validUntil: Math.floor(Date.now() / 1000) + 600,
-          messages: [
-            {
-              address: escrowAddress,
-              amount: amountNano,
-            },
-          ],
+          address: escrowAddress,
+          amount: amountNano,
         },
-        {
-          modals: ['success', 'error'],  // БЕЗ 'before'!
-          notifications: ['before', 'success', 'error'],
-          returnStrategy: 'tg://resolve',
-          twaReturnUrl: 'https://t.me/adsingo_bot/open',
-        }
-      );
-      
-      // МГНОВЕННО перенаправляем пользователя в кошелёк
-      const isTMA = Boolean(window.Telegram?.WebApp?.initData);
-      
-      if (connectedWallet && 'universalLink' in connectedWallet && connectedWallet.universalLink) {
-        const link = connectedWallet.universalLink as string;
-        
-        if (isTMA) {
-          // Самый надёжный способ для TMA — нативный метод Telegram
-          if (window.Telegram?.WebApp?.openTelegramLink) {
-            window.Telegram.WebApp.openTelegramLink(link);
-          } else {
-            window.location.href = link;
-          }
-        } else {
-          // Для обычного браузера
-          window.location.href = link;
-        }
-      }
-      
-      toast.success("Перенаправляем в кошелёк...");
-    } catch (error: any) {
-      // Расширенное логирование для диагностики
+      ],
+    };
+    
+    // 2. СИНХРОННО получаем ссылку кошелька (без await!)
+    const walletLink = getConnectedWalletLink();
+    
+    // 3. Отправляем транзакцию (без await — чтобы не терять user gesture)
+    tonConnectUI.sendTransaction(transaction, {
+      modals: ['success', 'error'],
+      notifications: ['before', 'success', 'error'],
+      returnStrategy: 'tg://resolve',
+      twaReturnUrl: 'https://t.me/adsingo_bot/open',
+    }).catch((error: any) => {
       console.error('[TonConnect] sendTransaction error:', error);
-      console.error('[TonConnect] error details:', JSON.stringify(error, null, 2));
       
-      // Определяем тип ошибки и показываем понятное сообщение
       const errorMessage = error?.message || '';
-      const errorCode = error?.code || '';
-      
       if (errorMessage.includes('Interrupted') || errorMessage.includes('cancelled')) {
         toast.error("Оплата отменена");
       } else if (errorMessage.includes('timeout') || errorMessage.includes('bridge')) {
         toast.error("Кошелёк не отвечает. Попробуйте ещё раз.");
-      } else if (errorMessage) {
-        toast.error(`Ошибка: ${errorMessage}`);
-      } else if (errorCode) {
-        toast.error(`Ошибка кошелька (${errorCode})`);
       } else {
         toast.error("Не удалось выполнить оплату. Попробуйте ещё раз.");
       }
-    } finally {
+    }).finally(() => {
+      setIsPaying(false);
+    });
+    
+    // 4. СРАЗУ открываем кошелёк (в контексте клика!)
+    if (walletLink) {
+      openWalletLink(walletLink);
+      toast.success("Открываем кошелёк...");
+    } else {
+      toast.error("Не удалось получить ссылку кошелька. Переподключите кошелёк.");
       setIsPaying(false);
     }
   };
