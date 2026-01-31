@@ -1,104 +1,80 @@
 
-Цель: исправить ситуацию, когда в Telegram Mini App (моб.) транзакция “уходит” в кошелёк (если открыть MyTonWallet вручную — запрос там появляется), но само приложение кошелька не открывается из бота. Это типичный кейс, когда Telegram WebView/OS блокирует открытие внешнего приложения, если deeplink/Universal Link запускается “не тем способом” или не синхронно с кликом.
+## Исправление открытия внешнего кошелька (MyTonWallet) в Telegram Mini App
 
-## 1) Диагностика (быстро подтвердим гипотезу)
-1) Уточнить платформу:
-   - iOS или Android? (поведение Universal Links отличается)
-2) Уточнить, что происходит после клика “Оплатить”:
-   - появляется ли вверху Telegram плашка “Открыть внешнюю ссылку?” (иногда Telegram ее “прячет”)
-3) Снять логи из консоли в момент клика (чтобы увидеть, какой именно error object приходит от SDK, даже если toast “без причины”).
+### Диагноз проблемы
 
-Если платформа iOS и кошелёк не открывается, наиболее вероятная причина — ограничения Universal Links: открытие должно быть строго синхронно с пользовательским действием и без “лишних” асинхронных шагов/модалок.
+Найдена точная причина: функция `openExternalWalletApp` возвращает `false` потому что:
 
-## 2) Исправление №1 (правильная стратегия редиректа и поведение UI — глобально)
-Файл: `src/main.tsx`
+1. **Неправильный источник данных**: код ищет `universalLink` в `tonConnectUI.wallet`, но там его НЕТ
+2. **Правильные источники**:
+   - `tonConnectUI.walletInfo` — содержит `universalLink` и `deepLink`
+   - Callback `onRequestSent` в `sendTransaction` — официальный способ, даёт готовую функцию `redirectToWallet`
 
-Сделать настройку TonConnect UI более “жёсткой” именно для Telegram Mini App:
-- оставить текущий `returnStrategy: 'tg://resolve'` в TMA (у вас уже так)
-- оставить `twaReturnUrl: https://t.me/adsingo_bot/open` (у вас уже так)
-- добавить глобальные UI options для actionsConfiguration, чтобы:
-  1) минимизировать/отключить “before” модалки (они могут делать открытие кошелька несинхронным относительно клика)
-  2) задать `skipRedirectToWallet: 'never'` или, если iOS — использовать рекомендованное поведение из документации (см. ниже)
+Структура объектов TonConnect:
+```text
+tonConnectUI.wallet = { account, device, ... } // Нет universalLink!
+tonConnectUI.walletInfo = { universalLink, deepLink, appName, ... } // ← Нужные данные тут!
+```
 
-Рекомендация по `skipRedirectToWallet` (важно):
-- В документации TonConnect UI указано, что:
-  - `'ios'` (default) может НЕ редиректить автоматически на iOS, чтобы не попасть в ограничения universal links
-  - `'never'` следует использовать только когда до редиректа нет асинхронных операций
-- Но у нас проблема обратная: редирект вообще не происходит в Telegram WebView, поэтому мы сделаем “fallback open” (следующий пункт), а `skipRedirectToWallet` оставим в наиболее безопасном режиме для iOS.
+### Изменения
 
-Итого: мы настроим глобально actionsConfiguration так, чтобы UI не вставлял лишних шагов, а открытие кошелька было максимально “клико-зависимым”.
+#### 1. `src/lib/tonWalletUtils.ts` — исправить получение URL кошелька
 
-## 3) Исправление №2 (ключевое): принудительно “пинать” открытие кошелька через Telegram API
-Проблема пользователя: “из бота не может открыть приложение, но если открыть вручную — можно подтвердить”.
-Это означает: запрос на транзакцию в кошелёк попадает, но авто-переход в приложение кошелька не срабатывает.
+Было:
+```typescript
+const wallet = tonConnectUI.wallet;
+const universalLink = wallet.universalLink || wallet.openMethod?.universalLink;
+```
 
-Решение: после клика “Оплатить” мы:
-1) запускаем `sendTransaction`, но не ждём его сразу (`const txPromise = tonConnectUI.sendTransaction(...)`)
-2) сразу же, синхронно в этом же обработчике клика, вызываем открытие внешней ссылки на кошелёк через Telegram WebApp API (это важнее, чем `window.open` в WebView):
-   - `Telegram.WebApp.openLink(...)` (Telegram сам покажет системный prompt “Открыть приложение?” и корректно передаст управление)
-3) затем уже `await txPromise` и показываем success/cancel/error
+Станет:
+```typescript
+// Используем walletInfo вместо wallet
+// @ts-ignore - walletInfo содержит universalLink для remote wallets
+const walletInfo = tonConnectUI.walletInfo;
+const universalLink = walletInfo?.universalLink;
+const deepLink = walletInfo?.deepLink;
+```
 
-Где взять ссылку на кошелёк:
-- у подключенного кошелька обычно есть `universalLink` (и иногда `deepLink`)
-- в TonConnect UI типы позволяют получить это из `tonConnectUI.wallet` (для remote wallets)
-- fallback: если нужного поля нет, берём список кошельков через `TonConnectUI.getWallets()` и ищем MyTonWallet по `appName`, берём его `universalLink`
+Добавить логирование структуры для диагностики в будущем.
 
-Какие файлы правим:
-- `src/components/channel/PaymentStep.tsx`
-- `src/components/deals/PaymentDialog.tsx`
+#### 2. `src/components/channel/PaymentStep.tsx` — использовать официальный callback
 
-Что именно добавляем:
-- утилиту `openExternalWalletApp(tonConnectUI)`:
-  - определяет ссылку (prefer `deepLink` → `universalLink`)
-  - если мы в Telegram Mini App и доступен `window.Telegram.WebApp.openLink`, используем его
-  - иначе делаем `window.open(url, '_blank')` как запасной вариант
-- в `handlePayViaWallet` меняем порядок:
-  - `const txPromise = tonConnectUI.sendTransaction(...)`
-  - `openExternalWalletApp(tonConnectUI)` (без await)
-  - `await txPromise`
+TonConnect SDK предоставляет callback `onRequestSent` с готовой функцией `redirectToWallet`. Это официальный и самый надёжный способ:
 
-Ожидаемый эффект: даже если TonConnect не смог сам открыть MyTonWallet из Telegram WebView, мы “насильно” откроем приложение кошелька (и пользователь увидит запрос на подпись).
+```typescript
+const txPromise = tonConnectUI.sendTransaction(transaction, {
+  skipRedirectToWallet: 'never',
+  onRequestSent: (redirectToWallet) => {
+    // Вызываем редирект после отправки запроса на мост
+    redirectToWallet();
+    // Показываем подсказку через 2 сек, если не открылось
+    setTimeout(() => setShowWalletHint(true), 2000);
+  },
+});
+```
 
-## 4) Исправление №3: UI-фоллбек для пользователя (“Если кошелёк не открылся — нажмите сюда”)
-Даже после автоматического открытия могут оставаться кейсы, когда Telegram/OS не дал открыть внешнее приложение.
+Удалить ручной вызов `openExternalWalletApp` в setTimeout — он больше не нужен, официальный callback надёжнее.
 
-Поэтому на экране оплаты добавим:
-- небольшую подсказку: “Если кошелёк не открылся автоматически — нажмите кнопку ниже”
-- кнопку “Открыть MyTonWallet” / “Открыть кошелёк”, которая вызывает `openExternalWalletApp(...)`
+#### 3. `src/components/deals/PaymentDialog.tsx` — аналогичное исправление
 
-Файлы:
-- `src/components/channel/PaymentStep.tsx` (лучше всего — там у вас основной флоу оплаты)
-- опционально `src/components/deals/PaymentDialog.tsx` (если этот диалог используется в другом месте)
+Добавить `onRequestSent` callback для автоматического редиректа.
 
-Это даст пользователю 100% способ продолжить сценарий даже при капризном WebView.
+### Файлы для изменения
 
-## 5) Уточнение Telegram typings (чтобы не ломать TypeScript)
-Файл: `src/lib/telegram.ts`
+| Файл | Изменение |
+|------|-----------|
+| `src/lib/tonWalletUtils.ts` | Использовать `tonConnectUI.walletInfo` вместо `tonConnectUI.wallet` |
+| `src/components/channel/PaymentStep.tsx` | Добавить `onRequestSent` callback с `redirectToWallet()` |
+| `src/components/deals/PaymentDialog.tsx` | Добавить `onRequestSent` callback |
 
-Сейчас в вашем интерфейсе `TelegramWebApp` нет методов `openLink`/`openTelegramLink`, но в реальном Telegram WebApp API они существуют.
-Добавим в типы (опционально-необязательно для рантайма, но важно для TS):
-- `openLink?: (url: string, options?: any) => void`
-- `openTelegramLink?: (url: string) => void`
+### Почему это исправит проблему
 
-И будем использовать optional chaining:
-- `window.Telegram?.WebApp?.openLink?.(url)`
+1. **`walletInfo`** — содержит реальный `universalLink` (например `https://connect.mytonwallet.org`)
+2. **`onRequestSent`** — официальный callback, который TonConnect вызывает когда запрос УЖЕ отправлен на bridge и можно редиректить
+3. **`redirectToWallet()`** — внутренняя функция SDK, которая знает все нюансы редиректа для конкретного кошелька
 
-## 6) Как будем проверять (чёткий тест)
-1) Telegram mobile → открыть Mini App через https://t.me/adsingo_bot/open
-2) Подключить MyTonWallet
-3) Нажать “Оплатить”
-4) Ожидаемо:
-   - Telegram покажет подтверждение открытия внешнего приложения или сразу откроет MyTonWallet
-   - в MyTonWallet появится запрос на подпись
-   - после подтверждения вернёт в Mini App (за счёт `twaReturnUrl`)
-5) Если всё ещё не открывает:
-   - нажать новую кнопку “Открыть кошелёк” на шаге оплаты
-   - проверить, что при ручном открытии кошелька запрос отображается
+### Ожидаемый результат
 
-## 7) Почему это должно помочь именно в вашем кейсе
-Вы описали, что “если открыть приложение вручную — можно подтвердить”. Это означает, что:
-- соединение (bridge/session) установлено
-- запрос на транзакцию создаётся корректно
-- ломается только “открытие внешнего приложения” из Telegram WebView
-
-Telegram WebApp API `openLink()` — самый надёжный способ запустить внешний app-switch из Telegram (он делает это “правильно” с точки зрения платформенных ограничений и UI-подтверждения).
+1. После нажатия "Оплатить" → MyTonWallet откроется автоматически
+2. Если авто-редирект не сработает → кнопка "Открыть MyTonWallet" будет работать корректно
+3. Логи покажут реальный URL кошелька для диагностики
