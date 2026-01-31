@@ -132,8 +132,17 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
             {getCampaignTypeLabel(acceptedCampaignTypes)}
           </div>
         </div>
-        <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full w-fit">
-          {getCategoryById(category)?.name || category}
+        <div className="bg-white/20 backdrop-blur-sm text-white text-xs font-medium px-2 py-1 rounded-full w-fit flex items-center gap-1">
+          {(() => {
+            const cat = getCategoryById(category);
+            const Icon = cat?.icon;
+            return (
+              <>
+                {Icon && <Icon className="w-3 h-3" />}
+                <span>{cat?.name || category}</span>
+              </>
+            );
+          })()}
         </div>
       </div>
 
@@ -179,7 +188,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           {/* Left: Info */}
           <div className="flex-1 min-w-0">
             <motion.h3
-              className="text-white font-bold text-lg truncate"
+              className="text-white font-bold text-lg truncate max-w-[140px]"
               variants={itemVariants}
             >
               {name}
