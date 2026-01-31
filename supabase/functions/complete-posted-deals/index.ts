@@ -361,19 +361,48 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; refunded?: b
       console.log(`Incremented successful_ads for channel ${deal.channel_id}`);
     }
 
-    // Auto-delete post if enabled
+    // Auto-delete all posts if enabled
     let postDeleted = false;
-    if (channelData?.auto_delete_posts && deal.telegram_message_id && deal.channel.telegram_chat_id) {
-      console.log(`Auto-delete enabled for channel ${deal.channel_id}, deleting post...`);
-      try {
-        const deleteResult = await sendTelegramRequest("deleteMessage", {
-          chat_id: deal.channel.telegram_chat_id,
-          message_id: deal.telegram_message_id,
-        });
-        postDeleted = deleteResult.ok === true;
-        console.log(`Auto-delete result for deal ${deal.id}:`, deleteResult);
-      } catch (deleteError) {
-        console.error(`Failed to auto-delete post for deal ${deal.id}:`, deleteError);
+    if (channelData?.auto_delete_posts && deal.channel.telegram_chat_id) {
+      console.log(`Auto-delete enabled for channel ${deal.channel_id}, deleting all posts...`);
+      
+      // Get all message IDs from the deal
+      const { data: dealData } = await supabase
+        .from("deals")
+        .select("telegram_message_ids")
+        .eq("id", deal.id)
+        .single();
+      
+      const messageIds: number[] = [];
+      
+      // Add IDs from array if available
+      if (dealData?.telegram_message_ids && Array.isArray(dealData.telegram_message_ids)) {
+        messageIds.push(...(dealData.telegram_message_ids as number[]));
+      }
+      
+      // Fallback to single message ID if array is empty
+      if (messageIds.length === 0 && deal.telegram_message_id) {
+        messageIds.push(deal.telegram_message_id);
+      }
+      
+      console.log(`Found ${messageIds.length} messages to delete for deal ${deal.id}`);
+      
+      // Delete all messages
+      for (const messageId of messageIds) {
+        try {
+          const deleteResult = await sendTelegramRequest("deleteMessage", {
+            chat_id: deal.channel.telegram_chat_id,
+            message_id: messageId,
+          });
+          if (deleteResult.ok === true) {
+            postDeleted = true;
+            console.log(`Deleted message ${messageId} for deal ${deal.id}`);
+          } else {
+            console.log(`Failed to delete message ${messageId}:`, deleteResult);
+          }
+        } catch (deleteError) {
+          console.error(`Failed to auto-delete message ${messageId} for deal ${deal.id}:`, deleteError);
+        }
       }
     }
 

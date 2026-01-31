@@ -101,3 +101,6 @@ verify_jwt = false
 
 [functions.detect-bot-channels]
 verify_jwt = false
+
+[functions.toggle-favorite]
+verify_jwt = false
