@@ -9,9 +9,10 @@ import { useFavorites } from "@/hooks/useFavorites";
 import { useChannels } from "@/hooks/useChannels";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useState, useMemo } from "react";
-import { ArrowUpDown, DollarSign, Users, TrendingUp, Heart } from "lucide-react";
+import { ArrowUpDown, DollarSign, Users, TrendingUp, Heart, Sparkles, PenTool, FileText } from "lucide-react";
 
 type SortOption = "subscribers" | "price" | "engagement" | "rating";
+type CampaignTypeFilter = "all" | "prompt" | "ready_post";
 
 const Channels = () => {
   const [searchQuery, setSearchQuery] = useState("");
@@ -19,6 +20,7 @@ const Channels = () => {
   const [sortBy, setSortBy] = useState<SortOption>("subscribers");
   const [showFilters, setShowFilters] = useState(false);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [campaignTypeFilter, setCampaignTypeFilter] = useState<CampaignTypeFilter>("all");
   const { favorites, toggleFavorite, isFavorite } = useFavorites();
   const { data: dbChannels, isLoading } = useChannels();
   
@@ -38,7 +40,12 @@ const Channels = () => {
         
         const matchesFavorites = !showFavoritesOnly || favorites.includes(channel.id);
         
-        return matchesSearch && matchesCategory && matchesFavorites;
+        const matchesCampaignType = 
+          campaignTypeFilter === "all" || 
+          channel.acceptedCampaignTypes === "both" || 
+          channel.acceptedCampaignTypes === campaignTypeFilter;
+        
+        return matchesSearch && matchesCategory && matchesFavorites && matchesCampaignType;
       })
       .sort((a, b) => {
         switch (sortBy) {
@@ -54,7 +61,7 @@ const Channels = () => {
             return 0;
         }
       });
-  }, [channels, searchQuery, activeCategory, showFavoritesOnly, favorites, sortBy]);
+  }, [channels, searchQuery, activeCategory, showFavoritesOnly, favorites, sortBy, campaignTypeFilter]);
 
   return (
     <div className="min-h-screen bg-transparent safe-bottom">
@@ -100,6 +107,27 @@ const Channels = () => {
               icon={<ArrowUpDown className="w-4 h-4" />}
             >
               Рейтинг
+            </FilterChip>
+            <FilterChip
+              active={campaignTypeFilter === "all"}
+              onClick={() => setCampaignTypeFilter("all")}
+              icon={<Sparkles className="w-4 h-4" />}
+            >
+              Все кампании
+            </FilterChip>
+            <FilterChip
+              active={campaignTypeFilter === "prompt"}
+              onClick={() => setCampaignTypeFilter("prompt")}
+              icon={<PenTool className="w-4 h-4" />}
+            >
+              По промту
+            </FilterChip>
+            <FilterChip
+              active={campaignTypeFilter === "ready_post"}
+              onClick={() => setCampaignTypeFilter("ready_post")}
+              icon={<FileText className="w-4 h-4" />}
+            >
+              Готовый пост
             </FilterChip>
           </div>
         )}

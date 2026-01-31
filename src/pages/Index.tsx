@@ -12,12 +12,13 @@ import { useFavorites } from "@/hooks/useFavorites";
 import { useChannels } from "@/hooks/useChannels";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TrendingUp, Users, Heart, DollarSign, ArrowUpDown } from "lucide-react";
+import { TrendingUp, Users, Heart, DollarSign, ArrowUpDown, Sparkles, PenTool, FileText } from "lucide-react";
 import animatedSticker from "@/assets/stickers/animated-sticker.tgs";
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 type SortOption = "subscribers" | "price" | "engagement" | "rating";
+type CampaignTypeFilter = "all" | "prompt" | "ready_post";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -26,6 +27,7 @@ const Index = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [sortBy, setSortBy] = useState<SortOption>("subscribers");
+  const [campaignTypeFilter, setCampaignTypeFilter] = useState<CampaignTypeFilter>("all");
   const { favorites, toggleFavorite, isFavorite } = useFavorites();
   const { data: dbChannels, isLoading } = useChannels();
   const { stickerEnabled } = useAppSettings();
@@ -56,7 +58,12 @@ const Index = () => {
         
         const matchesFavorites = !showFavoritesOnly || favorites.includes(channel.id);
         
-        return matchesSearch && matchesCategory && matchesFavorites;
+        const matchesCampaignType = 
+          campaignTypeFilter === "all" || 
+          channel.acceptedCampaignTypes === "both" || 
+          channel.acceptedCampaignTypes === campaignTypeFilter;
+        
+        return matchesSearch && matchesCategory && matchesFavorites && matchesCampaignType;
       })
       .sort((a, b) => {
         switch (sortBy) {
@@ -72,7 +79,7 @@ const Index = () => {
             return 0;
         }
       });
-  }, [channels, searchQuery, activeCategory, showFavoritesOnly, favorites, sortBy]);
+  }, [channels, searchQuery, activeCategory, showFavoritesOnly, favorites, sortBy, campaignTypeFilter]);
 
   // Сбрасываем стикер при смене фильтров и запускаем анимацию после загрузки карточки
   useEffect(() => {
@@ -132,6 +139,27 @@ const Index = () => {
               icon={<ArrowUpDown className="w-4 h-4" />}
             >
               Рейтинг
+            </FilterChip>
+            <FilterChip
+              active={campaignTypeFilter === "all"}
+              onClick={() => setCampaignTypeFilter("all")}
+              icon={<Sparkles className="w-4 h-4" />}
+            >
+              Все кампании
+            </FilterChip>
+            <FilterChip
+              active={campaignTypeFilter === "prompt"}
+              onClick={() => setCampaignTypeFilter("prompt")}
+              icon={<PenTool className="w-4 h-4" />}
+            >
+              По промту
+            </FilterChip>
+            <FilterChip
+              active={campaignTypeFilter === "ready_post"}
+              onClick={() => setCampaignTypeFilter("ready_post")}
+              icon={<FileText className="w-4 h-4" />}
+            >
+              Готовый пост
             </FilterChip>
           </div>
         )}
