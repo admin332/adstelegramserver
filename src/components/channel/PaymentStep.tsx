@@ -64,15 +64,38 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
       ],
     };
     
+    // Получаем информацию о подключённом кошельке ДО отправки
+    const wallet = tonConnectUI.wallet;
+    
     try {
-      // Полная конфигурация для открытия внешнего кошелька в TMA
-      await tonConnectUI.sendTransaction(transaction, {
+      // Отправляем транзакцию
+      const sendPromise = tonConnectUI.sendTransaction(transaction, {
         modals: ['before', 'success', 'error'],
         notifications: ['before', 'success', 'error'],
         returnStrategy: window.Telegram?.WebApp?.initData ? 'tg://resolve' : 'back',
         twaReturnUrl: 'https://t.me/adsingo_bot/open',
         skipRedirectToWallet: 'never',
       });
+      
+      // Если это TMA и внешний кошелёк — принудительно открываем его
+      const isTMA = Boolean(window.Telegram?.WebApp?.initData);
+      
+      // Получаем универсальную ссылку из списка кошельков
+      if (isTMA && wallet) {
+        const walletsList = await tonConnectUI.getWallets();
+        const connectedWallet = walletsList.find(
+          w => w.appName === wallet.device.appName
+        );
+        
+        if (connectedWallet && 'universalLink' in connectedWallet && connectedWallet.universalLink) {
+          // Небольшая задержка, чтобы запрос ушёл в bridge
+          setTimeout(() => {
+            window.location.href = connectedWallet.universalLink as string;
+          }, 100);
+        }
+      }
+      
+      await sendPromise;
       toast.success('Транзакция отправлена!');
       onPaymentComplete();
     } catch (error: any) {
