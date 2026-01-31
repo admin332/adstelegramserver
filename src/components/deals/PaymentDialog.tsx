@@ -74,8 +74,14 @@ export function PaymentDialog({
     try {
       const amountNano = Math.floor(totalPrice * 1_000_000_000).toString();
       
-      // Отправляем транзакцию
-      const sendPromise = tonConnectUI.sendTransaction(
+      // Получаем универсальную ссылку из списка кошельков ЗАРАНЕЕ
+      const walletsList = await tonConnectUI.getWallets();
+      const connectedWallet = walletsList.find(
+        w => w.appName === wallet?.device.appName
+      );
+      
+      // Отправляем транзакцию БЕЗ модалки 'before' — она ломается в TMA
+      tonConnectUI.sendTransaction(
         {
           validUntil: Math.floor(Date.now() / 1000) + 600,
           messages: [
@@ -86,36 +92,33 @@ export function PaymentDialog({
           ],
         },
         {
-          modals: ['before', 'success', 'error'],
+          modals: ['success', 'error'],  // БЕЗ 'before'!
           notifications: ['before', 'success', 'error'],
-          returnStrategy: window.Telegram?.WebApp?.initData ? 'tg://resolve' : 'back',
+          returnStrategy: 'tg://resolve',
           twaReturnUrl: 'https://t.me/adsingo_bot/open',
-          skipRedirectToWallet: 'never',
         }
       );
       
-      // Если это TMA и внешний кошелёк — принудительно открываем его
+      // МГНОВЕННО перенаправляем пользователя в кошелёк
       const isTMA = Boolean(window.Telegram?.WebApp?.initData);
       
-      // Получаем универсальную ссылку из списка кошельков
-      if (isTMA && wallet) {
-        const walletsList = await tonConnectUI.getWallets();
-        const connectedWallet = walletsList.find(
-          w => w.appName === wallet.device.appName
-        );
+      if (connectedWallet && 'universalLink' in connectedWallet && connectedWallet.universalLink) {
+        const link = connectedWallet.universalLink as string;
         
-        if (connectedWallet && 'universalLink' in connectedWallet && connectedWallet.universalLink) {
-          // Небольшая задержка, чтобы запрос ушёл в bridge
-          setTimeout(() => {
-            window.location.href = connectedWallet.universalLink as string;
-          }, 100);
+        if (isTMA) {
+          // Самый надёжный способ для TMA — нативный метод Telegram
+          if (window.Telegram?.WebApp?.openTelegramLink) {
+            window.Telegram.WebApp.openTelegramLink(link);
+          } else {
+            window.location.href = link;
+          }
+        } else {
+          // Для обычного браузера
+          window.location.href = link;
         }
       }
       
-      await sendPromise;
-      toast.success("Транзакция отправлена!");
-      onPaymentSuccess?.();
-      onOpenChange(false);
+      toast.success("Перенаправляем в кошелёк...");
     } catch (error: any) {
       // Расширенное логирование для диагностики
       console.error('[TonConnect] sendTransaction error:', error);
