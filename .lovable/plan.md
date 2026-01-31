@@ -1,36 +1,61 @@
 
-## Пропуск внешнего редиректа для встроенного кошелька Telegram (@wallet)
+
+## Исправление: НЕ открывать браузер для Telegram Wallet
 
 ### Проблема
-Сейчас при оплате через @wallet (встроенный кошелёк Telegram) код пытается открыть внешнюю ссылку, хотя это не нужно — @wallet работает прямо внутри Telegram через JS Bridge.
 
-### Как определить встроенный кошелёк
+Сейчас код проверяет `wallet.provider === 'injected'`, но **Telegram Wallet** может не определяться таким образом. В результате для него всё равно вызывается `openWalletLink()`, что открывает браузер.
 
 Согласно типам TonConnect SDK:
-- `wallet.provider === 'injected'` — кошелёк работает через JS Bridge (встроен)
-- `wallet.provider === 'http'` — кошелёк работает через HTTP Bridge (внешнее приложение)
+- `Wallet.device.appName` содержит название кошелька (например `'telegram-wallet'`)
+- Для Telegram Wallet нужно **не открывать внешние ссылки** — он работает прямо внутри Telegram
 
-Для @wallet (Telegram Wallet):
-- `provider = 'injected'`
-- `device.appName = 'telegram-wallet'`
+### Решение
 
-### План изменений
+Определять Telegram Wallet по `device.appName`:
 
-#### 1. `src/components/channel/PaymentStep.tsx`
+```typescript
+const wallet = tonConnectUI.wallet;
 
-Добавить проверку перед попыткой открыть внешнюю ссылку:
+// Telegram Wallet определяется по appName, не по provider!
+const isTelegramWallet = wallet?.device?.appName?.toLowerCase().includes('telegram');
+
+// Также проверяем injected как fallback
+const isInjectedWallet = wallet?.provider === 'injected';
+
+// Для Telegram Wallet и injected кошельков — не открываем внешние ссылки
+const shouldOpenExternalWallet = !isTelegramWallet && !isInjectedWallet;
+```
+
+---
+
+## Изменения
+
+### Файл 1: `src/components/channel/PaymentStep.tsx`
+
+**Строки ~77-130** — изменить логику `handlePayViaWallet`:
 
 ```typescript
 const handlePayViaWallet = () => {
-  // ... формирование transaction ...
+  if (!escrowAddress) return;
+  
+  setIsPaying(true);
   
   const wallet = tonConnectUI.wallet;
   
-  // Проверяем, это injected кошелёк (встроенный, например @wallet)?
+  // Telegram Wallet определяется по appName устройства
+  const isTelegramWallet = wallet?.device?.appName?.toLowerCase().includes('telegram');
+  
+  // Также проверяем injected как fallback для других встроенных кошельков
   const isInjectedWallet = wallet?.provider === 'injected';
   
-  // Получаем ссылку только для http-кошельков
-  const walletLink = isInjectedWallet ? null : getConnectedWalletLink();
+  // Для встроенных кошельков (Telegram Wallet, injected) — не нужно открывать внешнюю ссылку
+  const isEmbeddedWallet = isTelegramWallet || isInjectedWallet;
+  
+  // ... формирование transaction ...
+  
+  // Получаем ссылку только для внешних кошельков
+  const walletLink = isEmbeddedWallet ? null : getConnectedWalletLink();
   
   // Отправляем транзакцию
   tonConnectUI.sendTransaction(transaction, { ... }).catch(...);
@@ -39,39 +64,66 @@ const handlePayViaWallet = () => {
   if (walletLink) {
     openWalletLink(walletLink);
     toast.success('Открываем кошелёк...');
-  } else if (isInjectedWallet) {
-    // Для injected кошелька (@wallet) ничего делать не нужно
+  } else if (isEmbeddedWallet) {
+    // Для Telegram Wallet и injected кошельков — ничего делать не нужно
     // Модальное окно откроется автоматически внутри Telegram
     toast.success('Подтвердите транзакцию в кошельке');
   } else {
-    toast.error('Не удалось получить ссылку кошелька...');
+    toast.error('Не удалось получить ссылку кошелька. Переподключите кошелёк.');
     setIsPaying(false);
   }
 };
 ```
 
-#### 2. `src/components/deals/PaymentDialog.tsx`
+---
 
-Аналогичные изменения:
-- Добавить проверку `wallet?.provider === 'injected'`
-- Для injected кошельков не вызывать `openWalletLink`
-- Показать другой toast: "Подтвердите транзакцию в кошельке"
+### Файл 2: `src/components/deals/PaymentDialog.tsx`
+
+**Аналогичные изменения** в функции `handlePayViaWallet`:
+
+```typescript
+const wallet = tonConnectUI.wallet;
+
+// Telegram Wallet определяется по appName устройства
+const isTelegramWallet = wallet?.device?.appName?.toLowerCase().includes('telegram');
+
+// Также проверяем injected как fallback
+const isInjectedWallet = wallet?.provider === 'injected';
+
+// Для встроенных кошельков — не открываем внешнюю ссылку
+const isEmbeddedWallet = isTelegramWallet || isInjectedWallet;
+
+const walletLink = isEmbeddedWallet ? null : getConnectedWalletLink();
+```
 
 ---
 
-### Логика работы после изменений
+## Логика после изменений
 
-| Кошелёк | provider | Действие |
-|---------|----------|----------|
-| @wallet (Telegram) | `injected` | Не открываем ссылку, показываем "Подтвердите транзакцию" |
-| MyTonWallet (app) | `http` | Открываем universalLink через `openLink()` |
-| Tonkeeper (app) | `http` | Открываем universalLink через `openLink()` |
+| Кошелёк | device.appName | provider | Действие |
+|---------|----------------|----------|----------|
+| Telegram Wallet (@wallet) | `'telegram-wallet'` | `injected` или `http` | НЕ открываем ссылку |
+| MyTonWallet (app) | `'mytonwallet'` | `http` | Открываем universalLink |
+| Tonkeeper (app) | `'tonkeeper'` | `http` | Открываем universalLink |
 
 ---
 
-### Файлы для изменения
+## Файлы для изменения
 
 | Файл | Изменение |
 |------|-----------|
-| `src/components/channel/PaymentStep.tsx` | Добавить проверку `provider === 'injected'`, пропустить редирект для встроенных кошельков |
+| `src/components/channel/PaymentStep.tsx` | Добавить проверку `device.appName.includes('telegram')` |
 | `src/components/deals/PaymentDialog.tsx` | То же самое |
+
+---
+
+## Дополнительно: логирование для отладки
+
+Добавим в лог `device.appName` чтобы видеть, как определяется кошелёк:
+
+```typescript
+console.log('[TonConnect] wallet:', wallet);
+console.log('[TonConnect] device.appName:', wallet?.device?.appName);
+console.log('[TonConnect] provider:', wallet?.provider);
+```
+
