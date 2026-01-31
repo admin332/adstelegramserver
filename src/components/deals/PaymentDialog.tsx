@@ -91,6 +91,11 @@ export function PaymentDialog({
 
     setIsPaying(true);
     
+    const wallet = tonConnectUI.wallet;
+    
+    // Проверяем, это injected кошелёк (встроенный, например @wallet)?
+    const isInjectedWallet = wallet?.provider === 'injected';
+    
     // 1. Конвертация TON в nanoTON
     const amountNano = Math.floor(totalPrice * 1_000_000_000).toString();
     
@@ -104,8 +109,8 @@ export function PaymentDialog({
       ],
     };
     
-    // 2. СИНХРОННО получаем ссылку кошелька (без await!)
-    const walletLink = getConnectedWalletLink();
+    // 2. Получаем ссылку только для http-кошельков
+    const walletLink = isInjectedWallet ? null : getConnectedWalletLink();
     
     // 3. Отправляем транзакцию (без await — чтобы не терять user gesture)
     tonConnectUI.sendTransaction(transaction, {
@@ -128,10 +133,14 @@ export function PaymentDialog({
       setIsPaying(false);
     });
     
-    // 4. СРАЗУ открываем кошелёк (в контексте клика!)
+    // 4. Открываем кошелёк только если это внешний (http) кошелёк
     if (walletLink) {
       openWalletLink(walletLink);
       toast.success("Открываем кошелёк...");
+    } else if (isInjectedWallet) {
+      // Для injected кошелька (@wallet) ничего делать не нужно
+      // Модальное окно откроется автоматически внутри Telegram
+      toast.success("Подтвердите транзакцию в кошельке");
     } else {
       toast.error("Не удалось получить ссылку кошелька. Переподключите кошелёк.");
       setIsPaying(false);
