@@ -65,8 +65,12 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
     };
     
     try {
-      // skipRedirectToWallet: 'never' — принудительно открывать внешний кошелёк
+      // Полные опции для корректного открытия кошелька в Telegram Mini App
       await tonConnectUI.sendTransaction(transaction, {
+        modals: ['before', 'success', 'error'],
+        notifications: ['before', 'success', 'error'],
+        returnStrategy: window.Telegram?.WebApp?.initData ? 'tg://resolve' : 'back',
+        twaReturnUrl: 'https://t.me/adsingo_bot/open',
         skipRedirectToWallet: 'never',
       });
       toast.success('Транзакция отправлена!');
