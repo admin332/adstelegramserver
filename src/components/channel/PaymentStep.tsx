@@ -59,9 +59,14 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
   // Получает universal link из подключённого кошелька СИНХРОННО
   const getConnectedWalletLink = (): string | null => {
     const wallet = tonConnectUI.wallet;
-    // walletInfo содержит universalLink для подключённого кошелька
-    const walletInfo = (wallet as any)?.walletInfo;
-    return walletInfo?.universalLink || null;
+    if (!wallet) return null;
+    
+    // universalLink находится прямо на ConnectedWallet (не во вложенном walletInfo)
+    const link = (wallet as any).universalLink;
+    console.log('[TonConnect] wallet:', wallet);
+    console.log('[TonConnect] universalLink:', link);
+    
+    return link || null;
   };
 
   const handlePayViaWallet = () => {
