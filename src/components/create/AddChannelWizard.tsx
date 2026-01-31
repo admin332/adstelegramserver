@@ -30,6 +30,15 @@ import { toast } from "@/hooks/use-toast";
 import { useTonPrice } from "@/hooks/useTonPrice";
 import { getTelegramInitData } from "@/lib/telegram";
 
+// Price validation: only integers 1-100000
+const validatePriceInput = (value: string): string => {
+  const cleaned = value.replace(/[^0-9]/g, '');
+  if (!cleaned) return '';
+  const num = parseInt(cleaned, 10);
+  if (num > 100000) return '100000';
+  return cleaned;
+};
+
 interface ChannelData {
   username: string;
   category: string;
@@ -579,15 +588,17 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
                     </span>
                     <div className="flex items-center gap-2">
                       <Input
-                        type="number"
-                        placeholder={selectedChannel.recommended_price_24?.toString() || "0"}
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        placeholder={selectedChannel.recommended_price_24?.toString() || "1-100000"}
                         value={channelData.price_1_24}
-                        onChange={(e) => setChannelData({ ...channelData, price_1_24: e.target.value })}
+                        onChange={(e) => setChannelData({ ...channelData, price_1_24: validatePriceInput(e.target.value) })}
                         className="bg-card border-0"
                       />
                       {channelData.price_1_24 && tonPrice && (
                         <span className="text-xs text-muted-foreground whitespace-nowrap">
-                          ≈ ${(parseFloat(channelData.price_1_24) * tonPrice).toFixed(2)}
+                          ≈ ${(parseInt(channelData.price_1_24, 10) * tonPrice).toFixed(2)}
                         </span>
                       )}
                     </div>
@@ -598,15 +609,17 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
                     </span>
                     <div className="flex items-center gap-2">
                       <Input
-                        type="number"
-                        placeholder={selectedChannel.recommended_price_48?.toString() || "0"}
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        placeholder={selectedChannel.recommended_price_48?.toString() || "1-100000"}
                         value={channelData.price_2_48}
-                        onChange={(e) => setChannelData({ ...channelData, price_2_48: e.target.value })}
+                        onChange={(e) => setChannelData({ ...channelData, price_2_48: validatePriceInput(e.target.value) })}
                         className="bg-card border-0"
                       />
                       {channelData.price_2_48 && tonPrice && (
                         <span className="text-xs text-muted-foreground whitespace-nowrap">
-                          ≈ ${(parseFloat(channelData.price_2_48) * tonPrice).toFixed(2)}
+                          ≈ ${(parseInt(channelData.price_2_48, 10) * tonPrice).toFixed(2)}
                         </span>
                       )}
                     </div>
@@ -714,15 +727,17 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
                         <span className="text-xs text-muted-foreground">1/24</span>
                         <div className="flex items-center gap-2">
                           <Input
-                            type="number"
-                            placeholder="0"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            placeholder="1-100000"
                             value={channelData.price_1_24}
-                            onChange={(e) => setChannelData({ ...channelData, price_1_24: e.target.value })}
+                            onChange={(e) => setChannelData({ ...channelData, price_1_24: validatePriceInput(e.target.value) })}
                             className="bg-card border-0"
                           />
                           {channelData.price_1_24 && tonPrice && (
                             <span className="text-xs text-muted-foreground whitespace-nowrap">
-                              ≈ ${(parseFloat(channelData.price_1_24) * tonPrice).toFixed(2)}
+                              ≈ ${(parseInt(channelData.price_1_24, 10) * tonPrice).toFixed(2)}
                             </span>
                           )}
                         </div>
@@ -731,15 +746,17 @@ export const AddChannelWizard = ({ onBack, onComplete }: AddChannelWizardProps) 
                         <span className="text-xs text-muted-foreground">2+/24</span>
                         <div className="flex items-center gap-2">
                           <Input
-                            type="number"
-                            placeholder="0"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            placeholder="1-100000"
                             value={channelData.price_2_48}
-                            onChange={(e) => setChannelData({ ...channelData, price_2_48: e.target.value })}
+                            onChange={(e) => setChannelData({ ...channelData, price_2_48: validatePriceInput(e.target.value) })}
                             className="bg-card border-0"
                           />
                           {channelData.price_2_48 && tonPrice && (
                             <span className="text-xs text-muted-foreground whitespace-nowrap">
-                              ≈ ${(parseFloat(channelData.price_2_48) * tonPrice).toFixed(2)}
+                              ≈ ${(parseInt(channelData.price_2_48, 10) * tonPrice).toFixed(2)}
                             </span>
                           )}
                         </div>
