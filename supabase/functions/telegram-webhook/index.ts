@@ -121,22 +121,65 @@ async function refundToAdvertiser(
   }
 }
 
-// Store for tracking users waiting for draft input
-// Format: { telegramId: { dealId: string, step: 'awaiting_draft' | 'awaiting_revision' } }
-interface UserState {
-  dealId: string;
-  step: 'awaiting_draft' | 'awaiting_revision';
-  advertiserTelegramId?: number;
-}
-
 // Media item with file_id for permanent Telegram storage
 interface MediaItem {
   type: 'photo' | 'video' | 'document';
   file_id: string;
 }
 
-// In-memory state (will reset on function restart, but that's OK for this use case)
-const userStates: Map<number, UserState> = new Map();
+// =============================================================================
+// Database-backed user state functions (for stateless edge function compatibility)
+// =============================================================================
+
+async function setUserState(
+  telegramUserId: number, 
+  stateType: string, 
+  dealId: string, 
+  draftIndex: number = 0
+) {
+  const { error } = await supabase
+    .from('telegram_user_states')
+    .upsert({
+      telegram_user_id: telegramUserId,
+      state_type: stateType,
+      deal_id: dealId,
+      draft_index: draftIndex,
+      expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1 hour
+    }, {
+      onConflict: 'telegram_user_id'
+    });
+  
+  if (error) {
+    console.error('Failed to set user state:', error);
+  }
+}
+
+async function getUserState(telegramUserId: number) {
+  const { data, error } = await supabase
+    .from('telegram_user_states')
+    .select('state_type, deal_id, draft_index')
+    .eq('telegram_user_id', telegramUserId)
+    .gt('expires_at', new Date().toISOString())
+    .maybeSingle();
+  
+  if (error) {
+    console.error('Failed to get user state:', error);
+    return null;
+  }
+  
+  return data;
+}
+
+async function clearUserState(telegramUserId: number) {
+  const { error } = await supabase
+    .from('telegram_user_states')
+    .delete()
+    .eq('telegram_user_id', telegramUserId);
+  
+  if (error) {
+    console.error('Failed to clear user state:', error);
+  }
+}
 
 async function sendTelegramMessage(chatId: number, text: string, replyMarkup?: Record<string, unknown>) {
   const body: Record<string, unknown> = {
@@ -622,12 +665,8 @@ async function handleDraftRevision(
     .eq("id", channel?.owner_id)
     .single();
 
-  // Store state for waiting revision comment
-  userStates.set(from.id, {
-    dealId,
-    step: 'awaiting_revision',
-    advertiserTelegramId: from.id,
-  });
+  // Store state for waiting revision comment in database
+  await setUserState(from.id, 'awaiting_revision', dealId, draftIndex);
 
   // Remove buttons
   await editMessageReplyMarkup(message.chat.id, message.message_id);
@@ -649,13 +688,13 @@ async function handleDraftRevision(
 
 // Handle revision comment from advertiser
 async function handleRevisionComment(telegramUserId: number, text: string) {
-  const state = userStates.get(telegramUserId);
-  if (!state || state.step !== 'awaiting_revision') {
+  const state = await getUserState(telegramUserId);
+  if (!state || state.state_type !== 'awaiting_revision') {
     return false;
   }
 
-  const dealId = state.dealId;
-  userStates.delete(telegramUserId);
+  const dealId = state.deal_id;
+  await clearUserState(telegramUserId);
 
   // Get deal with posts_count for multi-draft support
   const { data: deal } = await supabase
@@ -732,12 +771,24 @@ async function handleRevisionComment(telegramUserId: number, text: string) {
 
 // Handle cancel revision
 async function handleCancelRevision(callbackQueryId: string, dealId: string, from: { id: number }) {
-  userStates.delete(from.id);
+  // Get state to retrieve draft_index before clearing
+  const state = await getUserState(from.id);
+  const draftIndex = state?.draft_index || 0;
   
-  // Restore approval buttons
+  await clearUserState(from.id);
+  
+  // Restore approval buttons so user can try again
   await sendTelegramMessage(
     from.id,
-    "❌ Запрос на доработку отменён.\n\nВы можете снова проверить черновик в приложении Adsingo.",
+    "❌ Запрос на доработку отменён.\n\nВы можете снова проверить черновик:",
+    {
+      inline_keyboard: [
+        [
+          { text: "✅ Одобрить", callback_data: `approve_draft:${dealId}:${draftIndex}` },
+          { text: "✏️ На доработку", callback_data: `revise_draft:${dealId}:${draftIndex}` }
+        ]
+      ]
+    }
   );
 
   await answerCallbackQuery(callbackQueryId, "Отменено");
@@ -1174,9 +1225,9 @@ Deno.serve(async (req) => {
 
       const telegramUserId = from.id;
 
-      // Check if user is in revision comment mode
-      const state = userStates.get(telegramUserId);
-      if (state?.step === 'awaiting_revision' && message.text) {
+      // Check if user is in revision comment mode (from database state)
+      const state = await getUserState(telegramUserId);
+      if (state?.state_type === 'awaiting_revision' && message.text) {
         const handled = await handleRevisionComment(telegramUserId, message.text);
         if (handled) {
           return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders });

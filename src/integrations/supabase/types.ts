@@ -555,6 +555,44 @@ export type Database = {
           },
         ]
       }
+      telegram_user_states: {
+        Row: {
+          created_at: string | null
+          deal_id: string | null
+          draft_index: number | null
+          expires_at: string | null
+          id: string
+          state_type: string
+          telegram_user_id: number
+        }
+        Insert: {
+          created_at?: string | null
+          deal_id?: string | null
+          draft_index?: number | null
+          expires_at?: string | null
+          id?: string
+          state_type: string
+          telegram_user_id: number
+        }
+        Update: {
+          created_at?: string | null
+          deal_id?: string | null
+          draft_index?: number | null
+          expires_at?: string | null
+          id?: string
+          state_type?: string
+          telegram_user_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telegram_user_states_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string | null
