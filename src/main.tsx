@@ -6,7 +6,13 @@ import "./index.css";
 const manifestUrl = `${window.location.origin}/tonconnect-manifest.json`;
 
 createRoot(document.getElementById("root")!).render(
-  <TonConnectUIProvider manifestUrl={manifestUrl}>
+  <TonConnectUIProvider 
+    manifestUrl={manifestUrl}
+    actionsConfiguration={{
+      returnStrategy: 'back',
+      twaReturnUrl: 'https://t.me/AdsingoBot'
+    }}
+  >
     <App />
   </TonConnectUIProvider>
 );
