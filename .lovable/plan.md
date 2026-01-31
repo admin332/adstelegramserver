@@ -1,184 +1,107 @@
 
+Цель: сделать «открытие кошелька» надёжным в Telegram Mini App (TMA) для MyTonWallet, без «before»-модалки TonConnect, и объяснить почему “просто ссылка” сейчас не открывается.
 
-## Виправлення оплати в Telegram Mini App — "План Б"
+## Почему сейчас «перенаправляем… и ничего»
+По текущему коду в `PaymentStep.tsx` / `PaymentDialog.tsx` есть две ключевые причины, из‑за которых в TMA может не открываться кошелёк:
 
-### Проблема
+1) **Мы открываем ссылку после `await tonConnectUI.getWallets()`**
+   - В WebView/Telegram действия открытия внешних ссылок часто **должны происходить строго в рамках пользовательского клика**.
+   - Любой `await` перед открытием ссылки может “снять” user-gesture контекст, и Telegram/OS молча блокирует переход.
 
-При натисканні "Оплатити" SDK показує модальне вікно з кнопкою "Open Wallet", яка ламається в TMA через:
-1. `window.open()` блокується Telegram
-2. Зв'язок з bridge втрачається
-3. Виникає помилка `TON_CONNECT_SDK_ERROR`
+2) **Используется `Telegram.WebApp.openTelegramLink(link)` для НЕ-telegram ссылок**
+   - `openTelegramLink` предназначен для `t.me/...`/`tg://...`
+   - Universal Link кошелька (MyTonWallet/Tonkeeper) обычно **внешний https-url**, и Telegram может его не открыть через `openTelegramLink`, поэтому визуально “ничего”.
 
-### Рішення
+Дополнительно ухудшает UX то, что мы показываем toast “Перенаправляем…” даже если ссылку так и не удалось получить/открыть.
 
-1. **Прибрати модалку `before`** — вона малює те проблемне вікно з кнопкою
-2. **Використати `openTelegramLink`** — це нативний метод Telegram WebApp SDK, який працює стабільніше
+## Что сделаем (исправление «как для людей»)
+### Главный принцип
+- **Никаких await до открытия кошелька.**
+- Универсальную ссылку кошелька получаем **синхронно** из `tonConnectUI.wallet` (там есть wallet info для подключённого кошелька).
+- Для TMA используем **`Telegram.WebApp.openLink()`** (а не openTelegramLink) для внешних URL.
+- Если Telegram API недоступен — fallback на `window.location.href = link`.
 
----
+### Где правим
+1) `src/components/channel/PaymentStep.tsx`
+2) `src/components/deals/PaymentDialog.tsx`
 
-## Зміни
-
-### 1. `src/components/channel/PaymentStep.tsx`
-
-**Строки 70-96 — замінити логіку оплати:**
-
-```typescript
-try {
-  // Отримуємо посилання на гаманець ЗАЗДАЛЕГІДЬ
-  const walletsList = await tonConnectUI.getWallets();
-  const connectedWallet = walletsList.find(
-    w => w.appName === wallet?.device.appName
-  );
-  
-  // Відправляємо транзакцію (йде в фон через bridge)
-  // ВИМИКАЄМО модалку 'before' — вона ламається в TMA
-  tonConnectUI.sendTransaction(transaction, {
-    modals: ['success', 'error'],  // БЕЗ 'before'!
-    notifications: ['before', 'success', 'error'],
-    returnStrategy: 'tg://resolve',
-    twaReturnUrl: 'https://t.me/adsingo_bot/open',
-  });
-  
-  // МИТТЄВО перекидаємо користувача в гаманець
-  const isTMA = Boolean(window.Telegram?.WebApp?.initData);
-  
-  if (isTMA && connectedWallet && 'universalLink' in connectedWallet && connectedWallet.universalLink) {
-    const link = connectedWallet.universalLink as string;
-    
-    // Найнадійніший спосіб для TMA — нативний метод Telegram
-    if (window.Telegram?.WebApp?.openTelegramLink) {
-      window.Telegram.WebApp.openTelegramLink(link);
-    } else {
-      window.location.href = link;
-    }
-  } else if (!isTMA && connectedWallet && 'universalLink' in connectedWallet && connectedWallet.universalLink) {
-    // Для звичайного браузера
-    window.location.href = connectedWallet.universalLink as string;
-  }
-  
-  // Не чекаємо sendPromise — користувач вже в гаманці
-  toast.success('Перенаправляємо в гаманець...');
-  // onPaymentComplete() викличеться після повернення через webhook або polling
-  
-} catch (error: any) {
-  // ... обробка помилок
-}
-```
+(Типы в `src/lib/telegram.ts` уже содержат `openLink`, менять их, скорее всего, не нужно.)
 
 ---
 
-### 2. `src/components/deals/PaymentDialog.tsx`
+## Точный план правок
 
-**Строки 74-118 — аналогічна заміна:**
+### A) Добавить безопасный helper (локально в каждом компоненте или вынести позже)
+Внутри каждого компонента создаём функцию (можно прямо над `handlePayViaWallet`):
 
-```typescript
-try {
-  const amountNano = Math.floor(totalPrice * 1_000_000_000).toString();
-  
-  // Отримуємо посилання на гаманець ЗАЗДАЛЕГІДЬ
-  const walletsList = await tonConnectUI.getWallets();
-  const connectedWallet = walletsList.find(
-    w => w.appName === wallet?.device.appName
-  );
-  
-  // Відправляємо транзакцію БЕЗ модалки 'before'
-  tonConnectUI.sendTransaction(
-    {
-      validUntil: Math.floor(Date.now() / 1000) + 600,
-      messages: [
-        {
-          address: escrowAddress,
-          amount: amountNano,
-        },
-      ],
-    },
-    {
-      modals: ['success', 'error'],  // БЕЗ 'before'!
-      notifications: ['before', 'success', 'error'],
-      returnStrategy: 'tg://resolve',
-      twaReturnUrl: 'https://t.me/adsingo_bot/open',
-    }
-  );
-  
-  // МИТТЄВО перекидаємо користувача в гаманець
-  const isTMA = Boolean(window.Telegram?.WebApp?.initData);
-  
-  if (isTMA && connectedWallet && 'universalLink' in connectedWallet && connectedWallet.universalLink) {
-    const link = connectedWallet.universalLink as string;
-    
-    if (window.Telegram?.WebApp?.openTelegramLink) {
-      window.Telegram.WebApp.openTelegramLink(link);
-    } else {
-      window.location.href = link;
-    }
-  } else if (!isTMA && connectedWallet && 'universalLink' in connectedWallet && connectedWallet.universalLink) {
-    window.location.href = connectedWallet.universalLink as string;
-  }
-  
-  toast.success('Перенаправляємо в гаманець...');
-  
-} catch (error: any) {
-  // ... обробка помилок
-}
-```
+- `getConnectedWalletUniversalLink()`:
+  - Считывает `const wallet = tonConnectUI.wallet`
+  - Берёт `const link = (wallet as any)?.universalLink`
+  - (Опционально: если universalLink отсутствует, показать пользователю понятное сообщение)
+
+- `openWalletLink(link: string)`:
+  - Если `window.Telegram?.WebApp?.openLink` есть — `window.Telegram.WebApp.openLink(link)`
+  - Иначе `window.location.href = link`
+
+Важно: **никаких await внутри этих функций.**
+
+### B) Переписать `handlePayViaWallet` так, чтобы ссылка открывалась строго в момент клика
+Текущая проблема: мы ждём `getWallets()`, а потом пытаемся открыть.
+Исправляем порядок:
+
+1) Сформировать `transaction`
+2) Синхронно достать `link` из `tonConnectUI.wallet` (без await)
+3) Вызвать `tonConnectUI.sendTransaction(...)` (можно без await, как сейчас)
+4) Сразу вызвать `openWalletLink(link)` (в этой же синхронной цепочке клика)
+5) Toast показывать:
+   - Если `link` найден и мы вызвали openLink/location.href — можно показать “Открываем кошелёк…”
+   - Если `link` не найден — показать ошибку “Не удалось получить ссылку кошелька. Переподключите кошелёк.”
+
+Также:
+- Toast “Перенаправляем…” показывать **только когда реально есть link и мы реально делаем попытку открытия**.
+- Если `link` отсутствует — не обещать пользователю редирект.
+
+### C) Оставить modals без `before`, как в Plan B
+Сохраняем:
+- `modals: ['success', 'error']`
+- `notifications: ['before', 'success', 'error']` (можно оставить, но если мешает — обсудим)
+- `returnStrategy: 'tg://resolve'`
+- `twaReturnUrl: 'https://t.me/adsingo_bot/open'`
+
+### D) (Опционально, но желательно) добавить “Fallback: открыть ссылку вручную”
+Чтобы полностью закрыть кейсы, когда Telegram/OS всё равно блокирует:
+- Если `link` есть, но переход не случился (мы не можем 100% детектнуть), можно показать под кнопкой оплаты вторую кнопку:
+  - “Открыть кошелёк вручную”
+  - которая просто вызывает `openWalletLink(link)` ещё раз
+  - или выводит сам link (копируемый) — “Скопировать ссылку кошелька”
+
+Это сильно снижает “бесит, ничего не происходит”.
 
 ---
 
-### 3. Додати типи для Telegram WebApp (якщо ще немає)
-
-**Перевірити `src/lib/telegram.ts` або додати глобальні типи:**
-
-```typescript
-declare global {
-  interface Window {
-    Telegram?: {
-      WebApp?: {
-        initData?: string;
-        openTelegramLink?: (url: string) => void;
-        // ... інші методи
-      };
-    };
-  }
-}
-```
+## Проверка после изменений (обязательно)
+1) В Telegram Mini App (реально внутри Telegram, не preview), с подключённым **MyTonWallet**:
+   - Нажать “Оплатить”
+   - Ожидаем: появляется системный prompt/или сразу открывается MyTonWallet (в зависимости от платформы)
+2) Проверить в iOS и Android (если доступно):
+   - На iOS чаще нужен системный prompt — это норм
+3) Если не открылось:
+   - Сразу открыть “Открыть кошелёк вручную” (fallback) — должно сработать
+4) Посмотреть консоль в TMA (если есть возможность) на предмет ошибок TonConnect.
 
 ---
 
-## Що зміниться для користувача
+## Почему «обычная ссылка» не всегда открывается в TMA
+Даже “обычная ссылка” в Telegram Mini App:
+- может быть заблокирована, если она открывается не в рамках user gesture (клика),
+- может не открыться, если использовать неподходящий API (`openTelegramLink` вместо `openLink`),
+- иногда Telegram требует именно свой метод `openLink`, а не `window.open`.
 
-| Було | Стане |
-|------|-------|
-| Натискає "Оплатити" | Натискає "Оплатити" |
-| Бачить модалку SDK з кнопкою | — |
-| Натискає "Open Wallet" | — |
-| Помилка або нічого | Одразу відкривається гаманець |
-
----
-
-## Технічне пояснення
-
-| Метод | Чому працює |
-|-------|-------------|
-| `modals: ['success', 'error']` | Прибираємо `before` — не малюється проблемне вікно |
-| `openTelegramLink()` | Нативний метод Telegram SDK, не блокується |
-| Виклик редиректу одразу | Синхронно в контексті кліку — дозволено iOS/Android |
+Мы сделаем поведение максимально похожим на connect: “клик → сразу openLink → кошелёк открывается”.
 
 ---
 
-## Файли для зміни
-
-| Файл | Зміна |
-|------|-------|
-| `src/components/channel/PaymentStep.tsx` | Прибрати `'before'` з modals, додати `openTelegramLink` |
-| `src/components/deals/PaymentDialog.tsx` | Те саме |
-| `src/lib/telegram.ts` | Перевірити/додати тип `openTelegramLink` |
-
----
-
-## Очікуваний результат
-
-1. Користувач натискає "Оплатити"
-2. **Без жодних модалок** — одразу відкривається MyTonWallet/Tonkeeper
-3. Користувач бачить запит на підтвердження транзакції
-4. Після підтвердження повертається в Mini App
+## Затрагиваемые файлы
+- `src/components/channel/PaymentStep.tsx` — убрать `await getWallets()` из клика, заменить на sync `tonConnectUI.wallet?.universalLink`, использовать `Telegram.WebApp.openLink`
+- `src/components/deals/PaymentDialog.tsx` — то же самое
 
