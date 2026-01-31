@@ -1,80 +1,117 @@
 
-## Исправление открытия внешнего кошелька (MyTonWallet) в Telegram Mini App
 
-### Диагноз проблемы
+## Исправление открытия MyTonWallet на iOS в Telegram Mini App
 
-Найдена точная причина: функция `openExternalWalletApp` возвращает `false` потому что:
+### Диагностика проблемы
 
-1. **Неправильный источник данных**: код ищет `universalLink` в `tonConnectUI.wallet`, но там его НЕТ
-2. **Правильные источники**:
-   - `tonConnectUI.walletInfo` — содержит `universalLink` и `deepLink`
-   - Callback `onRequestSent` в `sendTransaction` — официальный способ, даёт готовую функцию `redirectToWallet`
+1. **Где реальные данные кошелька**: `tonConnectUI.walletInfo` содержит `universalLink` и `deepLink` — исправлено в прошлом коммите
+2. **iOS блокирует `openLink()`**: На iOS `Telegram.WebApp.openLink(url)` открывает **Safari**, а НЕ приложение кошелька. Это известный баг Telegram iOS (#1670)
+3. **Решение для iOS**: Использовать **custom URL scheme** (`mytonwallet-tc://`) через `window.location.href` вместо `openLink()`
 
-Структура объектов TonConnect:
-```text
-tonConnectUI.wallet = { account, device, ... } // Нет universalLink!
-tonConnectUI.walletInfo = { universalLink, deepLink, appName, ... } // ← Нужные данные тут!
+### Структура данных MyTonWallet из wallets-v2.json
+
+```json
+{
+  "app_name": "mytonwallet",
+  "universal_url": "https://connect.mytonwallet.org",
+  "deepLink": "mytonwallet-tc://"
+}
 ```
 
 ### Изменения
 
-#### 1. `src/lib/tonWalletUtils.ts` — исправить получение URL кошелька
+#### 1. `src/lib/tonWalletUtils.ts` — специальная логика для iOS
 
-Было:
-```typescript
-const wallet = tonConnectUI.wallet;
-const universalLink = wallet.universalLink || wallet.openMethod?.universalLink;
-```
+**Проблема**: `Telegram.WebApp.openLink(universalLink)` на iOS открывает браузер, а не приложение
 
-Станет:
-```typescript
-// Используем walletInfo вместо wallet
-// @ts-ignore - walletInfo содержит universalLink для remote wallets
-const walletInfo = tonConnectUI.walletInfo;
-const universalLink = walletInfo?.universalLink;
-const deepLink = walletInfo?.deepLink;
-```
-
-Добавить логирование структуры для диагностики в будущем.
-
-#### 2. `src/components/channel/PaymentStep.tsx` — использовать официальный callback
-
-TonConnect SDK предоставляет callback `onRequestSent` с готовой функцией `redirectToWallet`. Это официальный и самый надёжный способ:
+**Решение**: На iOS использовать `deepLink` (custom scheme) через `window.location.href`:
 
 ```typescript
-const txPromise = tonConnectUI.sendTransaction(transaction, {
-  skipRedirectToWallet: 'never',
-  onRequestSent: (redirectToWallet) => {
-    // Вызываем редирект после отправки запроса на мост
-    redirectToWallet();
-    // Показываем подсказку через 2 сек, если не открылось
-    setTimeout(() => setShowWalletHint(true), 2000);
-  },
-});
+export function openExternalWalletApp(tonConnectUI: TonConnectUI): boolean {
+  const walletInfo = tonConnectUI.walletInfo;
+  const wallet = tonConnectUI.wallet;
+  
+  if (!wallet) return false;
+
+  const universalLink = walletInfo?.universalLink;
+  const deepLink = walletInfo?.deepLink;
+  
+  const tgWebApp = window.Telegram?.WebApp;
+  const platform = tgWebApp?.platform?.toLowerCase() || '';
+  const isIOS = platform === 'ios';
+  
+  // На iOS используем deepLink (custom scheme) — он обходит ограничения WebView
+  // На Android openLink работает нормально
+  if (isIOS && deepLink) {
+    // Custom scheme открывается через window.location.href
+    window.location.href = deepLink;
+    return true;
+  }
+  
+  // Fallback: universalLink через openLink (работает на Android)
+  const walletUrl = universalLink || deepLink;
+  if (!walletUrl) return false;
+  
+  if (tgWebApp && typeof tgWebApp.openLink === 'function') {
+    tgWebApp.openLink(walletUrl);
+    return true;
+  }
+  
+  window.open(walletUrl, '_blank');
+  return true;
+}
 ```
 
-Удалить ручной вызов `openExternalWalletApp` в setTimeout — он больше не нужен, официальный callback надёжнее.
+#### 2. `src/lib/tonWalletUtils.ts` — проверка isExternalWallet
 
-#### 3. `src/components/deals/PaymentDialog.tsx` — аналогичное исправление
+Оставить как есть — уже использует `walletInfo`.
 
-Добавить `onRequestSent` callback для автоматического редиректа.
+#### 3. PaymentStep.tsx / PaymentDialog.tsx — без изменений
+
+Код уже использует `onRequestSent` callback. Но если `redirectToWallet()` не работает на iOS, кнопка "Открыть кошелёк" (которая вызывает исправленную `openExternalWalletApp`) будет fallback.
+
+### Технические детали
+
+**Почему `window.location.href = deepLink` работает на iOS:**
+- Custom URL schemes (`mytonwallet-tc://`, `tonkeeper-tc://`) обрабатываются iOS напрямую
+- Telegram WebView не блокирует их, потому что это не HTTP-ссылка
+- iOS показывает диалог "Открыть в MyTonWallet?" и переключает на приложение
+
+**Почему `openLink(universalLink)` НЕ работает:**
+- Universal Links (`https://connect.mytonwallet.org`) на iOS требуют особой обработки
+- `Telegram.WebApp.openLink()` всегда открывает внешний браузер (Safari)
+- Safari может (но не обязан) сделать app-switch — это ненадёжно
 
 ### Файлы для изменения
 
 | Файл | Изменение |
 |------|-----------|
-| `src/lib/tonWalletUtils.ts` | Использовать `tonConnectUI.walletInfo` вместо `tonConnectUI.wallet` |
-| `src/components/channel/PaymentStep.tsx` | Добавить `onRequestSent` callback с `redirectToWallet()` |
-| `src/components/deals/PaymentDialog.tsx` | Добавить `onRequestSent` callback |
-
-### Почему это исправит проблему
-
-1. **`walletInfo`** — содержит реальный `universalLink` (например `https://connect.mytonwallet.org`)
-2. **`onRequestSent`** — официальный callback, который TonConnect вызывает когда запрос УЖЕ отправлен на bridge и можно редиректить
-3. **`redirectToWallet()`** — внутренняя функция SDK, которая знает все нюансы редиректа для конкретного кошелька
+| `src/lib/tonWalletUtils.ts` | Добавить iOS-специфичную логику с `deepLink` через `window.location.href` |
 
 ### Ожидаемый результат
 
-1. После нажатия "Оплатить" → MyTonWallet откроется автоматически
-2. Если авто-редирект не сработает → кнопка "Открыть MyTonWallet" будет работать корректно
-3. Логи покажут реальный URL кошелька для диагностики
+1. **iOS + MyTonWallet**: Нажатие "Открыть кошелёк" → iOS покажет "Открыть в MyTonWallet?" → приложение откроется
+2. **Android + любой кошелёк**: `openLink()` работает как раньше
+3. **Автоматический редирект**: `redirectToWallet()` от SDK должен сработать (если нет — кнопка fallback)
+
+### Альтернативный подход (если не сработает)
+
+Если `window.location.href = deepLink` не открывает приложение, можно попробовать:
+
+1. **Скрытый iframe** для активации deep link:
+```typescript
+const iframe = document.createElement('iframe');
+iframe.style.display = 'none';
+iframe.src = deepLink;
+document.body.appendChild(iframe);
+setTimeout(() => iframe.remove(), 100);
+```
+
+2. **Прямой transfer link** (обходит TonConnect полностью):
+```typescript
+// Формируем прямую ссылку на оплату
+const transferUrl = `https://connect.mytonwallet.org/transfer/${escrowAddress}?amount=${amountNano}`;
+```
+
+Но сначала попробуем основной подход с `window.location.href = deepLink`.
+
