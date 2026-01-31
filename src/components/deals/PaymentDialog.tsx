@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTonConnectUI } from "@tonconnect/ui-react";
-import { ExternalLink, Copy, Check, Wallet, Loader2 } from "lucide-react";
+import { ExternalLink, Copy, Check, Wallet, Loader2, ArrowUpRight } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { useTonPrice } from "@/hooks/useTonPrice";
 import { ExpirationTimer } from "@/components/deals/ExpirationTimer";
 import TonIcon from "@/assets/ton-icon.svg";
+import { openExternalWalletApp, getWalletName, isExternalWallet } from "@/lib/tonWalletUtils";
 
 interface PaymentDialogProps {
   open: boolean;
@@ -38,9 +39,12 @@ export function PaymentDialog({
   const [tonConnectUI] = useTonConnectUI();
   const [copied, setCopied] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
+  const [showWalletHint, setShowWalletHint] = useState(false);
   const { convertToUsd } = useTonPrice();
 
   const usdEquivalent = convertToUsd(totalPrice);
+  const walletName = getWalletName(tonConnectUI);
+  const isExternal = isExternalWallet(tonConnectUI);
 
   const handleCopyAddress = async () => {
     if (!escrowAddress) return;
@@ -52,6 +56,13 @@ export function PaymentDialog({
       setTimeout(() => setCopied(false), 2000);
     } catch {
       toast.error("Не удалось скопировать");
+    }
+  };
+
+  const handleOpenWallet = () => {
+    const opened = openExternalWalletApp(tonConnectUI);
+    if (!opened) {
+      toast.error('Не удалось открыть кошелёк');
     }
   };
 
@@ -67,12 +78,13 @@ export function PaymentDialog({
     }
 
     setIsPaying(true);
+    setShowWalletHint(false);
     
     try {
       const amountNano = Math.floor(totalPrice * 1_000_000_000).toString();
       
-      // skipRedirectToWallet: 'never' — принудительно открывать внешний кошелёк
-      await tonConnectUI.sendTransaction(
+      // Запускаем транзакцию, но не ждём сразу
+      const txPromise = tonConnectUI.sendTransaction(
         {
           validUntil: Math.floor(Date.now() / 1000) + 600,
           messages: [
@@ -87,7 +99,22 @@ export function PaymentDialog({
         }
       );
       
+      // Для внешних кошельков: принудительно открываем приложение через Telegram API
+      if (isExternal) {
+        console.log('[PaymentDialog] External wallet detected, forcing open...');
+        setTimeout(() => {
+          openExternalWalletApp(tonConnectUI);
+          setTimeout(() => {
+            setShowWalletHint(true);
+          }, 2000);
+        }, 300);
+      }
+      
+      // Ждём результат транзакции
+      await txPromise;
+      
       toast.success("Транзакция отправлена!");
+      setShowWalletHint(false);
       onPaymentSuccess?.();
       onOpenChange(false);
     } catch (error: any) {
@@ -202,6 +229,18 @@ export function PaymentDialog({
                 </>
               )}
             </Button>
+
+            {/* Подсказка: открыть кошелёк вручную */}
+            {(showWalletHint || isPaying) && isExternal && (
+              <Button 
+                variant="outline" 
+                onClick={handleOpenWallet}
+                className="w-full border-yellow-500/30 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/10"
+              >
+                <ArrowUpRight className="w-4 h-4 mr-2" />
+                Открыть {walletName}
+              </Button>
+            )}
 
             {escrowAddress && (
               <Button

@@ -55,6 +55,9 @@ export interface TelegramWebApp {
   disableClosingConfirmation: () => void;
   disableVerticalSwipes: () => void;
   enableVerticalSwipes: () => void;
+  // External links API (для открытия внешних приложений)
+  openLink: (url: string, options?: { try_instant_view?: boolean }) => void;
+  openTelegramLink: (url: string) => void;
 }
 
 declare global {
