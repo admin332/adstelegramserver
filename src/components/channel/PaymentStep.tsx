@@ -52,7 +52,7 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
     setIsPaying(true);
     
     // Конвертация TON в nanoTON (1 TON = 10^9 nanoTON)
-    const amountNano = (totalPriceTon * 1_000_000_000).toString();
+    const amountNano = Math.floor(totalPriceTon * 1_000_000_000).toString();
     
     const transaction = {
       validUntil: Math.floor(Date.now() / 1000) + 600, // 10 минут
@@ -65,12 +65,32 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
     };
     
     try {
-      await tonConnectUI.sendTransaction(transaction);
+      // skipRedirectToWallet: 'never' — принудительно открывать внешний кошелёк
+      await tonConnectUI.sendTransaction(transaction, {
+        skipRedirectToWallet: 'never',
+      });
       toast.success('Транзакция отправлена!');
       onPaymentComplete();
-    } catch (error) {
-      // Пользователь отменил или ошибка
-      console.error('Transaction error:', error);
+    } catch (error: any) {
+      // Расширенное логирование для диагностики
+      console.error('[TonConnect] sendTransaction error:', error);
+      console.error('[TonConnect] error details:', JSON.stringify(error, null, 2));
+      
+      // Определяем тип ошибки и показываем понятное сообщение
+      const errorMessage = error?.message || '';
+      const errorCode = error?.code || '';
+      
+      if (errorMessage.includes('Interrupted') || errorMessage.includes('cancelled')) {
+        toast.error('Оплата отменена');
+      } else if (errorMessage.includes('timeout') || errorMessage.includes('bridge')) {
+        toast.error('Кошелёк не отвечает. Попробуйте ещё раз.');
+      } else if (errorMessage) {
+        toast.error(`Ошибка: ${errorMessage}`);
+      } else if (errorCode) {
+        toast.error(`Ошибка кошелька (${errorCode})`);
+      } else {
+        toast.error('Не удалось выполнить оплату. Попробуйте ещё раз.');
+      }
     } finally {
       setIsPaying(false);
     }

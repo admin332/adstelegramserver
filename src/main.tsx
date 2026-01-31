@@ -5,12 +5,18 @@ import "./index.css";
 
 const manifestUrl = `${window.location.origin}/tonconnect-manifest.json`;
 
+// Определяем, находимся ли мы внутри Telegram Mini App
+const isTMA = Boolean(window.Telegram?.WebApp?.initData);
+
+// Для TMA используем tg://resolve, для браузера — back
+const returnStrategy = isTMA ? 'tg://resolve' : 'back';
+
 createRoot(document.getElementById("root")!).render(
   <TonConnectUIProvider 
     manifestUrl={manifestUrl}
     actionsConfiguration={{
-      returnStrategy: 'back',
-      twaReturnUrl: 'https://t.me/AdsingoBot'
+      returnStrategy: returnStrategy as 'back' | 'tg://resolve',
+      twaReturnUrl: 'https://t.me/AdsingoBot/app'
     }}
   >
     <App />

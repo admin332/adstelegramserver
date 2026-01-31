@@ -71,24 +71,44 @@ export function PaymentDialog({
     try {
       const amountNano = Math.floor(totalPrice * 1_000_000_000).toString();
       
-      await tonConnectUI.sendTransaction({
-        validUntil: Math.floor(Date.now() / 1000) + 600,
-        messages: [
-          {
-            address: escrowAddress,
-            amount: amountNano,
-          },
-        ],
-      });
+      // skipRedirectToWallet: 'never' — принудительно открывать внешний кошелёк
+      await tonConnectUI.sendTransaction(
+        {
+          validUntil: Math.floor(Date.now() / 1000) + 600,
+          messages: [
+            {
+              address: escrowAddress,
+              amount: amountNano,
+            },
+          ],
+        },
+        {
+          skipRedirectToWallet: 'never',
+        }
+      );
       
       toast.success("Транзакция отправлена!");
       onPaymentSuccess?.();
       onOpenChange(false);
     } catch (error: any) {
-      if (error?.message?.includes("Interrupted")) {
+      // Расширенное логирование для диагностики
+      console.error('[TonConnect] sendTransaction error:', error);
+      console.error('[TonConnect] error details:', JSON.stringify(error, null, 2));
+      
+      // Определяем тип ошибки и показываем понятное сообщение
+      const errorMessage = error?.message || '';
+      const errorCode = error?.code || '';
+      
+      if (errorMessage.includes('Interrupted') || errorMessage.includes('cancelled')) {
         toast.error("Оплата отменена");
+      } else if (errorMessage.includes('timeout') || errorMessage.includes('bridge')) {
+        toast.error("Кошелёк не отвечает. Попробуйте ещё раз.");
+      } else if (errorMessage) {
+        toast.error(`Ошибка: ${errorMessage}`);
+      } else if (errorCode) {
+        toast.error(`Ошибка кошелька (${errorCode})`);
       } else {
-        toast.error("Ошибка оплаты: " + (error?.message || "Неизвестная ошибка"));
+        toast.error("Не удалось выполнить оплату. Попробуйте ещё раз.");
       }
     } finally {
       setIsPaying(false);
