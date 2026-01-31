@@ -275,7 +275,7 @@ export const DealCard = ({
         
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-foreground truncate">{displayTitle}</h3>
+            <h3 className="font-semibold text-foreground truncate max-w-[140px]">{displayTitle}</h3>
             {isChannelOwner && (
               <span className="text-xs bg-secondary text-muted-foreground px-1.5 py-0.5 rounded">
                 входящий
