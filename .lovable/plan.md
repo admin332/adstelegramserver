@@ -1,130 +1,77 @@
 
+## Пропуск внешнего редиректа для встроенного кошелька Telegram (@wallet)
 
-## Исправление получения universalLink для оплаты
+### Проблема
+Сейчас при оплате через @wallet (встроенный кошелёк Telegram) код пытается открыть внешнюю ссылку, хотя это не нужно — @wallet работает прямо внутри Telegram через JS Bridge.
 
-### Корневая причина проблемы
-
-Сейчас код пытается получить ссылку так:
-```typescript
-const walletInfo = (wallet as any)?.walletInfo;  // ❌ Приватное поле!
-return walletInfo?.universalLink || null;
-```
-
-Но `walletInfo` — это **приватное** поле SDK, недоступное снаружи. Поэтому всегда `null`.
-
-### Правильная структура данных
+### Как определить встроенный кошелёк
 
 Согласно типам TonConnect SDK:
-- `tonConnectUI.wallet` возвращает `ConnectedWallet | null`
-- `ConnectedWallet` = `Wallet & WalletInfoWithOpenMethod`
-- `WalletInfoWithOpenMethod` включает `WalletInfoRemote` с полем `universalLink`
+- `wallet.provider === 'injected'` — кошелёк работает через JS Bridge (встроен)
+- `wallet.provider === 'http'` — кошелёк работает через HTTP Bridge (внешнее приложение)
 
-То есть `universalLink` находится **прямо на объекте `wallet`**, а не внутри вложенного `walletInfo`:
-```typescript
-const wallet = tonConnectUI.wallet;
-const link = (wallet as any)?.universalLink;  // ✅ Напрямую!
-```
+Для @wallet (Telegram Wallet):
+- `provider = 'injected'`
+- `device.appName = 'telegram-wallet'`
 
----
+### План изменений
 
-## План изменений
+#### 1. `src/components/channel/PaymentStep.tsx`
 
-### 1. `src/components/channel/PaymentStep.tsx`
-
-Исправить функцию `getConnectedWalletLink`:
+Добавить проверку перед попыткой открыть внешнюю ссылку:
 
 ```typescript
-// Было (неправильно):
-const getConnectedWalletLink = (): string | null => {
+const handlePayViaWallet = () => {
+  // ... формирование transaction ...
+  
   const wallet = tonConnectUI.wallet;
-  const walletInfo = (wallet as any)?.walletInfo;  // ❌ Не существует
-  return walletInfo?.universalLink || null;
-};
-
-// Станет (правильно):
-const getConnectedWalletLink = (): string | null => {
-  const wallet = tonConnectUI.wallet;
-  if (!wallet) return null;
   
-  // universalLink находится прямо на ConnectedWallet
-  // (Wallet & WalletInfoRemote содержит universalLink)
-  const link = (wallet as any).universalLink;
+  // Проверяем, это injected кошелёк (встроенный, например @wallet)?
+  const isInjectedWallet = wallet?.provider === 'injected';
   
-  // Добавляем логирование для отладки
-  console.log('[TonConnect] wallet:', wallet);
-  console.log('[TonConnect] universalLink:', link);
+  // Получаем ссылку только для http-кошельков
+  const walletLink = isInjectedWallet ? null : getConnectedWalletLink();
   
-  return link || null;
-};
-```
-
----
-
-### 2. `src/components/deals/PaymentDialog.tsx`
-
-Аналогичное исправление:
-
-```typescript
-// Было:
-const getConnectedWalletLink = (): string | null => {
-  const wallet = tonConnectUI.wallet;
-  const walletInfo = (wallet as any)?.walletInfo;
-  return walletInfo?.universalLink || null;
-};
-
-// Станет:
-const getConnectedWalletLink = (): string | null => {
-  const wallet = tonConnectUI.wallet;
-  if (!wallet) return null;
+  // Отправляем транзакцию
+  tonConnectUI.sendTransaction(transaction, { ... }).catch(...);
   
-  const link = (wallet as any).universalLink;
-  console.log('[TonConnect] wallet:', wallet);
-  console.log('[TonConnect] universalLink:', link);
-  
-  return link || null;
+  // Открываем кошелёк только если это внешний (http) кошелёк
+  if (walletLink) {
+    openWalletLink(walletLink);
+    toast.success('Открываем кошелёк...');
+  } else if (isInjectedWallet) {
+    // Для injected кошелька (@wallet) ничего делать не нужно
+    // Модальное окно откроется автоматически внутри Telegram
+    toast.success('Подтвердите транзакцию в кошельке');
+  } else {
+    toast.error('Не удалось получить ссылку кошелька...');
+    setIsPaying(false);
+  }
 };
 ```
 
----
+#### 2. `src/components/deals/PaymentDialog.tsx`
 
-## Почему так работает
-
-| Тип | Что содержит |
-|-----|--------------|
-| `Wallet` | `device`, `provider`, `account`, `connectItems` |
-| `WalletInfoRemote` | `universalLink`, `bridgeUrl`, `deepLink` |
-| `ConnectedWallet` | `Wallet` + `WalletInfoRemote` = всё вместе |
-
-При подключении через HTTP bridge (MyTonWallet, Tonkeeper) SDK сохраняет `universalLink` **прямо на объекте** `wallet`, не во вложенном поле.
+Аналогичные изменения:
+- Добавить проверку `wallet?.provider === 'injected'`
+- Для injected кошельков не вызывать `openWalletLink`
+- Показать другой toast: "Подтвердите транзакцию в кошельке"
 
 ---
 
-## Также важно: проверка домена в манифесте
+### Логика работы после изменений
 
-Вы тестируете на `adsingo.online`, а в `tonconnect-manifest.json` указан:
-```json
-{
-  "url": "https://adsingo.online"
-}
-```
-
-Это правильно! Если бы домен не совпадал, кошелёк бы не подключался вообще.
+| Кошелёк | provider | Действие |
+|---------|----------|----------|
+| @wallet (Telegram) | `injected` | Не открываем ссылку, показываем "Подтвердите транзакцию" |
+| MyTonWallet (app) | `http` | Открываем universalLink через `openLink()` |
+| Tonkeeper (app) | `http` | Открываем universalLink через `openLink()` |
 
 ---
 
-## Файлы для изменения
+### Файлы для изменения
 
 | Файл | Изменение |
 |------|-----------|
-| `src/components/channel/PaymentStep.tsx` | Исправить `getConnectedWalletLink`: читать `wallet.universalLink` напрямую |
+| `src/components/channel/PaymentStep.tsx` | Добавить проверку `provider === 'injected'`, пропустить редирект для встроенных кошельков |
 | `src/components/deals/PaymentDialog.tsx` | То же самое |
-
----
-
-## После изменений
-
-1. Нажимаете "Оплатить"
-2. В консоли увидите `[TonConnect] wallet:` и `universalLink:`
-3. Если `universalLink` есть — откроется MyTonWallet
-4. Если нет — покажется ошибка (но уже с понятной причиной в логах)
-
