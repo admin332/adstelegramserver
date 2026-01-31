@@ -49,7 +49,19 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
   
   const [currentStep, setCurrentStep] = useState(1);
   const [quantity, setQuantity] = useState(1);
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  // Вычисляем первую доступную дату и час на основе minHoursBeforePost
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const now = new Date();
+    const minTotalHours = Math.max(2, minHoursBeforePost);
+    const minPublishTime = new Date(now.getTime() + minTotalHours * 60 * 60 * 1000);
+    
+    // Возвращаем дату минимальной публикации (без времени)
+    const minDate = new Date(minPublishTime);
+    minDate.setHours(0, 0, 0, 0);
+    
+    return minDate;
+  });
+  
   const [selectedHour, setSelectedHour] = useState(() => {
     const now = new Date();
     const minTotalHours = Math.max(2, minHoursBeforePost);

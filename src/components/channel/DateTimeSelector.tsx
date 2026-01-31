@@ -126,7 +126,14 @@ const DateTimeSelector: React.FC<DateTimeSelectorProps> = ({
               mode="single"
               selected={selectedDate}
               onSelect={(date) => date && onDateChange(date)}
-              disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+              disabled={(date) => {
+                const minTotalHours = Math.max(2, minHoursBeforePost);
+                const minPublishTime = new Date(Date.now() + minTotalHours * 60 * 60 * 1000);
+                const minPublishDate = new Date(minPublishTime);
+                minPublishDate.setHours(0, 0, 0, 0);
+                
+                return date < minPublishDate;
+              }}
               initialFocus
               className="pointer-events-auto"
             />
