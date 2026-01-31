@@ -93,8 +93,19 @@ export function PaymentDialog({
     
     const wallet = tonConnectUI.wallet;
     
-    // Проверяем, это injected кошелёк (встроенный, например @wallet)?
+    // Telegram Wallet определяется по appName устройства
+    const isTelegramWallet = wallet?.device?.appName?.toLowerCase().includes('telegram');
+    
+    // Также проверяем injected как fallback для других встроенных кошельков
     const isInjectedWallet = wallet?.provider === 'injected';
+    
+    // Для встроенных кошельков (Telegram Wallet, injected) — не нужно открывать внешнюю ссылку
+    const isEmbeddedWallet = isTelegramWallet || isInjectedWallet;
+    
+    console.log('[TonConnect] wallet:', wallet);
+    console.log('[TonConnect] device.appName:', wallet?.device?.appName);
+    console.log('[TonConnect] provider:', wallet?.provider);
+    console.log('[TonConnect] isEmbeddedWallet:', isEmbeddedWallet);
     
     // 1. Конвертация TON в nanoTON
     const amountNano = Math.floor(totalPrice * 1_000_000_000).toString();
@@ -109,8 +120,8 @@ export function PaymentDialog({
       ],
     };
     
-    // 2. Получаем ссылку только для http-кошельков
-    const walletLink = isInjectedWallet ? null : getConnectedWalletLink();
+    // 2. Получаем ссылку только для внешних кошельков
+    const walletLink = isEmbeddedWallet ? null : getConnectedWalletLink();
     
     // 3. Отправляем транзакцию (без await — чтобы не терять user gesture)
     tonConnectUI.sendTransaction(transaction, {
@@ -137,8 +148,8 @@ export function PaymentDialog({
     if (walletLink) {
       openWalletLink(walletLink);
       toast.success("Открываем кошелёк...");
-    } else if (isInjectedWallet) {
-      // Для injected кошелька (@wallet) ничего делать не нужно
+    } else if (isEmbeddedWallet) {
+      // Для Telegram Wallet и injected кошельков — ничего делать не нужно
       // Модальное окно откроется автоматически внутри Telegram
       toast.success("Подтвердите транзакцию в кошельке");
     } else {
