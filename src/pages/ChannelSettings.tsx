@@ -12,6 +12,16 @@ import { getTelegramWebApp, isTelegramMiniApp } from '@/lib/telegram';
 import { useChannelStats, useUpdateChannelSettings, ChannelSettings } from '@/hooks/useChannelSettings';
 import { useUserChannels } from '@/hooks/useUserChannels';
 import { cn } from '@/lib/utils';
+import { toast } from '@/hooks/use-toast';
+
+// Price validation: only integers 1-100000
+const validatePriceInput = (value: string): string => {
+  const cleaned = value.replace(/[^0-9]/g, '');
+  if (!cleaned) return '';
+  const num = parseInt(cleaned, 10);
+  if (num > 100000) return '100000';
+  return cleaned;
+};
 
 const typeLabels: Record<string, string> = {
   prompt: 'Промпт',
@@ -74,6 +84,24 @@ const ChannelSettingsPage: React.FC = () => {
 
   const handleSave = () => {
     if (!id || !hasChanges) return;
+    
+    // Validate minimum price
+    if (localSettings.price_1_24 !== null && localSettings.price_1_24 !== undefined && localSettings.price_1_24 < 1) {
+      toast({
+        title: "Ошибка",
+        description: "Минимальная цена: 1 TON",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (localSettings.price_2_48 !== null && localSettings.price_2_48 !== undefined && localSettings.price_2_48 < 1) {
+      toast({
+        title: "Ошибка",
+        description: "Минимальная цена: 1 TON",
+        variant: "destructive",
+      });
+      return;
+    }
     
     updateSettings.mutate(
       { channelId: id, settings: localSettings },
@@ -190,13 +218,16 @@ const ChannelSettingsPage: React.FC = () => {
             <span className="text-muted-foreground">24 часа / 1 пост</span>
             <div className="flex items-center gap-2">
               <Input
-                type="number"
-                step="0.1"
-                min="0"
-                value={localSettings.price_1_24 ?? ''}
-                onChange={(e) => handleSettingChange('price_1_24', e.target.value ? parseFloat(e.target.value) : null)}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={localSettings.price_1_24?.toString() ?? ''}
+                onChange={(e) => {
+                  const validated = validatePriceInput(e.target.value);
+                  handleSettingChange('price_1_24', validated ? parseInt(validated, 10) : null);
+                }}
                 className="w-24 text-right bg-background"
-                placeholder="0.0"
+                placeholder="1-100000"
               />
               <span className="text-sm text-muted-foreground w-8">TON</span>
             </div>
@@ -206,13 +237,16 @@ const ChannelSettingsPage: React.FC = () => {
             <span className="text-muted-foreground">24 часа / 2+ поста</span>
             <div className="flex items-center gap-2">
               <Input
-                type="number"
-                step="0.1"
-                min="0"
-                value={localSettings.price_2_48 ?? ''}
-                onChange={(e) => handleSettingChange('price_2_48', e.target.value ? parseFloat(e.target.value) : null)}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={localSettings.price_2_48?.toString() ?? ''}
+                onChange={(e) => {
+                  const validated = validatePriceInput(e.target.value);
+                  handleSettingChange('price_2_48', validated ? parseInt(validated, 10) : null);
+                }}
                 className="w-24 text-right bg-background"
-                placeholder="0.0"
+                placeholder="1-100000"
               />
               <span className="text-sm text-muted-foreground w-8">TON</span>
             </div>
