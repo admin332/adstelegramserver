@@ -1,65 +1,40 @@
 
 
-## Исправление TonConnect для MyTonWallet — правильный twaReturnUrl и manifest
+## Ограничение длины названия канала в DealCard
 
----
+### Проблема
 
-## Найденная причина
-
-| Проблема | Сейчас | Должно быть |
-|----------|--------|-------------|
-| **twaReturnUrl** | `https://t.me/AdsingoBot/app` | `https://t.me/adsingo_bot/open` |
-| **terms page** | 404 | Рабочая страница или убрать из manifest |
-| **privacy page** | 404 | Рабочая страница или убрать из manifest |
-
-MyTonWallet после подписи транзакции пытается вернуть пользователя на указанный `twaReturnUrl`. Если ссылка неправильная — возврат не работает и SDK выбрасывает ошибку.
-
----
-
-## Изменения
-
-### 1. `src/main.tsx` — исправить twaReturnUrl
-
-```typescript
-// Было:
-twaReturnUrl: 'https://t.me/AdsingoBot/app'
-
-// Станет:
-twaReturnUrl: 'https://t.me/adsingo_bot/open'
+На главной странице (ChannelCard) название канала отображается с ограничением ширины `max-w-[140px]` и обрезается с `truncate`:
+```
+ІНФО Київ | Но...
 ```
 
----
+В карточках сделок (DealCard) название канала не имеет ограничения ширины — только `truncate`, который работает только когда контейнер переполнен. В результате длинные названия занимают слишком много места.
 
-### 2. `public/tonconnect-manifest.json` — убрать несуществующие ссылки
+### Решение
 
-**Вариант А: Убрать поля terms/privacy (если нет страниц)**
+Добавить ограничение `max-w-[140px]` к названию в DealCard, как это сделано в ChannelCard.
 
-```json
-{
-  "url": "https://adsingo.online",
-  "name": "Adsingo",
-  "iconUrl": "https://adsingo.online/icon.png"
-}
+### Изменения
+
+| Файл | Строка | Изменение |
+|------|--------|-----------|
+| `src/components/DealCard.tsx` | 278 | Добавить `max-w-[140px]` к заголовку |
+
+### Код
+
+**Было:**
+```tsx
+<h3 className="font-semibold text-foreground truncate">{displayTitle}</h3>
 ```
 
-**Вариант Б: Создать заглушки для /terms и /privacy**
+**Станет:**
+```tsx
+<h3 className="font-semibold text-foreground truncate max-w-[140px]">{displayTitle}</h3>
+```
 
-Если нужно оставить эти поля — можно создать простые страницы-заглушки.
+### Результат
 
----
-
-## Файлы для изменения
-
-| Файл | Изменение |
-|------|-----------|
-| `src/main.tsx` | Изменить `twaReturnUrl` на `https://t.me/adsingo_bot/open` |
-| `public/tonconnect-manifest.json` | Убрать `termsOfUseUrl` и `privacyPolicyUrl` |
-
----
-
-## Ожидаемый результат
-
-1. После подписи в MyTonWallet пользователь вернётся в правильный Mini App
-2. Не будет ошибок из-за недоступных страниц в манифесте
-3. ton_connect_sdk_error должен исчезнуть
+Название канала в карточке сделки будет обрезаться так же, как на главной странице:
+- `ІНФО Київ | Новини Столиці` → `ІНФО Київ | Но...`
 
