@@ -8,23 +8,29 @@ import { TonConnectUI } from '@tonconnect/ui-react';
  */
 export function openExternalWalletApp(tonConnectUI: TonConnectUI): boolean {
   try {
+    // ВАЖНО: universalLink и deepLink находятся в walletInfo, а НЕ в wallet!
+    // wallet содержит только account и device
+    // walletInfo содержит информацию о приложении кошелька включая ссылки
+    // @ts-ignore - walletInfo существует но не типизирован
+    const walletInfo = tonConnectUI.walletInfo;
     const wallet = tonConnectUI.wallet;
+    
+    console.log('[TonWallet] wallet:', JSON.stringify(wallet, null, 2));
+    console.log('[TonWallet] walletInfo:', JSON.stringify(walletInfo, null, 2));
     
     if (!wallet) {
       console.log('[TonWallet] No wallet connected');
       return false;
     }
 
-    // Получаем ссылку на кошелёк (универсальная или deep link)
-    // @ts-ignore - wallet может иметь разные структуры в зависимости от типа
-    const universalLink = wallet.universalLink || wallet.openMethod?.universalLink;
-    // @ts-ignore
-    const deepLink = wallet.deepLink || wallet.openMethod?.deepLink;
+    // Получаем ссылку из walletInfo (правильный источник)
+    const universalLink = walletInfo?.universalLink;
+    const deepLink = walletInfo?.deepLink;
     
     const walletUrl = deepLink || universalLink;
     
     if (!walletUrl) {
-      console.log('[TonWallet] No wallet URL found, wallet object:', JSON.stringify(wallet, null, 2));
+      console.log('[TonWallet] No wallet URL found in walletInfo');
       return false;
     }
 
@@ -56,11 +62,14 @@ export function openExternalWalletApp(tonConnectUI: TonConnectUI): boolean {
  * Получает название подключённого кошелька для отображения в UI
  */
 export function getWalletName(tonConnectUI: TonConnectUI): string {
+  // @ts-ignore - walletInfo содержит name/appName
+  const walletInfo = tonConnectUI.walletInfo;
   const wallet = tonConnectUI.wallet;
-  if (!wallet) return 'кошелёк';
   
-  // @ts-ignore
-  const name = wallet.device?.appName || wallet.name || 'кошелёк';
+  if (!wallet && !walletInfo) return 'кошелёк';
+  
+  // Приоритет: walletInfo.name > wallet.device.appName
+  const name = walletInfo?.name || wallet?.device?.appName || 'кошелёк';
   return name;
 }
 
@@ -68,11 +77,14 @@ export function getWalletName(tonConnectUI: TonConnectUI): string {
  * Проверяет, является ли кошелёк внешним (не встроенным Telegram Wallet)
  */
 export function isExternalWallet(tonConnectUI: TonConnectUI): boolean {
+  // @ts-ignore
+  const walletInfo = tonConnectUI.walletInfo;
   const wallet = tonConnectUI.wallet;
+  
   if (!wallet) return false;
   
-  // @ts-ignore
-  const appName = (wallet.device?.appName || wallet.name || '').toLowerCase();
+  // Приоритет: walletInfo.name > wallet.device.appName
+  const appName = (walletInfo?.name || wallet?.device?.appName || '').toLowerCase();
   
   // Встроенный Telegram Wallet работает через JS-bridge, ему не нужен внешний открыватель
   return !appName.includes('telegram') && appName !== 'wallet';
