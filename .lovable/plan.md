@@ -1,95 +1,87 @@
 
 
-## Автоопределение первой доступной даты при заказе рекламы
+## Исправление TonConnect для внешних кошельков (MyTonWallet, Tonkeeper)
 
 ---
 
 ## Проблема
 
-Сейчас при открытии формы заказа:
-- Дата по умолчанию = сегодня (`new Date()`)
-- Если владелец канала установил большой буфер (например, 48ч), то на сегодня нет слотов
-- Рекламодатель видит сообщение "На сегодня нет доступных слотов"
+Сейчас в `main.tsx`:
+
+```typescript
+<TonConnectUIProvider manifestUrl={manifestUrl}>
+  <App />
+</TonConnectUIProvider>
+```
+
+Отсутствует `actionsConfiguration`, поэтому:
+- Wallet (встроенный в Telegram) работает — он внутренний
+- MyTonWallet / Tonkeeper не работают — SDK не знает как вернуть пользователя обратно в Mini App
 
 ---
 
 ## Решение
 
-Автоматически устанавливать первую доступную дату при инициализации:
-
-```text
-minHoursBeforePost = 48ч
-Сейчас: 31 января, 14:00
-
-Минимальное время публикации: 2 февраля, 14:00
-→ Дата по умолчанию: 2 февраля (а не 31 января)
-```
+Добавить `actionsConfiguration` с двумя параметрами:
+- `returnStrategy: 'back'` — для обычных внешних кошельков
+- `twaReturnUrl` — для возврата в Telegram Mini App
 
 ---
 
 ## Изменения
 
-### `src/components/channel/OrderDrawer.tsx`
-
-**1. Вычислить первую доступную дату при инициализации:**
+### `src/main.tsx`
 
 ```typescript
-// Было:
-const [selectedDate, setSelectedDate] = useState(new Date());
+import { createRoot } from "react-dom/client";
+import { TonConnectUIProvider } from '@tonconnect/ui-react';
+import App from "./App.tsx";
+import "./index.css";
 
-// Станет:
-const [selectedDate, setSelectedDate] = useState(() => {
-  const now = new Date();
-  const minTotalHours = Math.max(2, minHoursBeforePost);
-  const minPublishTime = new Date(now.getTime() + minTotalHours * 60 * 60 * 1000);
-  
-  // Возвращаем дату минимальной публикации (без времени)
-  const minDate = new Date(minPublishTime);
-  minDate.setHours(0, 0, 0, 0);
-  
-  return minDate;
-});
+const manifestUrl = `${window.location.origin}/tonconnect-manifest.json`;
+
+createRoot(document.getElementById("root")!).render(
+  <TonConnectUIProvider 
+    manifestUrl={manifestUrl}
+    actionsConfiguration={{
+      // Для обычных браузеров - вернуться назад
+      returnStrategy: 'back',
+      // Для Telegram Mini Apps - вернуться в бота
+      twaReturnUrl: 'https://t.me/AdsingoBot'
+    }}
+  >
+    <App />
+  </TonConnectUIProvider>
+);
 ```
-
-**2. Синхронизировать час с выбранной датой:**
-
-Час уже вычисляется правильно, но нужно убедиться что он соответствует выбранной дате.
 
 ---
 
-## Логика работы
+## Как это работает
 
-| minHoursBeforePost | Текущее время | Первая доступная дата | Первый доступный час |
-|--------------------|---------------|----------------------|---------------------|
-| 2ч | 31 янв, 14:00 | 31 января | 16:00 |
-| 24ч | 31 янв, 14:00 | 1 февраля | 14:00 |
-| 48ч | 31 янв, 14:00 | 2 февраля | 14:00 |
-| 72ч | 31 янв, 14:00 | 3 февраля | 14:00 |
+| Сценарий | returnStrategy | Поведение |
+|----------|----------------|-----------|
+| TMA + Wallet (встроенный) | игнорируется | Работает нативно внутри Telegram |
+| TMA + MyTonWallet | `twaReturnUrl` | Открывает MyTonWallet → после подписания возвращает в t.me/AdsingoBot |
+| Браузер + Tonkeeper | `returnStrategy: 'back'` | Открывает Tonkeeper → после подписания возвращает назад |
 
 ---
 
-## Дополнительно: отключить недоступные даты в календаре
+## Альтернатива: динамическая настройка
 
-### `src/components/channel/DateTimeSelector.tsx`
-
-Сейчас календарь отключает только прошлые даты. Нужно также отключать даты до минимальной публикации:
+Если нужно более точное управление:
 
 ```typescript
-// Было:
-disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+// Определяем, в Telegram ли мы
+const isTMA = window.Telegram?.WebApp?.initData;
 
-// Станет:
-disabled={(date) => {
-  const minTotalHours = Math.max(2, minHoursBeforePost);
-  const minPublishTime = new Date(Date.now() + minTotalHours * 60 * 60 * 1000);
-  const minPublishDate = new Date(minPublishTime);
-  minPublishDate.setHours(0, 0, 0, 0);
-  
-  return date < minPublishDate;
-}}
+const actionsConfig = {
+  returnStrategy: isTMA ? 'tg://resolve' : 'back',
+  twaReturnUrl: 'https://t.me/AdsingoBot'
+};
 ```
 
-Это визуально покажет какие даты недоступны.
+Но базовой настройки с `'back'` и `twaReturnUrl` должно хватить для большинства случаев.
 
 ---
 
@@ -97,15 +89,13 @@ disabled={(date) => {
 
 | Файл | Изменение |
 |------|-----------|
-| `src/components/channel/OrderDrawer.tsx` | Инициализация `selectedDate` с первой доступной датой |
-| `src/components/channel/DateTimeSelector.tsx` | Отключение недоступных дат в календаре |
+| `src/main.tsx` | Добавить `actionsConfiguration` с `returnStrategy` и `twaReturnUrl` |
 
 ---
 
 ## Результат
 
-- Рекламодатель сразу видит первую доступную дату
-- Нет сообщения "На сегодня нет доступных слотов"
-- Недоступные даты визуально отключены в календаре
-- Первый доступный час автоматически выбран
+- MyTonWallet откроется и после подписания транзакции вернёт пользователя в приложение
+- Tonkeeper будет работать аналогично
+- Встроенный Wallet продолжит работать как раньше
 
