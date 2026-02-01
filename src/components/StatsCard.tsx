@@ -57,7 +57,7 @@ export const StatsCard = ({ icon, label, value, numericValue, trend, className }
       <div className="flex items-end gap-2">
         <span className="flex items-baseline">
           <span ref={valueRef} className="text-2xl font-bold text-foreground">{value}</span>
-          <span ref={suffixRef} className="text-sm font-medium text-muted-foreground ml-0.5">
+          <span ref={suffixRef} className="text-base font-bold text-muted-foreground ml-0.5">
             {getInitialSuffix()}
           </span>
         </span>
