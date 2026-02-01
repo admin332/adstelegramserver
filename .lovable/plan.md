@@ -1,104 +1,170 @@
 
 
-## План: Плавное затухание рамки в углах
+## План: Редирект на /deals после оплаты + статус "Проверка оплаты"
 
-### Текущее состояние
+### Текущее поведение
 
-Сейчас рамка равномерная по всему периметру:
+1. Пользователь открывает `PaymentDialog` и нажимает "Оплатить"
+2. Транзакция отправляется в кошелёк
+3. Пользователь остаётся в диалоге — ничего не меняется
+4. Статус "Ожидает оплаты" сохраняется, пока бэкенд не подтвердит оплату
 
-```text
-┌─────────────────────────────────────┐
-│ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ │  ← Одинаковая яркость везде
-│ ■                                ■ │
-│ ■                                ■ │
-│ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ │
-└─────────────────────────────────────┘
-```
+### Желаемое поведение
 
-### Целевой эффект
-
-Рамка должна плавно затухать в двух углах:
+1. После отправки транзакции → закрыть диалог и перенаправить на `/deals`
+2. Отображать "Проверка оплаты" вместо "Ожидает оплаты" для этой сделки
+3. Кнопка "Оплатить" остаётся доступной (на случай повторной попытки)
 
 ```text
-┌─────────────────────────────────░░░░┐
-│ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■░░░░░ │  ← Затухание сверху-справа
-│ ■                                ░ │
-│ ░                                ■ │
-│ ░░░░░░░■■■■■■■■■■■■■■■■■■■■■■■■■■ │  ← Затухание снизу-слева
-└░░░░─────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                     ТЕКУЩИЙ ФЛОУ                             │
+├──────────────────────────────────────────────────────────────┤
+│  [PaymentDialog] ──> sendTransaction ──> остаёмся в диалоге  │
+│                                                              │
+│  Статус: "Ожидает оплаты" ──────────────────────────────────►│
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────┐
+│                     НОВЫЙ ФЛОУ                               │
+├──────────────────────────────────────────────────────────────┤
+│  [PaymentDialog] ──> sendTransaction ──> закрыть диалог      │
+│                          │                                   │
+│                          ▼                                   │
+│               localStorage.set("pending_payment", dealId)    │
+│                          │                                   │
+│                          ▼                                   │
+│               navigate("/deals")                             │
+│                          │                                   │
+│                          ▼                                   │
+│  [DealCard] ──> check localStorage ──> "Проверка оплаты"     │
+│             + кнопка "Оплатить" доступна                     │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Техническая реализация
 
-### Подход: CSS mask с радиальными градиентами
+### 1. Файл: `src/components/deals/PaymentDialog.tsx`
 
-Используем `mask-image` для создания плавного затухания в углах. Это позволит сохранить текущий градиент рамки, но сделать её прозрачной в нужных местах.
+**Изменения:**
 
-### Файл: `src/components/ChannelCard.tsx`
+- Добавить `useNavigate` из `react-router-dom`
+- После успешной отправки транзакции (`.then()`):
+  - Сохранить dealId в localStorage как "проверяемый"
+  - Закрыть диалог
+  - Перенаправить на `/deals`
+  - Вызвать `onPaymentSuccess` для обновления данных
 
-**Изменения в строках 102-104:**
-
-Текущий код:
 ```tsx
-{/* Gradient border using after pseudo-element */}
-<div className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600 opacity-75 blur-[2px]" />
-<div className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600" />
-```
+import { useNavigate } from "react-router-dom";
 
-Новый код с маской:
-```tsx
-{/* Gradient border with corner fade */}
-<div 
-  className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600 opacity-75 blur-[2px]" 
-  style={{
-    maskImage: 'radial-gradient(ellipse 80% 80% at 0% 100%, transparent 0%, black 50%), radial-gradient(ellipse 80% 80% at 100% 0%, transparent 0%, black 50%)',
-    maskComposite: 'intersect',
-    WebkitMaskImage: 'radial-gradient(ellipse 80% 80% at 0% 100%, transparent 0%, black 50%), radial-gradient(ellipse 80% 80% at 100% 0%, transparent 0%, black 50%)',
-    WebkitMaskComposite: 'source-in'
-  }}
-/>
-<div 
-  className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600" 
-  style={{
-    maskImage: 'radial-gradient(ellipse 80% 80% at 0% 100%, transparent 0%, black 50%), radial-gradient(ellipse 80% 80% at 100% 0%, transparent 0%, black 50%)',
-    maskComposite: 'intersect',
-    WebkitMaskImage: 'radial-gradient(ellipse 80% 80% at 0% 100%, transparent 0%, black 50%), radial-gradient(ellipse 80% 80% at 100% 0%, transparent 0%, black 50%)',
-    WebkitMaskComposite: 'source-in'
-  }}
-/>
+// В компоненте:
+const navigate = useNavigate();
+
+// В handlePayViaWallet, после sendTransaction:
+tonConnectUI.sendTransaction(transaction, options)
+  .then(() => {
+    // Сохраняем ID сделки как "проверяющую оплату"
+    const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+    if (!pendingPayments.includes(dealId)) {
+      pendingPayments.push(dealId);
+      localStorage.setItem('pending_payments', JSON.stringify(pendingPayments));
+    }
+    
+    // Закрываем диалог
+    onOpenChange(false);
+    
+    // Вызываем callback и перенаправляем
+    onPaymentSuccess?.();
+    navigate('/deals');
+    
+    toast.success("Транзакция отправлена! Проверяем оплату...");
+  })
+  .catch(...)
 ```
 
 ---
 
-## Как работает маска
+### 2. Файл: `src/components/DealCard.tsx`
 
-| Свойство | Значение | Описание |
-|----------|----------|----------|
-| `radial-gradient at 0% 100%` | Снизу-слева | Создаёт затухание в левом нижнем углу |
-| `radial-gradient at 100% 0%` | Сверху-справа | Создаёт затухание в правом верхнем углу |
-| `ellipse 80% 80%` | Размер | Плавный, не слишком большой срез |
-| `transparent 0%, black 50%` | Градиент | Плавный переход от прозрачного к видимому |
-| `mask-composite: intersect` | Объединение | Совмещает обе маски |
+**Изменения:**
+
+- Проверять localStorage на наличие `dealId` в списке "pending_payments"
+- Если сделка в списке и статус `pending` → показывать "Проверка оплаты"
+- Если статус изменился на `escrow` → удалить из localStorage
+- Кнопка "Оплатить" остаётся доступной
+
+```tsx
+// Добавить в начало компонента:
+const isPendingPayment = (() => {
+  if (status !== 'pending') return false;
+  try {
+    const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+    return pendingPayments.includes(id);
+  } catch {
+    return false;
+  }
+})();
+
+// Очистка localStorage при смене статуса
+useEffect(() => {
+  if (status === 'escrow') {
+    try {
+      const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+      const updated = pendingPayments.filter((pid: string) => pid !== id);
+      localStorage.setItem('pending_payments', JSON.stringify(updated));
+    } catch {}
+  }
+}, [status, id]);
+
+// Изменить dynamicStatusLabel для pending:
+if (status === "pending" && isPendingPayment) {
+  dynamicStatusLabel = "Проверка оплаты";
+}
+```
 
 ---
 
-## Визуальный результат
+### 3. Файл: `src/pages/Deals.tsx`
 
-```text
-┌─────────────────────────────────░░░┐
-│ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░   │
-│ ▓                              ░  │
-│ ▓                              ▓  │
-│ ░                              ▓  │
-│   ░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  │
-└░░░────────────────────────────────┘
+**Изменения:**
 
-▓ = Яркая рамка
-░ = Плавное затухание
-  = Нет рамки
+- Добавить автоматическое обновление данных каждые 5-10 секунд, пока есть сделки в состоянии "проверка оплаты"
+- Это позволит быстро отобразить изменение статуса после подтверждения бэкендом
+
+```tsx
+// Добавить в useUserDeals:
+const { refetch } = useUserDeals();
+
+// Автообновление при наличии pending_payments
+useEffect(() => {
+  const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+  if (pendingPayments.length === 0) return;
+  
+  const interval = setInterval(() => {
+    refetch();
+  }, 5000);
+  
+  return () => clearInterval(interval);
+}, [refetch]);
 ```
+
+---
+
+## Дополнительная конфигурация статуса
+
+### Обновить `statusConfig` в `DealCard.tsx`:
+
+Не требуется добавлять новый статус в базу данных — мы используем тот же `pending`, но с другим отображением.
+
+| Состояние | Реальный статус | Отображение | Кнопка "Оплатить" |
+|-----------|-----------------|-------------|-------------------|
+| До оплаты | `pending` | "Ожидает оплаты" | Доступна |
+| После отправки транзакции | `pending` + localStorage | "Проверка оплаты" | Доступна |
+| Оплата подтверждена | `escrow` | "Оплачено" | Скрыта |
 
 ---
 
@@ -106,5 +172,7 @@
 
 | Файл | Изменение |
 |------|-----------|
-| `src/components/ChannelCard.tsx` | Добавить CSS mask к двум div-ам рамки (строки 102-104) |
+| `src/components/deals/PaymentDialog.tsx` | Добавить редирект на /deals после отправки транзакции |
+| `src/components/DealCard.tsx` | Показывать "Проверка оплаты" для pending + localStorage |
+| `src/pages/Deals.tsx` | Добавить автообновление пока есть pending_payments |
 
