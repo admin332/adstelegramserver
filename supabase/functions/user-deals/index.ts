@@ -115,6 +115,7 @@ serve(async (req) => {
         author_draft_media_urls,
         revision_count,
         is_draft_approved,
+        draft_history,
         advertiser_id,
         channel_id,
         channel:channels(id, title, avatar_url, username),

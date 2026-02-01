@@ -302,6 +302,13 @@ interface DraftItem {
   chat_id: number;
 }
 
+// Draft history item structure for version selection
+interface DraftHistoryItem {
+  version: number;
+  drafts: DraftItem[];
+  submitted_at: string;
+}
+
 // Get Russian plural form for "пост"
 function getPostsWord(count: number): string {
   const lastTwo = count % 100;
@@ -480,6 +487,50 @@ async function handleDraftMessage(telegramUserId: number, message: Record<string
       ]
     }
   );
+
+  // Get deal with draft_history to check if version selection buttons needed
+  const { data: dealWithHistory } = await supabase
+    .from("deals")
+    .select("draft_history")
+    .eq("id", deal.id)
+    .single();
+
+  const draftHistory = (dealWithHistory?.draft_history as DraftHistoryItem[]) || [];
+  const historyCount = draftHistory.length;
+
+  // If there's history (previous versions exist), show version selection buttons
+  if (historyCount > 0 && draftNumber === requiredCount) {
+    // Only show after all drafts are submitted
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const versionButtons: Array<{ text: string; callback_data: string }> = [];
+    
+    // Add history version buttons
+    for (let i = 1; i <= historyCount; i++) {
+      versionButtons.push({
+        text: `📄 Вариант ${i}`,
+        callback_data: `select_version:${deal.id}:${i}`
+      });
+    }
+    
+    // Current version button
+    versionButtons.push({
+      text: `📄 Вариант ${historyCount + 1} (текущий)`,
+      callback_data: `select_version:${deal.id}:${historyCount + 1}`
+    });
+
+    // Split buttons into rows of 3
+    const buttonRows: Array<Array<{ text: string; callback_data: string }>> = [];
+    for (let i = 0; i < versionButtons.length; i += 3) {
+      buttonRows.push(versionButtons.slice(i, i + 3));
+    }
+
+    await sendTelegramMessage(
+      advertiser.telegram_id,
+      `📋 <b>Доступные версии:</b>\n\nВы запрашивали доработки. Если предыдущий вариант нравился больше — выберите его:`,
+      { inline_keyboard: buttonRows }
+    );
+  }
 
   // Confirm to owner
   const remaining = requiredCount - draftNumber;
@@ -715,10 +766,10 @@ async function handleRevisionComment(telegramUserId: number, text: string) {
   const dealId = state.deal_id;
   await clearUserState(telegramUserId);
 
-  // Get deal with posts_count for multi-draft support
+  // Get deal with posts_count for multi-draft support and draft_history
   const { data: deal } = await supabase
     .from("deals")
-    .select("id, channel_id, revision_count, posts_count, author_drafts")
+    .select("id, channel_id, revision_count, posts_count, author_drafts, draft_history")
     .eq("id", dealId)
     .single();
 
@@ -727,8 +778,21 @@ async function handleRevisionComment(telegramUserId: number, text: string) {
     return true;
   }
 
-  // For multi-draft: reset all drafts back to empty
-  // Clear all draft fields including new ones
+  // Get current drafts and history
+  const currentDrafts = (deal.author_drafts as DraftItem[]) || [];
+  const currentHistory = (deal.draft_history as DraftHistoryItem[]) || [];
+
+  // Save current version to history if drafts exist
+  if (currentDrafts.length > 0) {
+    const historyEntry: DraftHistoryItem = {
+      version: (deal.revision_count || 0) + 1,
+      drafts: currentDrafts,
+      submitted_at: new Date().toISOString(),
+    };
+    currentHistory.push(historyEntry);
+  }
+
+  // For multi-draft: reset all drafts back to empty, but preserve history
   const { error: updateError } = await supabase
     .from("deals")
     .update({
@@ -738,6 +802,7 @@ async function handleRevisionComment(telegramUserId: number, text: string) {
       author_draft_media: [],
       author_draft_media_urls: [],
       author_drafts: [], // Clear the new drafts array
+      draft_history: currentHistory, // Preserve history!
       revision_count: (deal.revision_count || 0) + 1,
     })
     .eq("id", dealId);
@@ -784,8 +849,137 @@ async function handleRevisionComment(telegramUserId: number, text: string) {
     `✅ <b>Комментарий отправлен!</b>\n\nАвтор канала получил ваши замечания и подготовит новый черновик.`
   );
 
-  console.log(`Revision comment sent for deal ${dealId}, all drafts cleared`);
+  console.log(`Revision comment sent for deal ${dealId}, drafts saved to history (version ${currentHistory.length})`);
   return true;
+}
+
+// Handle version selection by advertiser
+async function handleVersionSelect(
+  callbackQueryId: string,
+  dealId: string,
+  version: number,
+  from: { id: number },
+  message: { chat: { id: number }; message_id: number }
+) {
+  // Get user
+  const { data: user } = await supabase
+    .from("users")
+    .select("id")
+    .eq("telegram_id", from.id)
+    .maybeSingle();
+
+  if (!user) {
+    await answerCallbackQuery(callbackQueryId, "Пользователь не найден");
+    return;
+  }
+
+  // Get deal with history
+  const { data: deal, error: dealError } = await supabase
+    .from("deals")
+    .select("id, status, advertiser_id, channel_id, revision_count, author_drafts, draft_history, posts_count")
+    .eq("id", dealId)
+    .single();
+
+  if (dealError || !deal) {
+    await answerCallbackQuery(callbackQueryId, "Сделка не найдена");
+    return;
+  }
+
+  // Verify user is advertiser
+  if (deal.advertiser_id !== user.id) {
+    await answerCallbackQuery(callbackQueryId, "Только рекламодатель может выбрать версию");
+    return;
+  }
+
+  if (deal.status !== "escrow") {
+    await answerCallbackQuery(callbackQueryId, "Сделка уже обработана");
+    return;
+  }
+
+  const history = (deal.draft_history as DraftHistoryItem[]) || [];
+  const currentDrafts = (deal.author_drafts as DraftItem[]) || [];
+  const currentVersion = history.length + 1;
+  
+  let selectedDrafts: DraftItem[];
+  
+  if (version === currentVersion) {
+    // Use current drafts
+    selectedDrafts = currentDrafts;
+  } else {
+    // Use history version
+    const historyEntry = history.find(h => h.version === version);
+    if (!historyEntry) {
+      await answerCallbackQuery(callbackQueryId, "Версия не найдена");
+      return;
+    }
+    selectedDrafts = historyEntry.drafts;
+  }
+
+  if (selectedDrafts.length === 0) {
+    await answerCallbackQuery(callbackQueryId, "Черновики не найдены");
+    return;
+  }
+
+  // Mark all drafts as approved
+  const approvedDrafts = selectedDrafts.map(d => ({ ...d, approved: true }));
+
+  // Update deal with selected version
+  const { error: updateError } = await supabase
+    .from("deals")
+    .update({
+      author_drafts: approvedDrafts,
+      is_draft_approved: true,
+      status: "in_progress",
+      // For backwards compatibility, copy first draft to legacy fields
+      author_draft: approvedDrafts[0]?.text || null,
+      author_draft_entities: approvedDrafts[0]?.entities || [],
+      author_draft_media: approvedDrafts[0]?.media || [],
+    })
+    .eq("id", dealId);
+
+  if (updateError) {
+    console.error("Failed to update deal with selected version:", updateError);
+    await answerCallbackQuery(callbackQueryId, "Ошибка при выборе версии");
+    return;
+  }
+
+  // Remove buttons
+  await editMessageReplyMarkup(message.chat.id, message.message_id);
+
+  // Get channel info and owner
+  const { data: channel } = await supabase
+    .from("channels")
+    .select("owner_id, title, username")
+    .eq("id", deal.channel_id)
+    .single();
+
+  const { data: owner } = await supabase
+    .from("users")
+    .select("telegram_id")
+    .eq("id", channel?.owner_id)
+    .single();
+
+  const channelName = channel?.title || `@${channel?.username}`;
+  const postsWord = getPostsWord(deal.posts_count || 1);
+
+  // Notify channel owner which version was selected
+  if (owner?.telegram_id) {
+    const ownerMessage = version === currentVersion
+      ? `✅ <b>Рекламодатель выбрал текущую версию!</b>\n\nВаш последний черновик для канала <b>${channelName}</b> одобрен.\n\nВсе ${deal.posts_count} ${postsWord} будут опубликованы по расписанию.`
+      : `✅ <b>Рекламодатель выбрал Вариант ${version}!</b>\n\nДля канала <b>${channelName}</b> будет опубликована предыдущая версия ${version} (не последняя).\n\nПубликация по расписанию.`;
+    
+    await sendTelegramMessage(owner.telegram_id, ownerMessage);
+  }
+
+  // Confirm to advertiser
+  const advertiserMessage = version === currentVersion
+    ? `✅ <b>Текущая версия выбрана!</b>\n\nВсе ${deal.posts_count} ${postsWord} будут опубликованы по расписанию.`
+    : `✅ <b>Вариант ${version} выбран!</b>\n\nВыбранная версия будет опубликована по расписанию.`;
+
+  await sendTelegramMessage(from.id, advertiserMessage);
+  await answerCallbackQuery(callbackQueryId, `Вариант ${version} выбран!`);
+  
+  console.log(`Version ${version} selected for deal ${dealId} (current: ${currentVersion})`);
 }
 
 // Handle cancel revision
@@ -1213,6 +1407,9 @@ Deno.serve(async (req) => {
         await handleDraftRevision(callbackQueryId, parts[1], draftIndex, from, message);
       } else if (action === "cancel_revision") {
         await handleCancelRevision(callbackQueryId, parts[1], from);
+      } else if (action === "select_version") {
+        const version = parseInt(parts[2], 10);
+        await handleVersionSelect(callbackQueryId, parts[1], version, from, message);
       }
       // Handle deal approval/rejection
       else if (action === "approve_deal") {
