@@ -355,6 +355,7 @@ const OrderDrawer: React.FC<OrderDrawerProps> = ({
                 exit={{ opacity: 0, x: 20 }}
               >
                 <PaymentStep
+                  dealId={dealId || undefined}
                   totalPriceTon={totalPrice}
                   escrowAddress={escrowAddress}
                   isCreatingDeal={isCreatingDeal}
