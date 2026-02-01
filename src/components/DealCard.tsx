@@ -1,4 +1,5 @@
-import { Clock, CheckCircle2, Wallet, Shield, XCircle, AlertTriangle, ExternalLink, TimerOff, MoreVertical, ImageIcon, FileVideo, FileText, Edit3, Eye } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Clock, CheckCircle2, Wallet, Shield, XCircle, AlertTriangle, ExternalLink, TimerOff, MoreVertical, ImageIcon, FileVideo, FileText, Edit3, Eye, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -144,15 +145,46 @@ export const DealCard = ({
   onWriteDraft,
   onReviewDraft,
 }: DealCardProps) => {
+  // Check if this deal is pending payment verification
+  const [isPendingPayment, setIsPendingPayment] = useState(false);
+  
+  useEffect(() => {
+    if (status === 'pending') {
+      try {
+        const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+        setIsPendingPayment(pendingPayments.includes(id));
+      } catch {
+        setIsPendingPayment(false);
+      }
+    } else {
+      setIsPendingPayment(false);
+    }
+  }, [status, id]);
+  
+  // Clear from localStorage when status changes to escrow
+  useEffect(() => {
+    if (status === 'escrow') {
+      try {
+        const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+        const updated = pendingPayments.filter((pid: string) => pid !== id);
+        localStorage.setItem('pending_payments', JSON.stringify(updated));
+      } catch {}
+    }
+  }, [status, id]);
+  
   const config = statusConfig[status];
-  const StatusIcon = config.icon;
+  const StatusIcon = isPendingPayment ? Loader2 : config.icon;
   
   // Check if this is a prompt campaign
   const isPromptCampaign = campaign?.campaign_type === "prompt";
   
   // Dynamic status label based on campaign type and draft status
   let dynamicStatusLabel = config.label;
-  if (status === "escrow" && isPromptCampaign) {
+  
+  // Override for pending payment verification
+  if (status === "pending" && isPendingPayment) {
+    dynamicStatusLabel = "Проверка оплаты";
+  } else if (status === "escrow" && isPromptCampaign) {
     if (!authorDraft) {
       dynamicStatusLabel = "Ожидает черновик";
     } else if (isDraftApproved === null) {
@@ -402,7 +434,7 @@ export const DealCard = ({
       {/* Status and time */}
       <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/5">
         <div className={cn("flex items-center gap-1.5 px-2 py-1 rounded-full", config.bgColor)}>
-          <StatusIcon className={cn("w-4 h-4", config.color)} />
+          <StatusIcon className={cn("w-4 h-4", config.color, isPendingPayment && "animate-spin")} />
           <span className={cn("text-sm font-medium", config.color)}>{dynamicStatusLabel}</span>
         </div>
         <span className="text-sm text-muted-foreground">{timeAgo}</span>
