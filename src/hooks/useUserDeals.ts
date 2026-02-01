@@ -25,6 +25,7 @@ export interface Deal {
   draft_submitted_at: string | null;
   payment_verified_at: string | null;
   role: 'advertiser' | 'channel_owner';
+  channel_role: 'owner' | 'manager' | null;
   channel: {
     id: string;
     title: string | null;

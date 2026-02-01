@@ -176,6 +176,7 @@ const Deals = () => {
               campaign={deal.campaign}
               usdEquivalent={convertToUsd(deal.total_price)}
               role={deal.role}
+              channelRole={deal.channel_role}
               onPayClick={() => handlePayClick(deal)}
               onOwnerAction={() => handleOwnerAction(deal)}
               onWriteDraft={() => setDraftEditorDeal(deal)}

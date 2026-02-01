@@ -43,6 +43,7 @@ interface DealCardProps {
   } | null;
   usdEquivalent: number | null;
   role: 'advertiser' | 'channel_owner';
+  channelRole?: 'owner' | 'manager' | null;
   onPayClick?: () => void;
   onOwnerAction?: () => void;
   onWriteDraft?: () => void;
@@ -137,6 +138,7 @@ export const DealCard = ({
   campaign,
   usdEquivalent,
   role,
+  channelRole,
   onPayClick,
   onOwnerAction,
   onWriteDraft,
@@ -354,8 +356,13 @@ export const DealCard = ({
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-foreground truncate max-w-[140px]">{displayTitle}</h3>
             {isChannelOwner && (
-              <span className="text-xs bg-secondary text-muted-foreground px-1.5 py-0.5 rounded">
-                входящий
+              <span className={cn(
+                "text-xs px-1.5 py-0.5 rounded",
+                channelRole === 'manager' 
+                  ? "bg-green-500/10 text-green-500" 
+                  : "bg-secondary text-muted-foreground"
+              )}>
+                {channelRole === 'manager' ? 'менеджер' : 'входящий'}
               </span>
             )}
           </div>
