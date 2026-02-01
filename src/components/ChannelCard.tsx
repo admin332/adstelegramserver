@@ -46,16 +46,6 @@ const formatNumber = (num: number): string => {
   return num.toString();
 };
 
-const formatNumberWithSuffix = (num: number): { value: string; suffix: string } => {
-  if (num >= 1000000) {
-    return { value: (num / 1000000).toFixed(1).replace(/\.0$/, ''), suffix: 'M' };
-  }
-  if (num >= 1000) {
-    return { value: (num / 1000).toFixed(1).replace(/\.0$/, ''), suffix: 'K' };
-  }
-  return { value: num.toString(), suffix: '' };
-};
-
 export const ChannelCard: React.FC<ChannelCardProps> = ({
   id,
   name,
@@ -214,8 +204,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           animate="visible"
         >
           <Users className="w-6 h-6" />
-          {formatNumberWithSuffix(subscribers).value}
-          <span className="text-lg text-white/60">{formatNumberWithSuffix(subscribers).suffix}</span>
+          {formatNumber(subscribers)}
         </motion.div>
       </div>
 
