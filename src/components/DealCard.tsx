@@ -161,9 +161,9 @@ export const DealCard = ({
     }
   }, [status, id]);
   
-  // Clear from localStorage when status changes to escrow
+  // Clear from localStorage when status changes to escrow, expired, or cancelled
   useEffect(() => {
-    if (status === 'escrow') {
+    if (status === 'escrow' || status === 'expired' || status === 'cancelled') {
       try {
         const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
         const updated = pendingPayments.filter((pid: string) => pid !== id);

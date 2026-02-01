@@ -93,6 +93,16 @@ export function PaymentDialog({
 
     setIsPaying(true);
     
+    // ВАЖНО: Сохраняем в localStorage СРАЗУ, ДО отправки транзакции
+    // Это нужно для TMA, где Promise может не resolve'иться после возврата из кошелька
+    try {
+      const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+      if (!pendingPayments.includes(dealId)) {
+        pendingPayments.push(dealId);
+        localStorage.setItem('pending_payments', JSON.stringify(pendingPayments));
+      }
+    } catch {}
+    
     const wallet = tonConnectUI.wallet;
     
     // Telegram Wallet определяется по appName устройства
@@ -132,15 +142,6 @@ export function PaymentDialog({
       returnStrategy: 'tg://resolve',
       twaReturnUrl: 'https://t.me/adsingo_bot/open',
     }).then(() => {
-      // Сохраняем ID сделки как "проверяющую оплату"
-      try {
-        const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
-        if (!pendingPayments.includes(dealId)) {
-          pendingPayments.push(dealId);
-          localStorage.setItem('pending_payments', JSON.stringify(pendingPayments));
-        }
-      } catch {}
-      
       // Закрываем диалог и перенаправляем
       onOpenChange(false);
       onPaymentSuccess?.();
@@ -148,6 +149,13 @@ export function PaymentDialog({
       toast.success("Транзакция отправлена! Проверяем оплату...");
     }).catch((error: any) => {
       console.error('[TonConnect] sendTransaction error:', error);
+      
+      // Удаляем из localStorage при ошибке
+      try {
+        const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+        const updated = pendingPayments.filter((pid: string) => pid !== dealId);
+        localStorage.setItem('pending_payments', JSON.stringify(updated));
+      } catch {}
       
       const errorMessage = error?.message || '';
       if (errorMessage.includes('Interrupted') || errorMessage.includes('cancelled')) {
@@ -164,7 +172,11 @@ export function PaymentDialog({
     // 4. Открываем кошелёк только если это внешний (http) кошелёк
     if (walletLink) {
       openWalletLink(walletLink);
-      toast.success("Открываем кошелёк...");
+      // Для внешних кошельков — редирект сразу, т.к. Promise может не resolve'иться
+      setTimeout(() => {
+        onOpenChange(false);
+        navigate('/deals');
+      }, 1000);
     } else if (isEmbeddedWallet) {
       // Для Telegram Wallet и injected кошельков — ничего делать не нужно
       // Модальное окно откроется автоматически внутри Telegram
@@ -172,6 +184,12 @@ export function PaymentDialog({
     } else {
       toast.error("Не удалось получить ссылку кошелька. Переподключите кошелёк.");
       setIsPaying(false);
+      // Удаляем из localStorage если не смогли открыть кошелёк
+      try {
+        const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+        const updated = pendingPayments.filter((pid: string) => pid !== dealId);
+        localStorage.setItem('pending_payments', JSON.stringify(updated));
+      } catch {}
     }
   };
 
