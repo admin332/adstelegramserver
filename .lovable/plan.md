@@ -1,91 +1,104 @@
 
 
-## План: Синяя градиентная обводка карточки канала
+## План: Плавное затухание рамки в углах
 
-### Анализ эффекта из YieldCard
+### Текущее состояние
 
-В примере используется техника **вложенных div с padding**:
-- Внешний div имеет градиентный фон (это и есть "обводка")
-- Внутренний div с `padding` создаёт видимость границы
-- Внутренний контейнер заполняет оставшееся пространство
+Сейчас рамка равномерная по всему периметру:
 
 ```text
 ┌─────────────────────────────────────┐
-│  Внешний: синий градиент (рамка)   │  ← p-[1px]
-│  ┌─────────────────────────────┐   │
-│  │   Внутренний контент        │   │  ← Карточка
-│  └─────────────────────────────┘   │
+│ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ │  ← Одинаковая яркость везде
+│ ■                                ■ │
+│ ■                                ■ │
+│ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ │
 └─────────────────────────────────────┘
+```
+
+### Целевой эффект
+
+Рамка должна плавно затухать в двух углах:
+
+```text
+┌─────────────────────────────────░░░░┐
+│ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■░░░░░ │  ← Затухание сверху-справа
+│ ■                                ░ │
+│ ░                                ■ │
+│ ░░░░░░░■■■■■■■■■■■■■■■■■■■■■■■■■■ │  ← Затухание снизу-слева
+└░░░░─────────────────────────────────┘
 ```
 
 ---
 
 ## Техническая реализация
 
+### Подход: CSS mask с радиальными градиентами
+
+Используем `mask-image` для создания плавного затухания в углах. Это позволит сохранить текущий градиент рамки, но сделать её прозрачной в нужных местах.
+
 ### Файл: `src/components/ChannelCard.tsx`
 
-**Текущая структура (строки 101-108):**
+**Изменения в строках 102-104:**
+
+Текущий код:
 ```tsx
-<motion.div
-  className={cn(
-    'relative w-full h-48 rounded-3xl overflow-hidden cursor-pointer group'
-  )}
-  ...
->
+{/* Gradient border using after pseudo-element */}
+<div className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600 opacity-75 blur-[2px]" />
+<div className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600" />
 ```
 
-**Новая структура с обёрткой:**
+Новый код с маской:
 ```tsx
-{/* Outer wrapper with gradient border */}
-<div className="relative w-full p-[1px] rounded-3xl bg-[linear-gradient(to_bottom,_#3b82f6,_#1d4ed8)]">
-  {/* Inner card */}
-  <motion.div
-    className={cn(
-      'relative w-full h-48 rounded-3xl overflow-hidden cursor-pointer group'
-    )}
-    ...
-  >
-    ... содержимое карточки ...
-  </motion.div>
-</div>
+{/* Gradient border with corner fade */}
+<div 
+  className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600 opacity-75 blur-[2px]" 
+  style={{
+    maskImage: 'radial-gradient(ellipse 80% 80% at 0% 100%, transparent 0%, black 50%), radial-gradient(ellipse 80% 80% at 100% 0%, transparent 0%, black 50%)',
+    maskComposite: 'intersect',
+    WebkitMaskImage: 'radial-gradient(ellipse 80% 80% at 0% 100%, transparent 0%, black 50%), radial-gradient(ellipse 80% 80% at 100% 0%, transparent 0%, black 50%)',
+    WebkitMaskComposite: 'source-in'
+  }}
+/>
+<div 
+  className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600" 
+  style={{
+    maskImage: 'radial-gradient(ellipse 80% 80% at 0% 100%, transparent 0%, black 50%), radial-gradient(ellipse 80% 80% at 100% 0%, transparent 0%, black 50%)',
+    maskComposite: 'intersect',
+    WebkitMaskImage: 'radial-gradient(ellipse 80% 80% at 0% 100%, transparent 0%, black 50%), radial-gradient(ellipse 80% 80% at 100% 0%, transparent 0%, black 50%)',
+    WebkitMaskComposite: 'source-in'
+  }}
+/>
 ```
 
 ---
 
-## Цветовая схема обводки
+## Как работает маска
 
-| Вариант | Верх | Низ | Описание |
-|---------|------|-----|----------|
-| **Яркий синий** | `#3b82f6` (blue-500) | `#1d4ed8` (blue-700) | Насыщенный, заметный |
-| **Мягкий синий** | `#60a5fa` (blue-400) | `#2563eb` (blue-600) | Более светлый |
-| **Тёмный синий** | `#2563eb` (blue-600) | `#1e40af` (blue-800) | Глубокий, премиальный |
-
-Выберем **яркий синий** вариант для хорошей видимости.
+| Свойство | Значение | Описание |
+|----------|----------|----------|
+| `radial-gradient at 0% 100%` | Снизу-слева | Создаёт затухание в левом нижнем углу |
+| `radial-gradient at 100% 0%` | Сверху-справа | Создаёт затухание в правом верхнем углу |
+| `ellipse 80% 80%` | Размер | Плавный, не слишком большой срез |
+| `transparent 0%, black 50%` | Градиент | Плавный переход от прозрачного к видимому |
+| `mask-composite: intersect` | Объединение | Совмещает обе маски |
 
 ---
 
-## Изменения в коде
+## Визуальный результат
 
-```tsx
-// Строки 100-108 - добавить обёртку
+```text
+┌─────────────────────────────────░░░┐
+│ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░   │
+│ ▓                              ░  │
+│ ▓                              ▓  │
+│ ░                              ▓  │
+│   ░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  │
+└░░░────────────────────────────────┘
 
-{/* Gradient Border Wrapper */}
-<div className="relative w-full p-[1px] rounded-3xl bg-[linear-gradient(to_bottom,_#3b82f6,_#1d4ed8)]">
-  <motion.div
-    className={cn(
-      'relative w-full h-48 rounded-3xl overflow-hidden cursor-pointer group'
-    )}
-    variants={cardVariants}
-    initial="hidden"
-    animate="visible"
-    onClick={handleCardClick}
-  >
-    {/* ... остальное содержимое карточки ... */}
-  </motion.div>
-</div>
+▓ = Яркая рамка
+░ = Плавное затухание
+  = Нет рамки
 ```
-
-И в конце добавить закрывающий `</div>`.
 
 ---
 
@@ -93,5 +106,5 @@
 
 | Файл | Изменение |
 |------|-----------|
-| `src/components/ChannelCard.tsx` | Обернуть карточку в div с градиентной границей |
+| `src/components/ChannelCard.tsx` | Добавить CSS mask к двум div-ам рамки (строки 102-104) |
 
