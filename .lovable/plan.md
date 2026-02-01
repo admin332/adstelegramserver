@@ -1,61 +1,57 @@
 
 
-## План: Исправление редиректа после оплаты в TMA
+## План: Использование `onRequestSent` для редиректа после оплаты
 
 ### Проблема
 
-При оплате через TonConnect в Telegram Mini App:
-1. Пользователь нажимает "Оплатить"
-2. Открывается кошелёк (Telegram Wallet или внешний)
-3. Пользователь подтверждает транзакцию
-4. Кошелёк показывает "Transaction sent" (это модалка TonConnect)
-5. Пользователь возвращается в приложение через `twaReturnUrl`
-6. **НО**: Это новый контекст — старый Promise от `sendTransaction` никогда не resolve'ится
-7. Наш `.then()` не выполняется → нет редиректа и записи в localStorage
+1. Вы оплачиваете через **мастер создания заказа** (`PaymentStep.tsx`)
+2. Используете **Telegram Wallet (встроенный)**
+3. После подтверждения оплаты — **остаётесь в модалке оплаты**, хотя транзакция отправлена
+
+### Причина
+
+В `PaymentStep.tsx` нет:
+- Сохранения в localStorage для отслеживания "проверяющихся" платежей
+- Callback `onRequestSent` — специальная функция SDK, которая вызывается **сразу после отправки транзакции в кошелёк**
+- Перенаправления на страницу сделок
+
+### Решение
+
+TonConnect SDK поддерживает callback **`onRequestSent`**, который вызывается когда транзакция успешно отправлена в кошелёк (до получения ответа). Это идеальный момент для:
+1. Сохранения dealId в localStorage
+2. Закрытия модалки/мастера
+3. Перенаправления на `/deals`
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│                    ТЕКУЩИЙ ПРОБЛЕМНЫЙ ФЛОУ                      │
+│                      ТЕКУЩИЙ ФЛОУ                               │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  [App Context 1]                  [Wallet App]                  │
-│       │                                │                        │
-│       ├── sendTransaction() ─────────► │                        │
-│       │   (Promise pending)            │                        │
-│       │                                ├── User confirms        │
-│       │                                │                        │
-│       │   ◄────── twaReturnUrl ────────┤                        │
-│       │                                                         │
-│  [App Context 2 - NEW!]                                         │
-│       │                                                         │
-│       │   Promise from Context 1 is LOST!                       │
-│       │   .then() never executes                                │
-│       │                                                         │
+│  [PaymentStep] ──> sendTransaction() ──> [Telegram Wallet]      │
+│       │                                        │                │
+│       │                                        ├── Confirm      │
+│       │                                        │                │
+│       │  (Promise pending forever in TMA)      │                │
+│       ▼                                        ▼                │
+│  UI застряла                            "Transaction sent"      │
+│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
-```
 
----
-
-## Решение
-
-Сохранять `dealId` в localStorage **ДО** отправки транзакции, а не после. Когда пользователь возвращается в приложение — проверять localStorage и показывать "Проверка оплаты".
-
-```text
 ┌─────────────────────────────────────────────────────────────────┐
-│                      ИСПРАВЛЕННЫЙ ФЛОУ                          │
+│                      НОВЫЙ ФЛОУ с onRequestSent                 │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  [App Context 1]                                                │
+│  [PaymentStep] ──> sendTransaction({                            │
+│                      onRequestSent: () => {                     │
+│                        localStorage.set(dealId)                 │
+│                        navigate('/deals')                       │
+│                      }                                          │
+│                    })                                           │
 │       │                                                         │
-│       ├── localStorage.set('pending_payments', [dealId])        │
-│       ├── sendTransaction() ────────► [Wallet]                  │
-│       │                                                         │
-│  [App Context 2 - after return]                                 │
-│       │                                                         │
-│       ├── Deals page loads                                      │
-│       ├── Checks localStorage                                   │
-│       ├── Shows "Проверка оплаты" for pending deals             │
-│       │                                                         │
+│       │  ← onRequestSent вызывается СРАЗУ после отправки        │
+│       ▼                                                         │
+│  Редирект на /deals + статус "Проверка оплаты"                  │
+│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -63,116 +59,96 @@
 
 ## Техническая реализация
 
-### Файл: `src/components/deals/PaymentDialog.tsx`
+### 1. Файл: `src/components/channel/PaymentStep.tsx`
 
-Переместить сохранение в localStorage **ДО** вызова `sendTransaction`:
+Добавить:
+- Пропс `dealId` для отслеживания транзакции
+- `useNavigate` для перенаправления
+- Callback `onRequestSent` в опциях `sendTransaction`
 
 ```tsx
-const handlePayViaWallet = () => {
-  // ... проверки ...
+interface PaymentStepProps {
+  dealId?: string;  // НОВЫЙ пропс
+  totalPriceTon: number;
+  escrowAddress: string | null;
+  isCreatingDeal: boolean;
+  onPaymentComplete: () => void;
+}
+
+// В функции handlePayViaWallet:
+tonConnectUI.sendTransaction(transaction, {
+  modals: ['success', 'error'],
+  notifications: ['before', 'success', 'error'],
+  returnStrategy: 'tg://resolve',
+  twaReturnUrl: 'https://t.me/adsingo_bot/open',
   
-  setIsPaying(true);
-  
-  // НОВОЕ: Сохраняем СРАЗУ, до отправки транзакции
-  try {
-    const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
-    if (!pendingPayments.includes(dealId)) {
-      pendingPayments.push(dealId);
-      localStorage.setItem('pending_payments', JSON.stringify(pendingPayments));
-    }
-  } catch {}
-  
-  // ... подготовка transaction ...
-  
-  tonConnectUI.sendTransaction(transaction, options)
-    .then(() => {
-      // Закрываем диалог и перенаправляем
-      onOpenChange(false);
-      onPaymentSuccess?.();
-      navigate('/deals');
-      toast.success("Транзакция отправлена! Проверяем оплату...");
-    })
-    .catch((error: any) => {
-      // НОВОЕ: Удаляем из localStorage при ошибке
+  // НОВОЕ: Callback вызывается сразу после отправки транзакции в кошелёк
+  onRequestSent: () => {
+    console.log('[TonConnect] onRequestSent triggered');
+    
+    // Сохраняем в localStorage
+    if (dealId) {
       try {
         const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
-        const updated = pendingPayments.filter((pid: string) => pid !== dealId);
-        localStorage.setItem('pending_payments', JSON.stringify(updated));
+        if (!pendingPayments.includes(dealId)) {
+          pendingPayments.push(dealId);
+          localStorage.setItem('pending_payments', JSON.stringify(pendingPayments));
+        }
       } catch {}
-      
-      // ... обработка ошибок ...
-    });
+    }
     
-  // НОВОЕ: Для внешних кошельков — редирект сразу после открытия ссылки
-  if (walletLink) {
-    openWalletLink(walletLink);
-    // Сразу перенаправляем на deals, т.к. Promise может не resolve'иться
-    setTimeout(() => {
-      onOpenChange(false);
-      navigate('/deals');
-    }, 1000);
+    // Перенаправляем на /deals
+    navigate('/deals');
+    toast.success("Транзакция отправлена! Проверяем оплату...");
   }
-};
+}).then(...)
 ```
 
 ---
 
-### Файл: `src/components/DealCard.tsx`
+### 2. Файл: `src/components/deals/PaymentDialog.tsx`
 
-Логика уже правильная — проверяет localStorage и показывает "Проверка оплаты".
-
-Нужно добавить очистку при истечении срока (если транзакция не прошла):
+Применить тот же подход с `onRequestSent`:
 
 ```tsx
-// Очистка из localStorage если сделка истекла
-useEffect(() => {
-  if (status === 'expired' || status === 'cancelled') {
-    try {
-      const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
-      const updated = pendingPayments.filter((pid: string) => pid !== id);
-      localStorage.setItem('pending_payments', JSON.stringify(updated));
-    } catch {}
+tonConnectUI.sendTransaction(transaction, {
+  modals: ['success', 'error'],
+  notifications: ['before', 'success', 'error'],
+  returnStrategy: 'tg://resolve',
+  twaReturnUrl: 'https://t.me/adsingo_bot/open',
+  
+  // НОВОЕ: Callback вызывается сразу после отправки транзакции в кошелёк
+  onRequestSent: () => {
+    console.log('[TonConnect] onRequestSent triggered');
+    
+    // dealId уже сохранён в localStorage выше
+    // Закрываем диалог и перенаправляем
+    onOpenChange(false);
+    onPaymentSuccess?.();
+    navigate('/deals');
+    toast.success("Транзакция отправлена! Проверяем оплату...");
   }
-}, [status, id]);
+}).then(...)
 ```
 
 ---
 
-### Файл: `src/pages/Deals.tsx`
+### 3. Передать `dealId` в `PaymentStep`
 
-Автообновление уже реализовано. Добавим проверку при загрузке страницы:
-
-```tsx
-// При загрузке страницы проверяем pending_payments
-useEffect(() => {
-  let pendingPayments: string[] = [];
-  try {
-    pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
-  } catch {}
-  
-  if (pendingPayments.length === 0) return;
-  
-  // Запускаем refetch сразу и каждые 5 секунд
-  refetch();
-  
-  const interval = setInterval(() => {
-    refetch();
-  }, 5000);
-  
-  return () => clearInterval(interval);
-}, [refetch]);
-```
+Нужно проверить компонент, который использует `PaymentStep`, и убедиться, что `dealId` передаётся после создания сделки.
 
 ---
 
-## Ключевые изменения
+## Что делает `onRequestSent`?
 
-| Аспект | Было | Стало |
-|--------|------|-------|
-| Когда сохраняется в localStorage | После `.then()` | До `sendTransaction()` |
-| При ошибке | Ничего | Удаляется из localStorage |
-| Для внешних кошельков | Ждём Promise | Редирект через 1 сек |
-| При expired/cancelled | Ничего | Очищается из localStorage |
+| Момент | Что происходит |
+|--------|----------------|
+| Пользователь нажимает "Оплатить" | `sendTransaction()` вызывается |
+| SDK отправляет запрос в кошелёк | **`onRequestSent()` срабатывает** |
+| Пользователь подтверждает в кошельке | Кошелёк отправляет транзакцию в блокчейн |
+| Promise resolve'ится | `.then()` выполняется (может не сработать в TMA) |
+
+**Ключевое преимущество**: `onRequestSent` вызывается **синхронно** в том же контексте, поэтому редирект сработает даже в TMA!
 
 ---
 
@@ -180,7 +156,7 @@ useEffect(() => {
 
 | Файл | Изменение |
 |------|-----------|
-| `src/components/deals/PaymentDialog.tsx` | Сохранение в localStorage ДО транзакции, редирект для внешних кошельков |
-| `src/components/DealCard.tsx` | Очистка при expired/cancelled статусах |
-| `src/pages/Deals.tsx` | Немедленный refetch при загрузке с pending_payments |
+| `src/components/channel/PaymentStep.tsx` | Добавить `dealId` пропс, `useNavigate`, `onRequestSent` callback |
+| `src/components/deals/PaymentDialog.tsx` | Добавить `onRequestSent` callback |
+| Родительский компонент `PaymentStep` | Передать `dealId` после создания сделки |
 
