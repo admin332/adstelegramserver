@@ -44,6 +44,26 @@ interface User {
   wallet_address: string | null;
 }
 
+// Get all channel team telegram IDs (owner + managers)
+async function getChannelTeamTelegramIds(channelId: string): Promise<number[]> {
+  const { data: admins } = await supabase
+    .from("channel_admins")
+    .select("user_id")
+    .eq("channel_id", channelId);
+
+  if (!admins?.length) return [];
+
+  const userIds = (admins as { user_id: string }[]).map(a => a.user_id);
+  const { data: users } = await supabase
+    .from("users")
+    .select("telegram_id")
+    .in("id", userIds);
+
+  return (users as { telegram_id: number | null }[] | null)
+    ?.map(u => u.telegram_id)
+    .filter((id): id is number => id !== null) || [];
+}
+
 async function sendTelegramRequest(method: string, body: Record<string, unknown>) {
   const response = await fetch(
     `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}`,
@@ -431,31 +451,48 @@ async function processDeal(deal: Deal): Promise<{ success: boolean; refunded?: b
       );
     }
 
-    // Notify channel owner and request rating
-    if (owner?.telegram_id) {
-      const paymentNote = transferSuccess 
-        ? `\n\n💎 <b>${deal.total_price} TON</b> переведены на ваш кошелёк.`
-        : `\n\nСредства будут переведены на ваш кошелёк в ближайшее время.`;
+    // Notify channel team (owner + managers)
+    const teamIds = await getChannelTeamTelegramIds(deal.channel_id);
+    
+    for (const telegramId of teamIds) {
+      const isOwner = telegramId === owner?.telegram_id;
       const autoDeleteNote = postDeleted ? "\n\n🗑️ Рекламный пост был автоматически удалён." : "";
       
-      await sendTelegramMessage(
-        owner.telegram_id,
-        `💰 <b>Оплата получена!</b>
+      if (isOwner && owner?.telegram_id) {
+        // Owner: show payment info
+        const paymentNote = transferSuccess 
+          ? `\n\n💎 <b>${deal.total_price} TON</b> переведены на ваш кошелёк.`
+          : `\n\nСредства будут переведены на ваш кошелёк в ближайшее время.`;
+        
+        await sendTelegramMessage(
+          telegramId,
+          `💰 <b>Оплата получена!</b>
 
 Реклама в канале <b>${channelTitle}</b> успешно отработала.${paymentNote}${autoDeleteNote}
 
 Спасибо за использование Adsingo! 🚀`
-      );
+        );
 
-      // Send rating request for advertiser
-      await sendRatingRequest(
-        owner.telegram_id,
-        `⭐ <b>Оцените рекламодателя</b>
+        // Send rating request for advertiser (only to owner)
+        await sendRatingRequest(
+          telegramId,
+          `⭐ <b>Оцените рекламодателя</b>
 
 Пожалуйста, оцените сотрудничество с рекламодателем:`,
-        deal.id,
-        "rate_advertiser"
-      );
+          deal.id,
+          "rate_advertiser"
+        );
+      } else {
+        // Manager: simplified message without payment info
+        await sendTelegramMessage(
+          telegramId,
+          `✅ <b>Сделка завершена!</b>
+
+Реклама в канале <b>${channelTitle}</b> успешно отработала.${autoDeleteNote}
+
+Спасибо за использование Adsingo! 🚀`
+        );
+      }
     }
 
     console.log(`Deal ${deal.id} completed successfully`);

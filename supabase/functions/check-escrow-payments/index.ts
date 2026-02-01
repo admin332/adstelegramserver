@@ -210,32 +210,68 @@ function formatDate(dateStr: string | null): string {
   return `${day}.${month}.${year} в ${hour}:${minute} (МСК)`;
 }
 
-// Send payment notification to CHANNEL OWNER with approve/reject buttons
-async function sendOwnerNotification(deal: Deal) {
-  const ownerTelegramId = deal.channel.owner.telegram_id;
+// Get all channel team telegram IDs (owner + managers)
+// deno-lint-ignore no-explicit-any
+async function getChannelTeamTelegramIds(
+  channelId: string,
+  supabaseClient: any
+): Promise<number[]> {
+  const { data: admins } = await supabaseClient
+    .from("channel_admins")
+    .select("user_id")
+    .eq("channel_id", channelId);
+
+  if (!admins?.length) return [];
+
+  const userIds = (admins as { user_id: string }[]).map(a => a.user_id);
+  const { data: users } = await supabaseClient
+    .from("users")
+    .select("telegram_id")
+    .in("id", userIds);
+
+  return (users as { telegram_id: number | null }[] | null)
+    ?.map(u => u.telegram_id)
+    .filter((id): id is number => id !== null) || [];
+}
+
+// Send payment notification to CHANNEL TEAM (owner + managers) with approve/reject buttons
+// deno-lint-ignore no-explicit-any
+async function sendOwnerNotification(deal: Deal, supabaseClient: any) {
+  // Get all team members
+  const teamIds = await getChannelTeamTelegramIds(deal.channel.id, supabaseClient);
   
-  if (!ownerTelegramId) {
-    console.error(`No telegram_id found for channel owner of channel ${deal.channel.id}`);
+  if (teamIds.length === 0) {
+    console.error(`No team members found for channel ${deal.channel.id}`);
     return;
   }
 
   const isPromptCampaign = deal.campaign?.campaign_type === "prompt";
+  const ownerTelegramId = deal.channel.owner.telegram_id;
 
-  // For ready_post campaigns: send preview first
-  if (!isPromptCampaign) {
-    await sendCampaignPreview(ownerTelegramId, deal.campaign);
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  
-  const formattedDate = formatDate(deal.scheduled_at);
-  const postsWord = getPostsWord(deal.posts_count);
-  const hoursWord = getHoursWord(deal.duration_hours);
-  
-  let notificationText: string;
-  
-  if (isPromptCampaign) {
-    // Prompt campaign: owner needs to write the post
-    notificationText = `✅ <b>Реклама оплачена!</b>
+  // Send to each team member
+  for (const telegramId of teamIds) {
+    const isOwner = telegramId === ownerTelegramId;
+    
+    // For ready_post campaigns: send preview first
+    if (!isPromptCampaign) {
+      await sendCampaignPreview(telegramId, deal.campaign);
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
+    const formattedDate = formatDate(deal.scheduled_at);
+    const postsWord = getPostsWord(deal.posts_count);
+    const hoursWord = getHoursWord(deal.duration_hours);
+    
+    let notificationText: string;
+    
+    if (isPromptCampaign) {
+      // Prompt campaign: owner needs to write the post
+      // Different message for owner vs manager
+      const earningsText = isOwner 
+        ? `💰 Вы получите: <b>${deal.total_price} TON</b>` 
+        : `💰 Заказ на: <b>${deal.total_price} TON</b>`;
+      
+      notificationText = `✅ <b>Реклама оплачена!</b>
 
 📢 Канал: <b>${deal.channel.title || deal.channel.username}</b>
 
@@ -243,77 +279,82 @@ async function sendOwnerNotification(deal: Deal) {
 
 📅 Публикация: <b>${formattedDate}</b>
 
-💰 Вы получите: <b>${deal.total_price} TON</b>
+${earningsText}
 
-📝 <b>Это заказ по брифу</b> — вам нужно написать пост самостоятельно.
+📝 <b>Это заказ по брифу</b> — нужно написать пост самостоятельно.
 
-⏰ <b>Важно:</b> У вас есть 24 часа на отправку черновика. После этого сделка будет автоматически отменена с возвратом средств рекламодателю.
+⏰ <b>Важно:</b> 24 часа на отправку черновика. После этого сделка будет автоматически отменена с возвратом средств рекламодателю.
 
 Отправьте мне текст поста (можно с фото/видео), и я перешлю его рекламодателю на проверку.`;
 
-    await sendTelegramRequest("sendMessage", {
-      chat_id: ownerTelegramId,
-      text: notificationText,
-      parse_mode: "HTML",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "❌ Отклонить заказ", callback_data: `reject_deal:${deal.id}` }]
-        ]
-      }
-    });
+      await sendTelegramRequest("sendMessage", {
+        chat_id: telegramId,
+        text: notificationText,
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "❌ Отклонить заказ", callback_data: `reject_deal:${deal.id}` }]
+          ]
+        }
+      });
 
-    // Send brief as separate message
-    await new Promise(resolve => setTimeout(resolve, 300));
-    
-    let briefText = `📋 <b>Бриф от рекламодателя:</b>
+      // Send brief as separate message
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      let briefText = `📋 <b>Бриф от рекламодателя:</b>
 
 ${deal.campaign?.text || "Бриф не указан"}`;
 
-    // Для prompt кампаний - показываем ссылку на товар (Product Link)
-    if (deal.campaign?.button_url) {
-      if (deal.campaign?.button_text) {
-        // Есть и текст кнопки и ссылка (ready_post)
-        briefText += `\n\n🔗 Кнопка: <b>${deal.campaign.button_text}</b>\nСсылка: ${deal.campaign.button_url}`;
-      } else {
-        // Только ссылка (prompt кампания - Product Link)
-        briefText += `\n\n🔗 <b>Ссылка на товар:</b> ${deal.campaign.button_url}`;
+      // Для prompt кампаний - показываем ссылку на товар (Product Link)
+      if (deal.campaign?.button_url) {
+        if (deal.campaign?.button_text) {
+          // Есть и текст кнопки и ссылка (ready_post)
+          briefText += `\n\n🔗 Кнопка: <b>${deal.campaign.button_text}</b>\nСсылка: ${deal.campaign.button_url}`;
+        } else {
+          // Только ссылка (prompt кампания - Product Link)
+          briefText += `\n\n🔗 <b>Ссылка на товар:</b> ${deal.campaign.button_url}`;
+        }
       }
-    }
 
-    await sendTelegramRequest("sendMessage", {
-      chat_id: ownerTelegramId,
-      text: briefText,
-      parse_mode: "HTML",
-    });
+      await sendTelegramRequest("sendMessage", {
+        chat_id: telegramId,
+        text: briefText,
+        parse_mode: "HTML",
+      });
 
-  } else {
-    // Ready post campaign: standard flow
-    notificationText = `✅ <b>Реклама оплачена!</b>
+    } else {
+      // Ready post campaign: standard flow
+      const earningsText = isOwner 
+        ? `💰 Вы получите: <b>${deal.total_price} TON</b>` 
+        : `💰 Заказ на: <b>${deal.total_price} TON</b>`;
+      
+      notificationText = `✅ <b>Реклама оплачена!</b>
 
 Рекламодатель оплатил <b>${deal.posts_count} ${postsWord}</b> на <b>${deal.duration_hours} ${hoursWord}</b>
 
 📅 Начало: <b>${formattedDate}</b>
 
-💰 Вы получите: <b>${deal.total_price} TON</b>
+${earningsText}
 
 Проверьте материалы выше и нажмите «Одобрить» для публикации или откройте бот и предложите изменения.`;
 
-    await sendTelegramRequest("sendMessage", {
-      chat_id: ownerTelegramId,
-      text: notificationText,
-      parse_mode: "HTML",
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "✅ Одобрить", callback_data: `approve_deal:${deal.id}` },
-            { text: "❌ Отклонить", callback_data: `reject_deal:${deal.id}` }
+      await sendTelegramRequest("sendMessage", {
+        chat_id: telegramId,
+        text: notificationText,
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ Одобрить", callback_data: `approve_deal:${deal.id}` },
+              { text: "❌ Отклонить", callback_data: `reject_deal:${deal.id}` }
+            ]
           ]
-        ]
-      }
-    });
+        }
+      });
+    }
+    
+    console.log(`Sent team notification for deal ${deal.id} to user ${telegramId} (isOwner: ${isOwner})`);
   }
-  
-  console.log(`Sent owner notification for deal ${deal.id} to user ${ownerTelegramId}`);
 }
 
 // Send payment confirmation to ADVERTISER
@@ -510,11 +551,11 @@ serve(async (req) => {
 
         console.log(`Deal ${deal.id} status updated to 'escrow'`);
 
-        // 4. Send notification to CHANNEL OWNER
+        // 4. Send notification to CHANNEL TEAM (owner + managers)
         try {
-          await sendOwnerNotification(deal);
+          await sendOwnerNotification(deal, supabase);
         } catch (notifyError) {
-          console.error(`Error sending owner notification for deal ${deal.id}:`, notifyError);
+          console.error(`Error sending team notification for deal ${deal.id}:`, notifyError);
         }
 
         // 5. Send confirmation to ADVERTISER

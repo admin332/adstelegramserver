@@ -127,6 +127,26 @@ interface MediaItem {
   file_id: string;
 }
 
+// Get all channel team telegram IDs (owner + managers)
+async function getChannelTeamTelegramIds(channelId: string): Promise<number[]> {
+  const { data: admins } = await supabase
+    .from("channel_admins")
+    .select("user_id")
+    .eq("channel_id", channelId);
+
+  if (!admins?.length) return [];
+
+  const userIds = (admins as { user_id: string }[]).map(a => a.user_id);
+  const { data: users } = await supabase
+    .from("users")
+    .select("telegram_id")
+    .in("id", userIds);
+
+  return (users as { telegram_id: number | null }[] | null)
+    ?.map(u => u.telegram_id)
+    .filter((id): id is number => id !== null) || [];
+}
+
 // =============================================================================
 // Database-backed user state functions (for stateless edge function compatibility)
 // =============================================================================
@@ -662,9 +682,11 @@ async function handleDraftApproval(
       `✅ <b>Все ${deal.posts_count} ${postsWord} одобрены!</b>\n\nПубликация будет выполнена автоматически по расписанию.`
     );
 
-    if (owner?.telegram_id) {
+    // Notify channel team
+    const teamIds = await getChannelTeamTelegramIds(deal.channel_id);
+    for (const telegramId of teamIds) {
       await sendTelegramMessage(
-        owner.telegram_id,
+        telegramId,
         `🎉 <b>Все посты одобрены!</b>\n\nРекламодатель принял все ${deal.posts_count} ${postsWord} для канала <b>${channelName}</b>.\n\nПубликация будет выполнена автоматически по расписанию.`
       );
     }
@@ -831,8 +853,9 @@ async function handleRevisionComment(telegramUserId: number, text: string) {
   const postsCount = deal.posts_count || 1;
   const postsWord = getPostsWord(postsCount);
 
-  // Notify owner with info about how many posts needed
-  if (owner?.telegram_id) {
+  // Notify channel team with info about how many posts needed
+  const teamIds = await getChannelTeamTelegramIds(deal.channel_id);
+  for (const telegramId of teamIds) {
     let revisionMessage = `✏️ <b>Требуется доработка</b>\n\nРекламодатель просит изменить черновик для канала <b>${channelName}</b>.\n\n<b>Комментарий:</b>\n${text}`;
     
     if (postsCount > 1) {
@@ -841,7 +864,7 @@ async function handleRevisionComment(telegramUserId: number, text: string) {
       revisionMessage += `\n\nОтправьте новый черновик (текст + медиа) в этот чат.`;
     }
     
-    await sendTelegramMessage(owner.telegram_id, revisionMessage);
+    await sendTelegramMessage(telegramId, revisionMessage);
   }
 
   // Confirm to advertiser
@@ -963,13 +986,14 @@ async function handleVersionSelect(
   const channelName = channel?.title || `@${channel?.username}`;
   const postsWord = getPostsWord(deal.posts_count || 1);
 
-  // Notify channel owner which version was selected
-  if (owner?.telegram_id) {
-    const ownerMessage = version === currentVersion
-      ? `✅ <b>Рекламодатель выбрал текущую версию!</b>\n\nВаш последний черновик для канала <b>${channelName}</b> одобрен.\n\nВсе ${deal.posts_count} ${postsWord} будут опубликованы по расписанию.`
+  // Notify channel team which version was selected
+  const teamIds = await getChannelTeamTelegramIds(deal.channel_id);
+  for (const telegramId of teamIds) {
+    const teamMessage = version === currentVersion
+      ? `✅ <b>Рекламодатель выбрал текущую версию!</b>\n\nПоследний черновик для канала <b>${channelName}</b> одобрен.\n\nВсе ${deal.posts_count} ${postsWord} будут опубликованы по расписанию.`
       : `✅ <b>Рекламодатель выбрал Вариант ${version}!</b>\n\nДля канала <b>${channelName}</b> будет опубликована предыдущая версия ${version} (не последняя).\n\nПубликация по расписанию.`;
     
-    await sendTelegramMessage(owner.telegram_id, ownerMessage);
+    await sendTelegramMessage(telegramId, teamMessage);
   }
 
   // Confirm to advertiser
