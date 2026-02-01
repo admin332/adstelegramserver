@@ -107,8 +107,16 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       animate="visible"
       onClick={handleCardClick}
     >
-      {/* Blue Background - Left Side */}
-      <div className="absolute inset-0 bg-gradient-to-b from-[hsl(217,91%,50%)] to-[hsl(224,76%,48%)]" />
+      {/* Metal Background - Base Layer */}
+      <div className="absolute inset-0 bg-gradient-to-b from-neutral-800 to-neutral-900" />
+      
+      {/* Metal Gradient Border Effect - Left Side */}
+      <div className="absolute inset-0 right-1/2 p-[1px] rounded-l-3xl bg-[linear-gradient(to_bottom,_#4a4a4a,_#1a1a1a)]">
+        <div className="h-full rounded-l-3xl bg-[linear-gradient(to_bottom,_#2d2d2d,_#1a1a1a)]" />
+      </div>
+      
+      {/* Top shine highlight */}
+      <div className="absolute inset-x-0 top-0 h-1/4 bg-gradient-to-b from-white/8 to-transparent rounded-t-3xl" />
       
       {/* Background Image - Right Side */}
       <div className="absolute top-0 bottom-0 right-0 w-1/2">
