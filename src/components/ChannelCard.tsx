@@ -98,7 +98,11 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   };
 
   return (
-    <div className="relative w-full p-[1px] rounded-3xl bg-[linear-gradient(to_bottom,_#3b82f6,_#1d4ed8)]">
+    <div className="relative w-full">
+      {/* Gradient border using after pseudo-element */}
+      <div className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600 opacity-75 blur-[2px]" />
+      <div className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600" />
+      
       <motion.div
         className={cn(
           'relative w-full h-48 rounded-3xl overflow-hidden cursor-pointer group'
