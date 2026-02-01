@@ -51,6 +51,30 @@ async function sendTelegramRequest(method: string, body: Record<string, unknown>
   return result;
 }
 
+// Get all channel team telegram IDs (owner + managers)
+// deno-lint-ignore no-explicit-any
+async function getChannelTeamTelegramIds(
+  channelId: string,
+  supabaseClient: any
+): Promise<number[]> {
+  const { data: admins } = await supabaseClient
+    .from("channel_admins")
+    .select("user_id")
+    .eq("channel_id", channelId);
+
+  if (!admins?.length) return [];
+
+  const userIds = (admins as { user_id: string }[]).map(a => a.user_id);
+  const { data: users } = await supabaseClient
+    .from("users")
+    .select("telegram_id")
+    .in("id", userIds);
+
+  return (users as { telegram_id: number | null }[] | null)
+    ?.map(u => u.telegram_id)
+    .filter((id): id is number => id !== null) || [];
+}
+
 // Check if URL is a video
 function isVideoUrl(url: string): boolean {
   const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
@@ -209,12 +233,14 @@ function formatDate(dateStr: string | null): string {
   return `${day}.${month}.${year} в ${hour}:${minute} (МСК)`;
 }
 
-// Send payment notification with approve/reject buttons
-async function sendPaymentNotification(deal: Deal) {
+// Send payment notification with approve/reject buttons to all team members
+// deno-lint-ignore no-explicit-any
+async function sendPaymentNotification(deal: Deal, supabaseClient: any) {
   const ownerTelegramId = deal.channel.owner.telegram_id;
+  const teamIds = await getChannelTeamTelegramIds(deal.channel.id, supabaseClient);
   
-  if (!ownerTelegramId) {
-    console.error(`No telegram_id found for channel owner of channel ${deal.channel.id}`);
+  if (teamIds.length === 0) {
+    console.error(`No team members found for channel ${deal.channel.id}`);
     return;
   }
 
@@ -222,33 +248,40 @@ async function sendPaymentNotification(deal: Deal) {
   const postsWord = getPostsWord(deal.posts_count);
   const hoursWord = getHoursWord(deal.duration_hours);
   
-  const notificationText = `✅ <b>Реклама оплачена!</b>
+  for (const telegramId of teamIds) {
+    const isOwner = telegramId === ownerTelegramId;
+    const earningsText = isOwner 
+      ? `💰 Вы получите: <b>${deal.total_price} TON</b>`
+      : `💰 Заказ на: <b>${deal.total_price} TON</b>`;
+    
+    const notificationText = `✅ <b>Реклама оплачена!</b>
 
 Рекламодатель оплатил <b>${deal.posts_count} ${postsWord}</b> на <b>${deal.duration_hours} ${hoursWord}</b>
 
 📅 Начало: <b>${formattedDate}</b>
 
-💰 Вы получите: <b>${deal.total_price} TON</b>
+${earningsText}
 
 ⏰ <b>Важно:</b> Примите решение в течение 24 часов, иначе сделка будет автоматически отменена с возвратом средств рекламодателю.
 
 Проверьте материалы выше и нажмите «Одобрить» для публикации или откройте бот и предложите изменения.`;
 
-  await sendTelegramRequest("sendMessage", {
-    chat_id: ownerTelegramId,
-    text: notificationText,
-    parse_mode: "HTML",
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "✅ Одобрить", callback_data: `approve_deal:${deal.id}` },
-          { text: "❌ Отклонить", callback_data: `reject_deal:${deal.id}` }
+    await sendTelegramRequest("sendMessage", {
+      chat_id: telegramId,
+      text: notificationText,
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "✅ Одобрить", callback_data: `approve_deal:${deal.id}` },
+            { text: "❌ Отклонить", callback_data: `reject_deal:${deal.id}` }
+          ]
         ]
-      ]
-    }
-  });
-  
-  console.log(`Sent payment notification for deal ${deal.id} to user ${ownerTelegramId}`);
+      }
+    });
+    
+    console.log(`Sent payment notification for deal ${deal.id} to user ${telegramId} (isOwner: ${isOwner})`);
+  }
 }
 
 serve(async (req) => {
@@ -317,18 +350,23 @@ serve(async (req) => {
     // Determine campaign type and send appropriate message
     const isPromptCampaign = typedDeal.campaign?.campaign_type === "prompt";
     
-    // 1. Send campaign preview or brief based on campaign type
-    if (isPromptCampaign) {
-      await sendPromptBrief(ownerTelegramId, typedDeal.campaign, typedDeal.posts_count);
-    } else {
-      await sendCampaignPreview(ownerTelegramId, typedDeal.campaign);
+    // Get all team members for notification
+    const teamIds = await getChannelTeamTelegramIds(typedDeal.channel.id, supabase);
+    
+    // 1. Send campaign preview or brief based on campaign type to all team members
+    for (const telegramId of teamIds) {
+      if (isPromptCampaign) {
+        await sendPromptBrief(telegramId, typedDeal.campaign, typedDeal.posts_count);
+      } else {
+        await sendCampaignPreview(telegramId, typedDeal.campaign);
+      }
     }
     
     // Small delay to ensure messages arrive in order
     await new Promise(resolve => setTimeout(resolve, 500));
 
-    // 2. Send payment notification with buttons
-    await sendPaymentNotification(typedDeal);
+    // 2. Send payment notification with buttons to all team members
+    await sendPaymentNotification(typedDeal, supabase);
 
     return new Response(
       JSON.stringify({ success: true, message: "Notification sent successfully" }),

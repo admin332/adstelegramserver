@@ -15,11 +15,32 @@ const TONCENTER_API_KEY = Deno.env.get("TONCENTER_API_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+// Get all channel team telegram IDs (owner + managers)
+async function getChannelTeamTelegramIds(channelId: string): Promise<number[]> {
+  const { data: admins } = await supabase
+    .from("channel_admins")
+    .select("user_id")
+    .eq("channel_id", channelId);
+
+  if (!admins?.length) return [];
+
+  const userIds = (admins as { user_id: string }[]).map(a => a.user_id);
+  const { data: users } = await supabase
+    .from("users")
+    .select("telegram_id")
+    .in("id", userIds);
+
+  return (users as { telegram_id: number | null }[] | null)
+    ?.map(u => u.telegram_id)
+    .filter((id): id is number => id !== null) || [];
+}
+
 interface Deal {
   id: string;
   telegram_message_id: number;
   total_price: number;
   escrow_mnemonic_encrypted: string | null;
+  channel_id: string;
   channel: {
     telegram_chat_id: number;
     title: string | null;
@@ -226,16 +247,31 @@ ${refundText}`
         );
       }
 
-      // Notify channel owner
-      if (owner?.telegram_id) {
-        await sendTelegramMessage(
-          owner.telegram_id,
-          `🚫 <b>Сделка отменена</b>
+      // Notify channel team (owner + managers)
+      const teamIds = await getChannelTeamTelegramIds(deal.channel_id);
+      
+      for (const telegramId of teamIds) {
+        const isOwner = telegramId === owner?.telegram_id;
+        
+        if (isOwner) {
+          await sendTelegramMessage(
+            telegramId,
+            `🚫 <b>Сделка отменена</b>
 
 Рекламный пост в канале <b>${channelTitle}</b> был удалён до окончания срока размещения.
 
 Средства возвращены рекламодателю. Подобные действия могут привести к понижению рейтинга.`
-        );
+          );
+        } else {
+          await sendTelegramMessage(
+            telegramId,
+            `🚫 <b>Сделка отменена</b>
+
+Рекламный пост в канале <b>${channelTitle}</b> был удалён до окончания срока размещения.
+
+Средства возвращены рекламодателю.`
+          );
+        }
       }
 
       return { success: true, deleted: true };

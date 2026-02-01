@@ -124,6 +124,27 @@ async function sendTelegramNotification(
   }
 }
 
+// Get all channel team telegram IDs (owner + managers)
+// deno-lint-ignore no-explicit-any
+async function getChannelTeamTelegramIds(channelId: string, supabaseClient: any): Promise<number[]> {
+  const { data: admins } = await supabaseClient
+    .from("channel_admins")
+    .select("user_id")
+    .eq("channel_id", channelId);
+
+  if (!admins?.length) return [];
+
+  const userIds = (admins as { user_id: string }[]).map(a => a.user_id);
+  const { data: users } = await supabaseClient
+    .from("users")
+    .select("telegram_id")
+    .in("id", userIds);
+
+  return (users as { telegram_id: number | null }[] | null)
+    ?.map(u => u.telegram_id)
+    .filter((id): id is number => id !== null) || [];
+}
+
 interface TimeoutDeal {
   id: string;
   total_price: number;
@@ -132,6 +153,7 @@ interface TimeoutDeal {
   author_draft: string | null;
   is_draft_approved: boolean | null;
   escrow_mnemonic_encrypted: string | null;
+  channel_id: string;
   channel: {
     title: string;
     username: string;
@@ -175,6 +197,7 @@ serve(async (req) => {
         author_draft,
         is_draft_approved,
         escrow_mnemonic_encrypted,
+        channel_id,
         channel:channels(title, username, owner_id),
         advertiser:users!deals_advertiser_id_fkey(telegram_id, wallet_address),
         campaign:campaigns(campaign_type)
@@ -260,21 +283,35 @@ serve(async (req) => {
 💰 <b>Возврат:</b> ${deal.total_price} TON отправлен на ваш кошелёк.`
                 );
                 
-                // Notify owner
-                if (channel?.owner_id) {
+                // Notify channel team (owner + managers)
+                const teamIds = await getChannelTeamTelegramIds(deal.channel_id, supabase);
+                
+                for (const telegramId of teamIds) {
                   const { data: owner } = await supabase
                     .from("users")
                     .select("telegram_id")
                     .eq("id", channel.owner_id)
                     .maybeSingle();
                   
-                  if (owner?.telegram_id) {
+                  const isOwner = telegramId === owner?.telegram_id;
+                  
+                  if (isOwner) {
                     await sendTelegramNotification(
                       botToken,
-                      owner.telegram_id,
+                      telegramId,
                       `⏰ <b>Сделка отменена</b>
 
 Вы не отправили черновик в течение 24 часов после оплаты.
+
+Средства возвращены рекламодателю.`
+                    );
+                  } else {
+                    await sendTelegramNotification(
+                      botToken,
+                      telegramId,
+                      `⏰ <b>Сделка отменена</b>
+
+Черновик для канала <b>${channelName}</b> не был отправлен в течение 24 часов.
 
 Средства возвращены рекламодателю.`
                     );
@@ -377,23 +414,37 @@ serve(async (req) => {
 30% отправлено автору за проделанную работу.`
               );
               
-              // Notify owner
-              if (channel?.owner_id) {
-                const { data: owner } = await supabase
+              // Notify channel team (owner + managers)
+              const teamIds = await getChannelTeamTelegramIds(deal.channel_id, supabase);
+              
+              for (const telegramId of teamIds) {
+                const { data: ownerUser } = await supabase
                   .from("users")
                   .select("telegram_id")
                   .eq("id", channel.owner_id)
                   .maybeSingle();
                 
-                if (owner?.telegram_id) {
+                const isOwner = telegramId === ownerUser?.telegram_id;
+                
+                if (isOwner) {
                   await sendTelegramNotification(
                     botToken,
-                    owner.telegram_id,
+                    telegramId,
                     `⏰ <b>Сделка автоматически закрыта</b>
 
 Рекламодатель не проверил ваш черновик в течение 24 часов.
 
 💰 <b>Вы получили:</b> 30% (${(Number(ownerShare) / 1_000_000_000).toFixed(2)} TON) за проделанную работу.`
+                  );
+                } else {
+                  await sendTelegramNotification(
+                    botToken,
+                    telegramId,
+                    `⏰ <b>Сделка автоматически закрыта</b>
+
+Рекламодатель не проверил черновик для канала <b>${channelName}</b> в течение 24 часов.
+
+Сделка завершена с частичной выплатой.`
                   );
                 }
               }
