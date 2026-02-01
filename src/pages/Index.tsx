@@ -186,11 +186,15 @@ const Index = () => {
                 icon={<Users className="w-5 h-5" />}
                 label="Каналов"
                 value={formatNumber(totalChannels)}
+                numericValue={totalChannels}
+                iconClassName="bg-blue-500/10 text-blue-500"
               />
               <StatsCard
                 icon={<TrendingUp className="w-5 h-5" />}
                 label="Подписчиков"
                 value={formatNumber(totalSubscribers)}
+                numericValue={totalSubscribers}
+                iconClassName="bg-green-500/10 text-green-500"
               />
             </>
           )}
