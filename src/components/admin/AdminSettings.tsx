@@ -4,6 +4,7 @@ import { Switch } from '@/components/ui/switch';
 import { Settings, Shield, Bell, Database, FlaskConical, Loader2, Sparkles } from 'lucide-react';
 import { useAppSettings } from '@/hooks/useAppSettings';
 import { toast } from 'sonner';
+import { CronJobsManager } from './CronJobsManager';
 
 export function AdminSettings() {
   const { testModeEnabled, stickerEnabled, isLoading, updateTestMode, updateStickerEnabled } = useAppSettings();
@@ -153,6 +154,9 @@ export function AdminSettings() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Cron Jobs Manager */}
+      <CronJobsManager />
     </div>
   );
 }

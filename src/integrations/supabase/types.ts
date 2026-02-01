@@ -670,6 +670,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_manage_cron_jobs: {
+        Args: {
+          p_action: string
+          p_active?: boolean
+          p_jobid?: number
+          p_schedule?: string
+        }
+        Returns: Json
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -677,7 +686,6 @@ export type Database = {
         }
         Returns: boolean
       }
-      manage_cron_jobs: { Args: { action: string }; Returns: Json }
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"
