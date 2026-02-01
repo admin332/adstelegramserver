@@ -36,6 +36,9 @@ const Deals = () => {
     
     if (pendingPayments.length === 0) return;
     
+    // Немедленный refetch при загрузке страницы с pending payments
+    refetch();
+    
     const interval = setInterval(() => {
       refetch();
     }, 5000);
