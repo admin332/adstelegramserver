@@ -172,6 +172,7 @@ Deno.serve(async (req) => {
         author_draft: draftText,
         author_draft_media_urls: draftMediaUrls || [],
         is_draft_approved: null, // Waiting for review
+        draft_submitted_at: new Date().toISOString(), // Track submission time for 24h timeout
       })
       .eq("id", dealId);
 
@@ -191,6 +192,8 @@ Deno.serve(async (req) => {
       const message = `📝 <b>Черновик готов к проверке</b>
 
 Автор канала ${channelTitle} написал пост по вашему брифу.
+
+⏰ <b>Важно:</b> У вас есть 24 часа на проверку. После этого сделка будет автоматически закрыта (70% вернётся вам, 30% получит автор за проделанную работу).
 
 Проверьте и одобрите в приложении Adsingo.`;
 

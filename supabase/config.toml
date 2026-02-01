@@ -104,3 +104,6 @@ verify_jwt = false
 
 [functions.toggle-favorite]
 verify_jwt = false
+
+[functions.auto-timeout-deals]
+verify_jwt = false

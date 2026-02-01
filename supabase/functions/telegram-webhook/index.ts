@@ -399,10 +399,19 @@ async function handleDraftMessage(telegramUserId: number, message: Record<string
 
   const updatedDrafts = [...currentDrafts, newDraft];
 
+  // Check if this is the first draft (for multi-draft deals) or the only draft
+  // Set draft_submitted_at to track 24h timeout for advertiser response
+  const isFirstDraft = submittedCount === 0;
+
   // Save to database
+  const updateData: Record<string, unknown> = { author_drafts: updatedDrafts };
+  if (isFirstDraft) {
+    updateData.draft_submitted_at = new Date().toISOString();
+  }
+
   const { error: updateError } = await supabase
     .from("deals")
-    .update({ author_drafts: updatedDrafts })
+    .update(updateData)
     .eq("id", deal.id);
 
   if (updateError) {
@@ -452,9 +461,12 @@ async function handleDraftMessage(telegramUserId: number, message: Record<string
   await new Promise(resolve => setTimeout(resolve, 300));
 
   // Send approval buttons with draft index
-  const approvalText = requiredCount > 1
+  let approvalText = requiredCount > 1
     ? `👆 <b>Проверьте черновик ${draftNumber}</b>`
     : "👆 <b>Проверьте черновик выше</b>\n\nНажмите «Одобрить» для публикации или «На доработку» с комментарием.";
+
+  // Add 24h timeout warning
+  approvalText += `\n\n⏰ У вас есть 24 часа на проверку.\n📝 Максимум 3 доработки.`;
 
   await sendTelegramMessage(
     advertiser.telegram_id,
@@ -640,15 +652,22 @@ async function handleDraftRevision(
     return;
   }
 
-  // Get deal
+  // Get deal with revision count for limit check
   const { data: deal } = await supabase
     .from("deals")
-    .select("id, advertiser_id, channel_id")
+    .select("id, advertiser_id, channel_id, revision_count")
     .eq("id", dealId)
     .single();
 
   if (!deal || deal.advertiser_id !== user.id) {
     await answerCallbackQuery(callbackQueryId, "Нет доступа");
+    return;
+  }
+
+  // Check revision limit (max 3)
+  const MAX_REVISIONS = 3;
+  if ((deal.revision_count || 0) >= MAX_REVISIONS) {
+    await answerCallbackQuery(callbackQueryId, `Лимит доработок исчерпан (${MAX_REVISIONS})`);
     return;
   }
 
