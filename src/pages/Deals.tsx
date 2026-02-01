@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { BottomNav } from "@/components/BottomNav";
 import { DealCard } from "@/components/DealCard";
 import { FilterChip } from "@/components/FilterChip";
@@ -26,6 +26,22 @@ const Deals = () => {
   const [ownerActionDeal, setOwnerActionDeal] = useState<Deal | null>(null);
   const [draftEditorDeal, setDraftEditorDeal] = useState<Deal | null>(null);
   const [draftReviewDeal, setDraftReviewDeal] = useState<Deal | null>(null);
+
+  // Auto-refetch while there are pending payments being verified
+  useEffect(() => {
+    let pendingPayments: string[] = [];
+    try {
+      pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+    } catch {}
+    
+    if (pendingPayments.length === 0) return;
+    
+    const interval = setInterval(() => {
+      refetch();
+    }, 5000);
+    
+    return () => clearInterval(interval);
+  }, [refetch, deals]);
 
   const filters = [
     { id: "all" as const, label: "Все", icon: Inbox },

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTonConnectUI } from "@tonconnect/ui-react";
 import { ExternalLink, Copy, Check, Wallet, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -35,6 +36,7 @@ export function PaymentDialog({
   channelName,
   onPaymentSuccess,
 }: PaymentDialogProps) {
+  const navigate = useNavigate();
   const [tonConnectUI] = useTonConnectUI();
   const [copied, setCopied] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
@@ -129,6 +131,21 @@ export function PaymentDialog({
       notifications: ['before', 'success', 'error'],
       returnStrategy: 'tg://resolve',
       twaReturnUrl: 'https://t.me/adsingo_bot/open',
+    }).then(() => {
+      // Сохраняем ID сделки как "проверяющую оплату"
+      try {
+        const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+        if (!pendingPayments.includes(dealId)) {
+          pendingPayments.push(dealId);
+          localStorage.setItem('pending_payments', JSON.stringify(pendingPayments));
+        }
+      } catch {}
+      
+      // Закрываем диалог и перенаправляем
+      onOpenChange(false);
+      onPaymentSuccess?.();
+      navigate('/deals');
+      toast.success("Транзакция отправлена! Проверяем оплату...");
     }).catch((error: any) => {
       console.error('[TonConnect] sendTransaction error:', error);
       
