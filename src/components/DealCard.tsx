@@ -25,6 +25,8 @@ interface DealCardProps {
   authorDraft: string | null;
   isDraftApproved: boolean | null;
   revisionCount: number;
+  draftSubmittedAt: string | null;
+  paymentVerifiedAt: string | null;
   channel: {
     title: string | null;
     avatar_url: string | null;
@@ -129,6 +131,8 @@ export const DealCard = ({
   authorDraft,
   isDraftApproved,
   revisionCount,
+  draftSubmittedAt,
+  paymentVerifiedAt,
   channel,
   campaign,
   usdEquivalent,
@@ -194,11 +198,51 @@ export const DealCard = ({
     ? new Date(new Date(postedAt).getTime() + durationHours * 60 * 60 * 1000).toISOString()
     : null;
 
+  // Calculate 24h deadlines
+  const deadline24hFromPayment = paymentVerifiedAt 
+    ? new Date(new Date(paymentVerifiedAt).getTime() + 24 * 60 * 60 * 1000).toISOString()
+    : null;
+
+  const deadline24hFromDraft = draftSubmittedAt 
+    ? new Date(new Date(draftSubmittedAt).getTime() + 24 * 60 * 60 * 1000).toISOString()
+    : null;
+
+  // Timer for channel owner: "24h to send draft" (after payment, no draft yet)
+  const showOwnerDraftDeadline = 
+    status === "escrow" && 
+    isPromptCampaign && 
+    isChannelOwner && 
+    !authorDraft && 
+    isDraftApproved !== false &&
+    deadline24hFromPayment &&
+    new Date(deadline24hFromPayment).getTime() > Date.now();
+
+  // Timer for channel owner: "24h for revision" (draft rejected, waiting for new one)
+  const showOwnerRevisionDeadline = 
+    status === "escrow" && 
+    isPromptCampaign && 
+    isChannelOwner && 
+    isDraftApproved === false && 
+    !authorDraft &&
+    deadline24hFromPayment &&
+    new Date(deadline24hFromPayment).getTime() > Date.now();
+
+  // Timer for advertiser: "24h to review" (draft submitted, waiting for review)
+  const showAdvertiserReviewDeadline = 
+    status === "escrow" && 
+    isPromptCampaign && 
+    !isChannelOwner && 
+    authorDraft && 
+    isDraftApproved === null &&
+    deadline24hFromDraft &&
+    new Date(deadline24hFromDraft).getTime() > Date.now();
+
   // Determine which countdown to show
   const showPublicationCountdown = 
     (status === "escrow" || status === "in_progress") && 
     scheduledAt && 
-    new Date(scheduledAt).getTime() > Date.now();
+    new Date(scheduledAt).getTime() > Date.now() &&
+    !showOwnerDraftDeadline && !showOwnerRevisionDeadline && !showAdvertiserReviewDeadline;
 
   const showCompletionCountdown = 
     status === "in_progress" && 
@@ -212,6 +256,39 @@ export const DealCard = ({
       {status === "pending" && expiresAt && (
         <div className="absolute top-4 right-4">
           <ExpirationTimer expiresAt={expiresAt} />
+        </div>
+      )}
+
+      {/* 24h timer for channel owner - send draft */}
+      {showOwnerDraftDeadline && (
+        <div className="absolute top-4 right-4">
+          <DealCountdown 
+            targetDate={deadline24hFromPayment!} 
+            label="на черновик"
+            colorClass="text-yellow-500"
+          />
+        </div>
+      )}
+
+      {/* 24h timer for channel owner - revision */}
+      {showOwnerRevisionDeadline && (
+        <div className="absolute top-4 right-4">
+          <DealCountdown 
+            targetDate={deadline24hFromPayment!} 
+            label="на доработку"
+            colorClass="text-yellow-500"
+          />
+        </div>
+      )}
+
+      {/* 24h timer for advertiser - review draft */}
+      {showAdvertiserReviewDeadline && (
+        <div className="absolute top-4 right-4">
+          <DealCountdown 
+            targetDate={deadline24hFromDraft!} 
+            label="на проверку"
+            colorClass="text-yellow-500"
+          />
         </div>
       )}
 

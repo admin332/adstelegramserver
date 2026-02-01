@@ -22,6 +22,8 @@ export interface Deal {
   author_draft_media_urls: string[] | null;
   revision_count: number;
   is_draft_approved: boolean | null;
+  draft_submitted_at: string | null;
+  payment_verified_at: string | null;
   role: 'advertiser' | 'channel_owner';
   channel: {
     id: string;
