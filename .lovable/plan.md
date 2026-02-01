@@ -1,225 +1,280 @@
 
 
-## План: Автоматические возвраты при отсутствии ответа + лимит доработок
+## План: Выбор версии черновика рекламодателем
 
-### Сценарии возвратов
+### Текущее поведение
+- При запросе доработки все черновики сбрасываются (`author_drafts: []`)
+- Предыдущие версии теряются
+- Рекламодатель видит только последнюю версию
 
-| Сценарий | Условие | Распределение |
-|----------|---------|---------------|
-| Владелец не отвечает 24ч после оплаты | Не одобрил/не отклонил заявку | 100% → рекламодателю |
-| Рекламодатель не отвечает 24ч после черновика | Не одобрил/не запросил доработку | 70% → рекламодателю, 30% → владельцу |
-| Превышен лимит доработок (3) | revision_count >= 3 | Блокировка кнопки "На доработку" |
+### Новое поведение
+- При каждой ревизии предыдущие черновики сохраняются в историю
+- Рекламодатель видит кнопки выбора версии: "Вариант 1", "Вариант 2", "Вариант 3"
+- При выборе версии владельцу приходит уведомление какой вариант выбрал рекламодатель
+- Публикуется выбранная версия
 
 ---
+
+## Технические изменения
 
 ### 1. Миграция базы данных
 
-Добавить поле для отслеживания времени отправки черновика:
+Добавить поле для хранения истории версий:
 
 ```sql
-ALTER TABLE deals ADD COLUMN draft_submitted_at TIMESTAMPTZ DEFAULT NULL;
+ALTER TABLE deals ADD COLUMN draft_history jsonb DEFAULT '[]'::jsonb;
 ```
 
-Это поле будет устанавливаться при отправке черновика владельцем канала.
+Структура `draft_history`:
+```typescript
+interface DraftHistoryItem {
+  version: number;           // 1, 2, 3
+  text: string | null;
+  entities: object[];
+  media: MediaItem[];
+  message_id: number;
+  chat_id: number;
+  submitted_at: string;      // ISO timestamp
+}
+```
 
----
+### 2. Обновление telegram-webhook/index.ts
 
-### 2. Новая Edge Function: `auto-timeout-deals/index.ts`
+**При отправке черновика - сохранять в историю:**
 
-Функция будет запускаться по cron каждые 30 минут и обрабатывать два сценария:
-
-**Сценарий A: Владелец не отвечает 24ч после оплаты**
-- Условия: `status = 'escrow'`, `payment_verified_at < now() - 24 hours`, `author_draft IS NULL` (черновик не отправлен)
-- Действие: 100% возврат рекламодателю, отмена сделки
-
-**Сценарий B: Рекламодатель не отвечает 24ч после черновика**
-- Условия: `status = 'escrow'`, `draft_submitted_at < now() - 24 hours`, `is_draft_approved IS NULL`
-- Действие: 
-  - 70% → рекламодатель
-  - 30% → владелец канала
-  - Отмена сделки
-
----
-
-### 3. Обновление `submit-draft/index.ts`
-
-При отправке черновика устанавливать `draft_submitted_at = now()`:
+В функции `handleDraftMessage` перед очисткой добавить:
 
 ```typescript
+// Save current draft to history before clearing (on revision)
+if (deal.revision_count > 0 && deal.author_drafts?.length > 0) {
+  const historyItem = {
+    version: deal.revision_count,
+    drafts: deal.author_drafts,
+    submitted_at: deal.draft_submitted_at
+  };
+  // This is handled in handleRevisionComment
+}
+```
+
+**При запросе ревизии - не терять старые черновики:**
+
+В функции `handleRevisionComment` изменить:
+
+```typescript
+// Get current drafts before clearing
+const currentDrafts = (deal.author_drafts as DraftItem[]) || [];
+const currentHistory = (deal.draft_history as DraftHistoryItem[]) || [];
+
+// Save current version to history if exists
+if (currentDrafts.length > 0) {
+  const historyEntry = {
+    version: (deal.revision_count || 0) + 1,
+    drafts: currentDrafts,
+    submitted_at: new Date().toISOString(),
+  };
+  currentHistory.push(historyEntry);
+}
+
+// Update deal
 const { error: updateError } = await supabase
   .from("deals")
   .update({
-    author_draft: draftText,
-    author_draft_media_urls: draftMediaUrls || [],
-    is_draft_approved: null,
-    draft_submitted_at: new Date().toISOString(), // ← ДОБАВИТЬ
+    is_draft_approved: false,
+    author_draft: null,
+    author_draft_entities: [],
+    author_draft_media: [],
+    author_draft_media_urls: [],
+    author_drafts: [],
+    draft_history: currentHistory,  // ← Сохраняем историю
+    revision_count: (deal.revision_count || 0) + 1,
   })
   .eq("id", dealId);
 ```
 
----
+**Изменить кнопки одобрения когда есть история:**
 
-### 4. Обновление webhook для установки `draft_submitted_at`
+При отправке нового черновика, если `revision_count > 0`, показывать кнопки выбора версии:
 
-В функции `handleDraftMessage` при отправке черновика через бот также устанавливать `draft_submitted_at`.
-
----
-
-### 5. Лимит доработок (максимум 3)
-
-**В review-draft/index.ts:**
 ```typescript
-if (action === "request_revision" && deal.revision_count >= 3) {
-  return Response({ 
-    success: false, 
-    error: "Достигнут лимит доработок (максимум 3)" 
+// After sending current draft for approval
+if (historyCount > 0) {
+  const versionButtons = [];
+  
+  // Add history version buttons
+  for (let i = 1; i <= historyCount; i++) {
+    versionButtons.push({
+      text: `📄 Вариант ${i}`,
+      callback_data: `select_version:${deal.id}:${i}`
+    });
+  }
+  
+  // Current version button
+  versionButtons.push({
+    text: `📄 Вариант ${historyCount + 1} (текущий)`,
+    callback_data: `select_version:${deal.id}:${historyCount + 1}`
   });
+
+  await sendTelegramMessage(
+    advertiser.telegram_id,
+    `📋 <b>Доступные версии:</b>\n\nВыберите версию поста для публикации:`,
+    { inline_keyboard: [versionButtons] }
+  );
 }
 ```
 
-**В telegram-webhook/index.ts (handleDraftRevision):**
-```typescript
-const { data: deal } = await supabase
-  .from("deals")
-  .select("id, revision_count")
-  .eq("id", dealId)
-  .single();
+### 3. Новый callback handler: handleVersionSelect
 
-if ((deal?.revision_count || 0) >= 3) {
-  await answerCallbackQuery(callbackQueryId, "Лимит доработок исчерпан (3)");
+```typescript
+async function handleVersionSelect(
+  callbackQueryId: string,
+  dealId: string,
+  version: number,
+  from: { id: number },
+  message: { chat: { id: number }; message_id: number }
+) {
+  // Get deal with history
+  const { data: deal } = await supabase
+    .from("deals")
+    .select("id, status, advertiser_id, channel_id, revision_count, author_drafts, draft_history")
+    .eq("id", dealId)
+    .single();
+
+  // Verify user is advertiser
+  if (deal.advertiser_id !== user.id) {
+    await answerCallbackQuery(callbackQueryId, "Только рекламодатель может выбрать версию");
+    return;
+  }
+
+  const history = (deal.draft_history as DraftHistoryItem[]) || [];
+  const currentVersion = (deal.revision_count || 0) + 1;
+  
+  let selectedDrafts: DraftItem[];
+  
+  if (version === currentVersion) {
+    // Use current drafts
+    selectedDrafts = deal.author_drafts;
+  } else {
+    // Use history version
+    const historyEntry = history.find(h => h.version === version);
+    if (!historyEntry) {
+      await answerCallbackQuery(callbackQueryId, "Версия не найдена");
+      return;
+    }
+    selectedDrafts = historyEntry.drafts;
+  }
+
+  // Update deal with selected version
+  await supabase
+    .from("deals")
+    .update({
+      author_drafts: selectedDrafts.map(d => ({ ...d, approved: true })),
+      is_draft_approved: true,
+      status: "in_progress",
+      selected_version: version,  // Optional: track which version was selected
+    })
+    .eq("id", dealId);
+
+  // Notify channel owner which version was selected
+  const { data: channel } = await supabase
+    .from("channels")
+    .select("owner_id, title, username")
+    .eq("id", deal.channel_id)
+    .single();
+
+  const { data: owner } = await supabase
+    .from("users")
+    .select("telegram_id")
+    .eq("id", channel?.owner_id)
+    .single();
+
+  if (owner?.telegram_id) {
+    const channelName = channel?.title || `@${channel?.username}`;
+    const message = version === currentVersion
+      ? `✅ <b>Рекламодатель выбрал текущую версию!</b>\n\nВаш последний черновик для канала <b>${channelName}</b> одобрен.\nПост будет опубликован по расписанию.`
+      : `✅ <b>Рекламодатель выбрал Вариант ${version}!</b>\n\nДля канала <b>${channelName}</b> будет опубликована предыдущая версия поста (не последняя).\n\nПубликация по расписанию.`;
+    
+    await sendTelegramMessage(owner.telegram_id, message);
+  }
+
+  // Confirm to advertiser
+  await answerCallbackQuery(callbackQueryId, `Вариант ${version} выбран!`);
+  
+  // Remove buttons
+  await editMessageReplyMarkup(message.chat.id, message.message_id);
+}
+```
+
+### 4. Обработка нового callback в main handler
+
+```typescript
+// In callback_query handling section
+if (data.startsWith("select_version:")) {
+  const [, dealId, versionStr] = data.split(":");
+  await handleVersionSelect(callbackQueryId, dealId, parseInt(versionStr), from, message);
   return;
 }
 ```
 
-**В DraftReviewDialog.tsx:**
+### 5. Обновление типов (опционально)
+
 ```typescript
-const maxRevisions = 3;
-const canRequestRevision = revisionCount < maxRevisions;
-
-// Показывать предупреждение
-{revisionCount === 2 && (
-  <p className="text-yellow-500 text-xs">
-    ⚠️ Осталась последняя доработка
-  </p>
-)}
-
-// Скрыть кнопку если лимит
-{canRequestRevision && (
-  <Button onClick={() => setShowRevisionInput(true)}>
-    На доработку
-  </Button>
-)}
+interface DraftHistoryItem {
+  version: number;
+  drafts: DraftItem[];
+  submitted_at: string;
+}
 ```
 
 ---
 
-### 6. Обновление уведомлений с новыми правилами
-
-**notify-deal-payment/index.ts — владельцу канала:**
-```
-✅ <b>Реклама оплачена!</b>
-
-...
-
-⏰ <b>Важно:</b> Примите решение в течение 24 часов, иначе сделка будет автоматически отменена с возвратом средств рекламодателю.
-```
-
-**check-escrow-payments/index.ts — рекламодателю:**
-```
-💳 <b>Оплата прошла успешно!</b>
-
-...
-
-⏰ <b>Важно:</b> После получения черновика у вас 24 часа на проверку. Если не ответите — 70% вернётся вам, 30% получит автор за проделанную работу.
-```
-
-**submit-draft/index.ts — рекламодателю при получении черновика:**
-```
-📝 <b>Черновик готов к проверке</b>
-
-...
-
-⏰ У вас есть 24 часа на проверку. После этого сделка будет автоматически завершена (70% вам, 30% автору).
-```
-
-**telegram-webhook/index.ts — при отправке черновика:**
-```
-📝 <b>Черновик готов к проверке</b>
-
-...
-
-⏰ Рекламодатель должен ответить в течение 24 часов.
-Максимум 3 доработки.
-```
-
----
-
-### 7. Cron job для auto-timeout-deals
-
-Добавить новый cron job для проверки таймаутов:
-
-```sql
-SELECT cron.schedule(
-  'auto-timeout-deals',
-  '45 * * * *', -- каждый час в :45
-  $$
-  SELECT net.http_post(
-    url:='https://fdxyittddmpyhaiijddp.supabase.co/functions/v1/auto-timeout-deals',
-    headers:='{"Authorization": "Bearer ...", "Content-Type": "application/json"}'::jsonb,
-    body:='{}'::jsonb
-  );
-  $$
-);
-```
-
----
-
-### Файлы для изменения
+## Файлы для изменения
 
 | Файл | Изменение |
 |------|-----------|
-| **Миграция БД** | Добавить `draft_submitted_at` |
-| `supabase/functions/auto-timeout-deals/index.ts` | Создать новую функцию |
-| `supabase/functions/submit-draft/index.ts` | Установка `draft_submitted_at` |
-| `supabase/functions/telegram-webhook/index.ts` | Лимит 3 доработок, `draft_submitted_at` |
-| `supabase/functions/review-draft/index.ts` | Проверка лимита доработок |
-| `supabase/functions/notify-deal-payment/index.ts` | Добавить правила 24ч |
-| `supabase/functions/check-escrow-payments/index.ts` | Добавить правила в уведомление |
-| `src/components/deals/DraftReviewDialog.tsx` | Скрыть кнопку при лимите |
-| `supabase/config.toml` | Добавить `auto-timeout-deals` |
+| **Миграция БД** | Добавить `draft_history` jsonb |
+| `supabase/functions/telegram-webhook/index.ts` | Сохранение истории, кнопки выбора, новый handler |
+| `supabase/functions/user-deals/index.ts` | Добавить `draft_history` в select (опционально) |
 
 ---
 
-### Логика разделения средств (70/30)
+## UX флоу
 
-При таймауте рекламодателя:
-
-```typescript
-const totalNano = balance; // Баланс эскроу в nanoTON
-const networkFee = BigInt(0.04 * 1_000_000_000); // 0.04 TON на 2 транзакции
-const availableAmount = totalNano - networkFee;
-
-const ownerShare = availableAmount * 30n / 100n;
-const advertiserShare = availableAmount - ownerShare; // ~70%
-
-// Отправить 30% владельцу
-await sendTransfer(ownerWalletAddress, ownerShare, "Adsingo - работа по созданию контента");
-
-// Отправить 70% рекламодателю
-await sendTransfer(advertiserWalletAddress, advertiserShare, "Adsingo - частичный возврат");
+```text
+Черновик 1 → Рекламодатель: "На доработку"
+  └─ История: [{ version: 1, drafts: [...] }]
+  
+Черновик 2 → Рекламодатель видит:
+  ├─ [📄 Вариант 1]
+  ├─ [📄 Вариант 2 (текущий)]
+  └─ [✅ Одобрить текущий]
+  
+Рекламодатель нажимает "Вариант 1"
+  └─ Владельцу: "Рекламодатель выбрал Вариант 1!"
+  └─ Публикуется Вариант 1
 ```
 
 ---
 
-### Итоговый флоу
+## Пример уведомлений
 
-```text
-Оплата → payment_verified_at = now()
-  ├─ 24ч владелец молчит → 100% рекламодателю
-  └─ Владелец пишет черновик → draft_submitted_at = now()
-       ├─ 24ч рекламодатель молчит → 70% рекламодателю, 30% владельцу
-       ├─ Рекламодатель одобряет → in_progress → публикация
-       └─ Рекламодатель на доработку (max 3) → новый черновик
-            └─ Повторение...
+**Рекламодателю (после 2-й ревизии):**
+```
+📝 Черновик поста от @channel
+
+[Текст черновика]
+
+📋 Доступные версии:
+Выберите версию для публикации:
+
+[📄 Вариант 1] [📄 Вариант 2] [📄 Вариант 3 (текущий)]
+```
+
+**Владельцу канала (при выборе старой версии):**
+```
+✅ Рекламодатель выбрал Вариант 1!
+
+Для канала MyChannel будет опубликована версия 1 (не последняя).
+
+Публикация по расписанию.
 ```
 
