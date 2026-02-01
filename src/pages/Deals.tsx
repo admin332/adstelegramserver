@@ -170,6 +170,8 @@ const Deals = () => {
               authorDraft={deal.author_draft}
               isDraftApproved={deal.is_draft_approved}
               revisionCount={deal.revision_count}
+              draftSubmittedAt={deal.draft_submitted_at}
+              paymentVerifiedAt={deal.payment_verified_at}
               channel={deal.channel}
               campaign={deal.campaign}
               usdEquivalent={convertToUsd(deal.total_price)}

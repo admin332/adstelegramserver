@@ -804,6 +804,7 @@ async function handleRevisionComment(telegramUserId: number, text: string) {
       author_drafts: [], // Clear the new drafts array
       draft_history: currentHistory, // Preserve history!
       revision_count: (deal.revision_count || 0) + 1,
+      draft_submitted_at: null, // Reset 24h timer
     })
     .eq("id", dealId);
 
