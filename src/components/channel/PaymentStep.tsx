@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Copy, ExternalLink, CheckCircle, Loader2, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTonWallet } from '@/hooks/useTonWallet';
@@ -8,6 +9,7 @@ import { toast } from 'sonner';
 import tonIcon from '@/assets/ton-icon.svg';
 
 interface PaymentStepProps {
+  dealId?: string;
   totalPriceTon: number;
   escrowAddress: string | null;
   isCreatingDeal: boolean;
@@ -15,11 +17,13 @@ interface PaymentStepProps {
 }
 
 const PaymentStep: React.FC<PaymentStepProps> = ({
+  dealId,
   totalPriceTon,
   escrowAddress,
   isCreatingDeal,
   onPaymentComplete,
 }) => {
+  const navigate = useNavigate();
   const { isConnected, connect } = useTonWallet();
   const { convertToUsd } = useTonPrice();
   const [tonConnectUI] = useTonConnectUI();
@@ -112,8 +116,36 @@ const PaymentStep: React.FC<PaymentStepProps> = ({
       notifications: ['before', 'success', 'error'],
       returnStrategy: 'tg://resolve',
       twaReturnUrl: 'https://t.me/adsingo_bot/open',
+      // onRequestSent вызывается сразу после отправки транзакции в кошелёк
+      onRequestSent: () => {
+        console.log('[TonConnect] onRequestSent triggered');
+        
+        // Сохраняем в localStorage для отслеживания "проверки оплаты"
+        if (dealId) {
+          try {
+            const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+            if (!pendingPayments.includes(dealId)) {
+              pendingPayments.push(dealId);
+              localStorage.setItem('pending_payments', JSON.stringify(pendingPayments));
+            }
+          } catch {}
+        }
+        
+        // Перенаправляем на /deals
+        navigate('/deals');
+        toast.success("Транзакция отправлена! Проверяем оплату...");
+      }
     }).catch((error: any) => {
       console.error('[TonConnect] sendTransaction error:', error);
+      
+      // Удаляем из localStorage при ошибке
+      if (dealId) {
+        try {
+          const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+          const updated = pendingPayments.filter((pid: string) => pid !== dealId);
+          localStorage.setItem('pending_payments', JSON.stringify(updated));
+        } catch {}
+      }
       
       const errorMessage = error?.message || '';
       if (errorMessage.includes('Interrupted') || errorMessage.includes('cancelled')) {

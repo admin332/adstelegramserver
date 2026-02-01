@@ -141,12 +141,22 @@ export function PaymentDialog({
       notifications: ['before', 'success', 'error'],
       returnStrategy: 'tg://resolve',
       twaReturnUrl: 'https://t.me/adsingo_bot/open',
+      // onRequestSent вызывается сразу после отправки транзакции в кошелёк
+      onRequestSent: () => {
+        console.log('[TonConnect] onRequestSent triggered');
+        
+        // dealId уже сохранён в localStorage выше
+        // Закрываем диалог и перенаправляем
+        onOpenChange(false);
+        onPaymentSuccess?.();
+        navigate('/deals');
+        toast.success("Транзакция отправлена! Проверяем оплату...");
+      }
     }).then(() => {
-      // Закрываем диалог и перенаправляем
+      // Fallback если onRequestSent не сработал
       onOpenChange(false);
       onPaymentSuccess?.();
       navigate('/deals');
-      toast.success("Транзакция отправлена! Проверяем оплату...");
     }).catch((error: any) => {
       console.error('[TonConnect] sendTransaction error:', error);
       
