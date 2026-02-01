@@ -1,30 +1,19 @@
 
 
-## План: Металлический эффект для карточки канала
+## План: Синяя градиентная обводка карточки канала
 
-### Текущее состояние
+### Анализ эффекта из YieldCard
 
-| Элемент | Сейчас | Новое |
-|---------|--------|-------|
-| **Левая часть** | Синий градиент `from-[hsl(217,91%,50%)] to-[hsl(224,76%,48%)]` | Металлический эффект |
-| **Структура** | Один слой | Многослойный металл |
+В примере используется техника **вложенных div с padding**:
+- Внешний div имеет градиентный фон (это и есть "обводка")
+- Внутренний div с `padding` создаёт видимость границы
+- Внутренний контейнер заполняет оставшееся пространство
 
----
-
-## Анализ металлического эффекта
-
-Эффект в `YieldCard` создаётся тремя слоями:
-
-```
+```text
 ┌─────────────────────────────────────┐
-│  Внешний: from-neutral-800/900     │  ← Основа (тёмная)
+│  Внешний: синий градиент (рамка)   │  ← p-[1px]
 │  ┌─────────────────────────────┐   │
-│  │ Рамка: #3b3b3b → #1a1a1a    │   │  ← Светлая → тёмная граница
-│  │  ┌─────────────────────┐    │   │
-│  │  │ Внутри: #262626     │    │   │  ← Контент
-│  │  │        ↓            │    │   │
-│  │  │      #1a1a1a        │    │   │
-│  │  └─────────────────────┘    │   │
+│  │   Внутренний контент        │   │  ← Карточка
 │  └─────────────────────────────┘   │
 └─────────────────────────────────────┘
 ```
@@ -35,47 +24,68 @@
 
 ### Файл: `src/components/ChannelCard.tsx`
 
-**Изменения в строке 110-111:**
-
-Заменить текущий синий фон:
+**Текущая структура (строки 101-108):**
 ```tsx
-{/* Blue Background - Left Side */}
-<div className="absolute inset-0 bg-gradient-to-b from-[hsl(217,91%,50%)] to-[hsl(224,76%,48%)]" />
+<motion.div
+  className={cn(
+    'relative w-full h-48 rounded-3xl overflow-hidden cursor-pointer group'
+  )}
+  ...
+>
 ```
 
-На многослойный металлический эффект:
+**Новая структура с обёрткой:**
 ```tsx
-{/* Metal Background - Left Side */}
-<div className="absolute inset-0 bg-gradient-to-b from-neutral-800 to-neutral-900" />
-{/* Metal shine overlay */}
-<div className="absolute inset-0 left-0 w-1/2">
-  <div className="relative h-full p-[1px] rounded-l-3xl bg-[linear-gradient(to_bottom,_#4a4a4a,_#1a1a1a)]">
-    <div className="h-full rounded-l-3xl bg-[linear-gradient(to_bottom,_#2d2d2d,_#1a1a1a)]" />
-  </div>
-</div>
-```
-
-Или упрощённый вариант без вложенности:
-```tsx
-{/* Metal Background - Left Side */}
-<div className="absolute inset-0 bg-gradient-to-b from-neutral-800 to-neutral-900">
-  {/* Top shine effect */}
-  <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/10 to-transparent" />
-  {/* Left edge shine */}
-  <div className="absolute inset-y-0 left-0 w-px bg-gradient-to-b from-white/20 via-white/10 to-transparent" />
+{/* Outer wrapper with gradient border */}
+<div className="relative w-full p-[1px] rounded-3xl bg-[linear-gradient(to_bottom,_#3b82f6,_#1d4ed8)]">
+  {/* Inner card */}
+  <motion.div
+    className={cn(
+      'relative w-full h-48 rounded-3xl overflow-hidden cursor-pointer group'
+    )}
+    ...
+  >
+    ... содержимое карточки ...
+  </motion.div>
 </div>
 ```
 
 ---
 
-## Визуальное сравнение
+## Цветовая схема обводки
 
-| Аспект | Синий (сейчас) | Металл (новое) |
-|--------|----------------|----------------|
-| **Цвет** | Яркий синий | Тёмно-серый металлик |
-| **Глубина** | Плоский | Многослойный с бликами |
-| **Границы** | Нет | Светящиеся края сверху |
-| **Стиль** | Яркий, цветной | Премиальный, нейтральный |
+| Вариант | Верх | Низ | Описание |
+|---------|------|-----|----------|
+| **Яркий синий** | `#3b82f6` (blue-500) | `#1d4ed8` (blue-700) | Насыщенный, заметный |
+| **Мягкий синий** | `#60a5fa` (blue-400) | `#2563eb` (blue-600) | Более светлый |
+| **Тёмный синий** | `#2563eb` (blue-600) | `#1e40af` (blue-800) | Глубокий, премиальный |
+
+Выберем **яркий синий** вариант для хорошей видимости.
+
+---
+
+## Изменения в коде
+
+```tsx
+// Строки 100-108 - добавить обёртку
+
+{/* Gradient Border Wrapper */}
+<div className="relative w-full p-[1px] rounded-3xl bg-[linear-gradient(to_bottom,_#3b82f6,_#1d4ed8)]">
+  <motion.div
+    className={cn(
+      'relative w-full h-48 rounded-3xl overflow-hidden cursor-pointer group'
+    )}
+    variants={cardVariants}
+    initial="hidden"
+    animate="visible"
+    onClick={handleCardClick}
+  >
+    {/* ... остальное содержимое карточки ... */}
+  </motion.div>
+</div>
+```
+
+И в конце добавить закрывающий `</div>`.
 
 ---
 
@@ -83,5 +93,5 @@
 
 | Файл | Изменение |
 |------|-----------|
-| `src/components/ChannelCard.tsx` | Заменить синий градиент на металлический эффект (строки 110-111) |
+| `src/components/ChannelCard.tsx` | Обернуть карточку в div с градиентной границей |
 
