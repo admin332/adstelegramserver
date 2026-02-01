@@ -1,157 +1,81 @@
 
 
-## План: Анимированные числа в StatsCard
+## План: Металлический эффект для карточки канала
 
 ### Текущее состояние
 
-| Аспект | Сейчас | Желаемое |
-|--------|--------|----------|
-| **Числа** | Статичные, сразу показываются | Анимация count-up при открытии |
-| **Дизайн** | Простой | Более красивый, как в примере |
-| **Пакеты** | `motion` уже установлен ✅ | Готово к использованию |
+| Элемент | Сейчас | Новое |
+|---------|--------|-------|
+| **Левая часть** | Синий градиент `from-[hsl(217,91%,50%)] to-[hsl(224,76%,48%)]` | Металлический эффект |
+| **Структура** | Один слой | Многослойный металл |
+
+---
+
+## Анализ металлического эффекта
+
+Эффект в `YieldCard` создаётся тремя слоями:
+
+```
+┌─────────────────────────────────────┐
+│  Внешний: from-neutral-800/900     │  ← Основа (тёмная)
+│  ┌─────────────────────────────┐   │
+│  │ Рамка: #3b3b3b → #1a1a1a    │   │  ← Светлая → тёмная граница
+│  │  ┌─────────────────────┐    │   │
+│  │  │ Внутри: #262626     │    │   │  ← Контент
+│  │  │        ↓            │    │   │
+│  │  │      #1a1a1a        │    │   │
+│  │  └─────────────────────┘    │   │
+│  └─────────────────────────────┘   │
+└─────────────────────────────────────┘
+```
 
 ---
 
 ## Техническая реализация
 
-### 1. Обновление компонента StatsCard
+### Файл: `src/components/ChannelCard.tsx`
 
-**Файл:** `src/components/StatsCard.tsx`
+**Изменения в строке 110-111:**
 
-**Изменения:**
-- Добавить анимацию count-up с помощью `animate` из `motion`
-- Использовать `useRef` для привязки к DOM элементу
-- Улучшить визуальный дизайн (иконка в цветном круге, более крупный метрик)
-
-```typescript
-import { ReactNode, useRef, useEffect } from "react";
-import { animate } from "motion";
-import { cn } from "@/lib/utils";
-
-interface StatsCardProps {
-  icon: ReactNode;
-  label: string;
-  value: string | number;
-  numericValue?: number;  // Числовое значение для анимации
-  trend?: number;
-  className?: string;
-  iconClassName?: string;  // Кастомный стиль для иконки
-}
-
-export const StatsCard = ({ 
-  icon, 
-  label, 
-  value, 
-  numericValue,
-  trend, 
-  className,
-  iconClassName 
-}: StatsCardProps) => {
-  const valueRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    const node = valueRef.current;
-    if (!node || numericValue === undefined) return;
-
-    // Анимация от 0 до целевого значения
-    const controls = animate(0, numericValue, {
-      duration: 1.5,
-      ease: "easeOut",
-      onUpdate(currentValue) {
-        // Форматирование в зависимости от величины
-        if (numericValue >= 1_000_000) {
-          node.textContent = (currentValue / 1_000_000).toFixed(1) + 'M';
-        } else if (numericValue >= 1_000) {
-          node.textContent = (currentValue / 1_000).toFixed(1) + 'K';
-        } else {
-          node.textContent = Math.round(currentValue).toString();
-        }
-      },
-    });
-
-    return () => controls.stop();
-  }, [numericValue]);
-
-  return (
-    <div className={cn(
-      "bg-secondary/80 backdrop-blur-sm rounded-2xl p-4 border border-border/50",
-      className
-    )}>
-      {/* Header с иконкой и названием */}
-      <div className="flex items-center gap-3 mb-3">
-        <div className={cn(
-          "p-2 rounded-xl",
-          iconClassName || "bg-primary/10 text-primary"
-        )}>
-          {icon}
-        </div>
-        <span className="text-sm font-medium text-muted-foreground">{label}</span>
-      </div>
-      
-      {/* Метрика */}
-      <div className="flex items-baseline gap-2">
-        <span 
-          ref={valueRef} 
-          className="text-3xl font-bold text-foreground tracking-tight"
-        >
-          {value}
-        </span>
-        {trend !== undefined && (
-          <span className={cn(
-            "text-sm font-medium",
-            trend >= 0 ? "text-green-500" : "text-destructive"
-          )}>
-            {trend >= 0 ? "+" : ""}{trend}%
-          </span>
-        )}
-      </div>
-    </div>
-  );
-};
-```
-
-### 2. Обновление использования в Index.tsx
-
-**Файл:** `src/pages/Index.tsx`
-
-Передавать `numericValue` для анимации:
-
+Заменить текущий синий фон:
 ```tsx
-<StatsCard
-  icon={<Users className="w-5 h-5" />}
-  label="Каналов"
-  value={formatNumber(totalChannels)}
-  numericValue={totalChannels}  // ← Добавить для анимации
-  iconClassName="bg-blue-500/10 text-blue-500"
-/>
-<StatsCard
-  icon={<TrendingUp className="w-5 h-5" />}
-  label="Подписчиков"
-  value={formatNumber(totalSubscribers)}
-  numericValue={totalSubscribers}  // ← Добавить для анимации
-  iconClassName="bg-green-500/10 text-green-500"
-/>
+{/* Blue Background - Left Side */}
+<div className="absolute inset-0 bg-gradient-to-b from-[hsl(217,91%,50%)] to-[hsl(224,76%,48%)]" />
+```
+
+На многослойный металлический эффект:
+```tsx
+{/* Metal Background - Left Side */}
+<div className="absolute inset-0 bg-gradient-to-b from-neutral-800 to-neutral-900" />
+{/* Metal shine overlay */}
+<div className="absolute inset-0 left-0 w-1/2">
+  <div className="relative h-full p-[1px] rounded-l-3xl bg-[linear-gradient(to_bottom,_#4a4a4a,_#1a1a1a)]">
+    <div className="h-full rounded-l-3xl bg-[linear-gradient(to_bottom,_#2d2d2d,_#1a1a1a)]" />
+  </div>
+</div>
+```
+
+Или упрощённый вариант без вложенности:
+```tsx
+{/* Metal Background - Left Side */}
+<div className="absolute inset-0 bg-gradient-to-b from-neutral-800 to-neutral-900">
+  {/* Top shine effect */}
+  <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/10 to-transparent" />
+  {/* Left edge shine */}
+  <div className="absolute inset-y-0 left-0 w-px bg-gradient-to-b from-white/20 via-white/10 to-transparent" />
+</div>
 ```
 
 ---
 
-## Визуальные улучшения
+## Визуальное сравнение
 
-| Элемент | До | После |
-|---------|----|----|
-| **Карточка** | `bg-secondary` | `bg-secondary/80 backdrop-blur-sm border border-border/50` |
-| **Иконка** | Просто цвет | В цветном круге с фоном |
-| **Число** | `text-2xl` | `text-3xl tracking-tight` + анимация |
-| **Layout** | Иконка и label в одной строке | Иконка в круге, label рядом |
-
----
-
-## Анимация
-
-- **Тип:** Count-up от 0 до целевого значения
-- **Длительность:** 1.5 секунды
-- **Easing:** `easeOut` для плавного замедления в конце
-- **Форматирование:** Автоматически добавляет K/M суффиксы во время анимации
+| Аспект | Синий (сейчас) | Металл (новое) |
+|--------|----------------|----------------|
+| **Цвет** | Яркий синий | Тёмно-серый металлик |
+| **Глубина** | Плоский | Многослойный с бликами |
+| **Границы** | Нет | Светящиеся края сверху |
+| **Стиль** | Яркий, цветной | Премиальный, нейтральный |
 
 ---
 
@@ -159,6 +83,5 @@ export const StatsCard = ({
 
 | Файл | Изменение |
 |------|-----------|
-| `src/components/StatsCard.tsx` | Полное обновление с анимацией и новым дизайном |
-| `src/pages/Index.tsx` | Добавить `numericValue` и `iconClassName` пропсы |
+| `src/components/ChannelCard.tsx` | Заменить синий градиент на металлический эффект (строки 110-111) |
 
