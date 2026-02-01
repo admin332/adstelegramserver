@@ -99,9 +99,25 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
 
   return (
     <div className="relative w-full">
-      {/* Gradient border using after pseudo-element */}
-      <div className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600 opacity-75 blur-[2px]" />
-      <div className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600" />
+      {/* Gradient border with corner fade */}
+      <div 
+        className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600 opacity-75 blur-[2px]" 
+        style={{
+          maskImage: 'radial-gradient(ellipse 80% 80% at 0% 100%, transparent 0%, black 50%), radial-gradient(ellipse 80% 80% at 100% 0%, transparent 0%, black 50%)',
+          maskComposite: 'intersect',
+          WebkitMaskImage: 'radial-gradient(ellipse 80% 80% at 0% 100%, transparent 0%, black 50%), radial-gradient(ellipse 80% 80% at 100% 0%, transparent 0%, black 50%)',
+          WebkitMaskComposite: 'source-in'
+        }}
+      />
+      <div 
+        className="absolute -inset-[1px] rounded-3xl bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600" 
+        style={{
+          maskImage: 'radial-gradient(ellipse 80% 80% at 0% 100%, transparent 0%, black 50%), radial-gradient(ellipse 80% 80% at 100% 0%, transparent 0%, black 50%)',
+          maskComposite: 'intersect',
+          WebkitMaskImage: 'radial-gradient(ellipse 80% 80% at 0% 100%, transparent 0%, black 50%), radial-gradient(ellipse 80% 80% at 100% 0%, transparent 0%, black 50%)',
+          WebkitMaskComposite: 'source-in'
+        }}
+      />
       
       <motion.div
         className={cn(
