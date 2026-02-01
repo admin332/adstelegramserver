@@ -2,25 +2,25 @@
 
 Telegram Mini App marketplace for advertising with escrow deals, verified channel statistics, and auto-posting.
 
-🤖 **Demo Bot**: [@AdsIngoBot](https://t.me/AdsIngoBot)  
-📱 **Mini App**: [Launch App](https://t.me/AdsIngoBot/app)
+**Demo Bot**: [@adsingo_bot](https://t.me/adsingo_bot)  
+**Mini App**: [Launch App](https://t.me/adsingo_bot)
 
 ---
 
-## ✨ Features
+## Features
 
-- ✅ **Two-sided marketplace** — Advertisers create campaigns, channel owners list channels
-- ✅ **Verified channel stats** — Bot API + MTProto for subscribers, views, engagement, language distribution
-- ✅ **TON escrow payments** — Unique wallet per deal, AES-256-GCM encrypted mnemonics
-- ✅ **Creative workflow** — Brief → Draft → Approval loop via Telegram bot
-- ✅ **Auto-posting** — Scheduled publishing with post integrity verification
-- ✅ **Channel team** — Owner + managers with permission-based access
-- ✅ **24h timeouts** — Automatic refunds with configurable splits (100% / 70-30)
-- ✅ **Draft versioning** — Advertiser can select any previous draft version
+- **Two-sided marketplace** — Advertisers create campaigns, channel owners list channels
+- **Verified channel stats** — Bot API + MTProto for subscribers, views, engagement, language distribution
+- **TON escrow payments** — Unique wallet per deal, AES-256-GCM encrypted mnemonics
+- **Creative workflow** — Brief → Draft → Approval loop via Telegram bot
+- **Auto-posting** — Scheduled publishing with post integrity verification
+- **Channel team** — Owner + managers with permission-based access
+- **24h timeouts** — Automatic refunds with configurable splits (100% / 70-30)
+- **Draft versioning** — Advertiser can select any previous draft version
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -51,7 +51,7 @@ Telegram Mini App marketplace for advertising with escrow deals, verified channe
 
 ---
 
-## 🔄 Deal Lifecycle
+## Deal Lifecycle
 
 ```
                     ┌──────────────────────────────────────────┐
@@ -69,17 +69,17 @@ Telegram Mini App marketplace for advertising with escrow deals, verified channe
                     └──────────────────────────────────────────┘
 
 Statuses:
-• pending     — Deal created, awaiting payment
-• escrow      — Payment received, awaiting draft from channel owner
-• in_progress — Draft approved, post scheduled or published
-• completed   — Post verified, funds released to channel owner
-• cancelled   — Deal cancelled (timeout, post deleted, manual)
-• expired     — Payment not received within timeout
+- pending     — Deal created, awaiting payment
+- escrow      — Payment received, awaiting draft from channel owner
+- in_progress — Draft approved, post scheduled or published
+- completed   — Post verified, funds released to channel owner
+- cancelled   — Deal cancelled (timeout, post deleted, manual)
+- expired     — Payment not received within timeout
 ```
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 ### Frontend
 | Technology | Purpose |
@@ -103,7 +103,7 @@ Statuses:
 
 ---
 
-## 📊 Database Schema
+## Database Schema
 
 ### Core Tables
 
@@ -170,7 +170,7 @@ reviews
 
 ---
 
-## ⚡ Edge Functions
+## Edge Functions
 
 39 edge functions organized by domain:
 
@@ -232,7 +232,7 @@ reviews
 
 ---
 
-## 🔐 Security
+## Security
 
 ### Authentication
 - **HMAC-SHA256** validation of Telegram `initData`
@@ -256,7 +256,7 @@ reviews
 
 ---
 
-## 🚀 Local Development
+## Local Development
 
 ### Prerequisites
 - Node.js 18+
@@ -310,7 +310,7 @@ MTPROTO_VPS_SECRET=your-vps-secret
 
 ---
 
-## 📦 Deployment
+## Deployment
 
 ### 1. Supabase Setup
 
@@ -395,7 +395,7 @@ Configure environment variables in edge functions to point to your VPS.
 
 ---
 
-## 🎯 Key Design Decisions
+## Key Design Decisions
 
 ### 1. Unique Escrow Wallet Per Deal
 **Why**: Maximum security — funds are isolated per deal. Even if one wallet is compromised, other deals are safe.
@@ -439,7 +439,7 @@ Configure environment variables in edge functions to point to your VPS.
 
 ---
 
-## ⚠️ Known Limitations
+## Known Limitations
 
 | Limitation | Workaround |
 |------------|------------|
@@ -452,7 +452,7 @@ Configure environment variables in edge functions to point to your VPS.
 
 ---
 
-## 🤖 AI Usage Disclosure
+## AI Usage Disclosure
 
 **~85% of code written with AI assistance**
 
@@ -467,7 +467,7 @@ Configure environment variables in edge functions to point to your VPS.
 
 ---
 
-## 🔮 Future Improvements
+## Future Improvements
 
 - [ ] Multi-post scheduling with intervals
 - [ ] Channel analytics dashboard for owners
@@ -482,19 +482,19 @@ Configure environment variables in edge functions to point to your VPS.
 
 ---
 
-## 📄 License
+## License
 
 MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-## 👥 Team
+## Team
 
 Developed by **AGDX Team**
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [Supabase](https://supabase.com) — Backend infrastructure
 - [TON Foundation](https://ton.org) — Blockchain platform
