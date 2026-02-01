@@ -89,13 +89,18 @@ serve(async (req) => {
 
     const userId = dbUser.id;
 
-    // Get channel IDs where user is admin/owner
+    // Get channel IDs where user is admin/owner (with role info)
     const { data: channelAdmins } = await supabase
       .from("channel_admins")
-      .select("channel_id")
+      .select("channel_id, role")
       .eq("user_id", userId);
 
     const userChannelIds = channelAdmins?.map((ca) => ca.channel_id) || [];
+    
+    // Create map: channel_id -> role (owner or manager)
+    const channelRoleMap = new Map<string, string>(
+      channelAdmins?.map((ca) => [ca.channel_id, ca.role]) || []
+    );
 
     // Fetch deals where user is advertiser OR channel owner
     let query = supabase
@@ -170,6 +175,9 @@ serve(async (req) => {
         channel: deal.channel,
         campaign: deal.campaign,
         role,
+        channel_role: role === 'channel_owner' 
+          ? channelRoleMap.get(deal.channel_id) || null 
+          : null,
       };
     }).filter((deal) => {
       // Hide pending/expired deals from channel owners
