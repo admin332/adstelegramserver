@@ -98,15 +98,16 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   };
 
   return (
-    <motion.div
-      className={cn(
-        'relative w-full h-48 rounded-3xl overflow-hidden cursor-pointer group'
-      )}
-      variants={cardVariants}
-      initial="hidden"
-      animate="visible"
-      onClick={handleCardClick}
-    >
+    <div className="relative w-full p-[1px] rounded-3xl bg-[linear-gradient(to_bottom,_#3b82f6,_#1d4ed8)]">
+      <motion.div
+        className={cn(
+          'relative w-full h-48 rounded-3xl overflow-hidden cursor-pointer group'
+        )}
+        variants={cardVariants}
+        initial="hidden"
+        animate="visible"
+        onClick={handleCardClick}
+      >
       {/* Metal Background - Base Layer */}
       <div className="absolute inset-0 bg-gradient-to-b from-neutral-800 to-neutral-900" />
       
@@ -242,7 +243,8 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
             </Button>
           </div>
         </div>
+        </motion.div>
       </motion.div>
-    </motion.div>
+    </div>
   );
 };
