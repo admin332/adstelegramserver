@@ -46,6 +46,9 @@ export const DraftReviewDialog = ({
   const [showRevisionInput, setShowRevisionInput] = useState(false);
   const [revisionComment, setRevisionComment] = useState("");
 
+  const MAX_REVISIONS = 3;
+  const canRequestRevision = revisionCount < MAX_REVISIONS;
+
   const handleAction = async (action: "approve" | "request_revision") => {
     const initData = getTelegramInitData();
     if (!initData) {
@@ -125,10 +128,22 @@ export const DraftReviewDialog = ({
             Канал: <span className="text-foreground font-medium">{channelName}</span>
             {revisionCount > 0 && (
               <span className="ml-2 text-yellow-500">
-                (доработка #{revisionCount})
+                (доработка {revisionCount}/{MAX_REVISIONS})
               </span>
             )}
           </div>
+
+          {/* Revision limit warning */}
+          {revisionCount === MAX_REVISIONS - 1 && (
+            <div className="text-xs text-yellow-500 bg-yellow-500/10 rounded-lg px-3 py-2">
+              ⚠️ Осталась последняя доработка
+            </div>
+          )}
+          {revisionCount >= MAX_REVISIONS && (
+            <div className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
+              ⚠️ Лимит доработок исчерпан ({MAX_REVISIONS})
+            </div>
+          )}
 
           {/* Post preview */}
           <div className="bg-secondary/30 rounded-xl p-4 space-y-3">
@@ -218,15 +233,17 @@ export const DraftReviewDialog = ({
               </>
             ) : (
               <>
-                <Button
-                  variant="secondary"
-                  onClick={() => setShowRevisionInput(true)}
-                  disabled={isSubmitting}
-                  className="flex-1"
-                >
-                  <Edit3 className="w-4 h-4 mr-1.5" />
-                  На доработку
-                </Button>
+                {canRequestRevision && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => setShowRevisionInput(true)}
+                    disabled={isSubmitting}
+                    className="flex-1"
+                  >
+                    <Edit3 className="w-4 h-4 mr-1.5" />
+                    На доработку
+                  </Button>
+                )}
                 <Button
                   onClick={() => handleAction("approve")}
                   disabled={isSubmitting}

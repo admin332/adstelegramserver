@@ -326,6 +326,7 @@ export type Database = {
           channel_id: string
           completed_at: string | null
           created_at: string | null
+          draft_submitted_at: string | null
           duration_hours: number
           escrow_address: string | null
           escrow_balance: number | null
@@ -358,6 +359,7 @@ export type Database = {
           channel_id: string
           completed_at?: string | null
           created_at?: string | null
+          draft_submitted_at?: string | null
           duration_hours?: number
           escrow_address?: string | null
           escrow_balance?: number | null
@@ -390,6 +392,7 @@ export type Database = {
           channel_id?: string
           completed_at?: string | null
           created_at?: string | null
+          draft_submitted_at?: string | null
           duration_hours?: number
           escrow_address?: string | null
           escrow_balance?: number | null

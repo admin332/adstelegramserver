@@ -149,6 +149,15 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Check revision limit (max 3)
+    const MAX_REVISIONS = 3;
+    if (action === "request_revision" && (deal.revision_count || 0) >= MAX_REVISIONS) {
+      return new Response(
+        JSON.stringify({ success: false, error: `Достигнут лимит доработок (максимум ${MAX_REVISIONS})` }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Get channel owner for notification
     const { data: channelOwner } = await supabase
       .from("users")
