@@ -1,117 +1,132 @@
 
 
-## План: Редирект на /deals после оплаты + статус "Проверка оплаты"
+## План: Исправление редиректа после оплаты в TMA
 
-### Текущее поведение
+### Проблема
 
-1. Пользователь открывает `PaymentDialog` и нажимает "Оплатить"
-2. Транзакция отправляется в кошелёк
-3. Пользователь остаётся в диалоге — ничего не меняется
-4. Статус "Ожидает оплаты" сохраняется, пока бэкенд не подтвердит оплату
-
-### Желаемое поведение
-
-1. После отправки транзакции → закрыть диалог и перенаправить на `/deals`
-2. Отображать "Проверка оплаты" вместо "Ожидает оплаты" для этой сделки
-3. Кнопка "Оплатить" остаётся доступной (на случай повторной попытки)
+При оплате через TonConnect в Telegram Mini App:
+1. Пользователь нажимает "Оплатить"
+2. Открывается кошелёк (Telegram Wallet или внешний)
+3. Пользователь подтверждает транзакцию
+4. Кошелёк показывает "Transaction sent" (это модалка TonConnect)
+5. Пользователь возвращается в приложение через `twaReturnUrl`
+6. **НО**: Это новый контекст — старый Promise от `sendTransaction` никогда не resolve'ится
+7. Наш `.then()` не выполняется → нет редиректа и записи в localStorage
 
 ```text
-┌──────────────────────────────────────────────────────────────┐
-│                     ТЕКУЩИЙ ФЛОУ                             │
-├──────────────────────────────────────────────────────────────┤
-│  [PaymentDialog] ──> sendTransaction ──> остаёмся в диалоге  │
-│                                                              │
-│  Статус: "Ожидает оплаты" ──────────────────────────────────►│
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    ТЕКУЩИЙ ПРОБЛЕМНЫЙ ФЛОУ                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  [App Context 1]                  [Wallet App]                  │
+│       │                                │                        │
+│       ├── sendTransaction() ─────────► │                        │
+│       │   (Promise pending)            │                        │
+│       │                                ├── User confirms        │
+│       │                                │                        │
+│       │   ◄────── twaReturnUrl ────────┤                        │
+│       │                                                         │
+│  [App Context 2 - NEW!]                                         │
+│       │                                                         │
+│       │   Promise from Context 1 is LOST!                       │
+│       │   .then() never executes                                │
+│       │                                                         │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-┌──────────────────────────────────────────────────────────────┐
-│                     НОВЫЙ ФЛОУ                               │
-├──────────────────────────────────────────────────────────────┤
-│  [PaymentDialog] ──> sendTransaction ──> закрыть диалог      │
-│                          │                                   │
-│                          ▼                                   │
-│               localStorage.set("pending_payment", dealId)    │
-│                          │                                   │
-│                          ▼                                   │
-│               navigate("/deals")                             │
-│                          │                                   │
-│                          ▼                                   │
-│  [DealCard] ──> check localStorage ──> "Проверка оплаты"     │
-│             + кнопка "Оплатить" доступна                     │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+---
+
+## Решение
+
+Сохранять `dealId` в localStorage **ДО** отправки транзакции, а не после. Когда пользователь возвращается в приложение — проверять localStorage и показывать "Проверка оплаты".
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                      ИСПРАВЛЕННЫЙ ФЛОУ                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  [App Context 1]                                                │
+│       │                                                         │
+│       ├── localStorage.set('pending_payments', [dealId])        │
+│       ├── sendTransaction() ────────► [Wallet]                  │
+│       │                                                         │
+│  [App Context 2 - after return]                                 │
+│       │                                                         │
+│       ├── Deals page loads                                      │
+│       ├── Checks localStorage                                   │
+│       ├── Shows "Проверка оплаты" for pending deals             │
+│       │                                                         │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Техническая реализация
 
-### 1. Файл: `src/components/deals/PaymentDialog.tsx`
+### Файл: `src/components/deals/PaymentDialog.tsx`
 
-**Изменения:**
-
-- Добавить `useNavigate` из `react-router-dom`
-- После успешной отправки транзакции (`.then()`):
-  - Сохранить dealId в localStorage как "проверяемый"
-  - Закрыть диалог
-  - Перенаправить на `/deals`
-  - Вызвать `onPaymentSuccess` для обновления данных
+Переместить сохранение в localStorage **ДО** вызова `sendTransaction`:
 
 ```tsx
-import { useNavigate } from "react-router-dom";
-
-// В компоненте:
-const navigate = useNavigate();
-
-// В handlePayViaWallet, после sendTransaction:
-tonConnectUI.sendTransaction(transaction, options)
-  .then(() => {
-    // Сохраняем ID сделки как "проверяющую оплату"
+const handlePayViaWallet = () => {
+  // ... проверки ...
+  
+  setIsPaying(true);
+  
+  // НОВОЕ: Сохраняем СРАЗУ, до отправки транзакции
+  try {
     const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
     if (!pendingPayments.includes(dealId)) {
       pendingPayments.push(dealId);
       localStorage.setItem('pending_payments', JSON.stringify(pendingPayments));
     }
+  } catch {}
+  
+  // ... подготовка transaction ...
+  
+  tonConnectUI.sendTransaction(transaction, options)
+    .then(() => {
+      // Закрываем диалог и перенаправляем
+      onOpenChange(false);
+      onPaymentSuccess?.();
+      navigate('/deals');
+      toast.success("Транзакция отправлена! Проверяем оплату...");
+    })
+    .catch((error: any) => {
+      // НОВОЕ: Удаляем из localStorage при ошибке
+      try {
+        const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+        const updated = pendingPayments.filter((pid: string) => pid !== dealId);
+        localStorage.setItem('pending_payments', JSON.stringify(updated));
+      } catch {}
+      
+      // ... обработка ошибок ...
+    });
     
-    // Закрываем диалог
-    onOpenChange(false);
-    
-    // Вызываем callback и перенаправляем
-    onPaymentSuccess?.();
-    navigate('/deals');
-    
-    toast.success("Транзакция отправлена! Проверяем оплату...");
-  })
-  .catch(...)
+  // НОВОЕ: Для внешних кошельков — редирект сразу после открытия ссылки
+  if (walletLink) {
+    openWalletLink(walletLink);
+    // Сразу перенаправляем на deals, т.к. Promise может не resolve'иться
+    setTimeout(() => {
+      onOpenChange(false);
+      navigate('/deals');
+    }, 1000);
+  }
+};
 ```
 
 ---
 
-### 2. Файл: `src/components/DealCard.tsx`
+### Файл: `src/components/DealCard.tsx`
 
-**Изменения:**
+Логика уже правильная — проверяет localStorage и показывает "Проверка оплаты".
 
-- Проверять localStorage на наличие `dealId` в списке "pending_payments"
-- Если сделка в списке и статус `pending` → показывать "Проверка оплаты"
-- Если статус изменился на `escrow` → удалить из localStorage
-- Кнопка "Оплатить" остаётся доступной
+Нужно добавить очистку при истечении срока (если транзакция не прошла):
 
 ```tsx
-// Добавить в начало компонента:
-const isPendingPayment = (() => {
-  if (status !== 'pending') return false;
-  try {
-    const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
-    return pendingPayments.includes(id);
-  } catch {
-    return false;
-  }
-})();
-
-// Очистка localStorage при смене статуса
+// Очистка из localStorage если сделка истекла
 useEffect(() => {
-  if (status === 'escrow') {
+  if (status === 'expired' || status === 'cancelled') {
     try {
       const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
       const updated = pendingPayments.filter((pid: string) => pid !== id);
@@ -119,30 +134,26 @@ useEffect(() => {
     } catch {}
   }
 }, [status, id]);
-
-// Изменить dynamicStatusLabel для pending:
-if (status === "pending" && isPendingPayment) {
-  dynamicStatusLabel = "Проверка оплаты";
-}
 ```
 
 ---
 
-### 3. Файл: `src/pages/Deals.tsx`
+### Файл: `src/pages/Deals.tsx`
 
-**Изменения:**
-
-- Добавить автоматическое обновление данных каждые 5-10 секунд, пока есть сделки в состоянии "проверка оплаты"
-- Это позволит быстро отобразить изменение статуса после подтверждения бэкендом
+Автообновление уже реализовано. Добавим проверку при загрузке страницы:
 
 ```tsx
-// Добавить в useUserDeals:
-const { refetch } = useUserDeals();
-
-// Автообновление при наличии pending_payments
+// При загрузке страницы проверяем pending_payments
 useEffect(() => {
-  const pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+  let pendingPayments: string[] = [];
+  try {
+    pendingPayments = JSON.parse(localStorage.getItem('pending_payments') || '[]');
+  } catch {}
+  
   if (pendingPayments.length === 0) return;
+  
+  // Запускаем refetch сразу и каждые 5 секунд
+  refetch();
   
   const interval = setInterval(() => {
     refetch();
@@ -154,17 +165,14 @@ useEffect(() => {
 
 ---
 
-## Дополнительная конфигурация статуса
+## Ключевые изменения
 
-### Обновить `statusConfig` в `DealCard.tsx`:
-
-Не требуется добавлять новый статус в базу данных — мы используем тот же `pending`, но с другим отображением.
-
-| Состояние | Реальный статус | Отображение | Кнопка "Оплатить" |
-|-----------|-----------------|-------------|-------------------|
-| До оплаты | `pending` | "Ожидает оплаты" | Доступна |
-| После отправки транзакции | `pending` + localStorage | "Проверка оплаты" | Доступна |
-| Оплата подтверждена | `escrow` | "Оплачено" | Скрыта |
+| Аспект | Было | Стало |
+|--------|------|-------|
+| Когда сохраняется в localStorage | После `.then()` | До `sendTransaction()` |
+| При ошибке | Ничего | Удаляется из localStorage |
+| Для внешних кошельков | Ждём Promise | Редирект через 1 сек |
+| При expired/cancelled | Ничего | Очищается из localStorage |
 
 ---
 
@@ -172,7 +180,7 @@ useEffect(() => {
 
 | Файл | Изменение |
 |------|-----------|
-| `src/components/deals/PaymentDialog.tsx` | Добавить редирект на /deals после отправки транзакции |
-| `src/components/DealCard.tsx` | Показывать "Проверка оплаты" для pending + localStorage |
-| `src/pages/Deals.tsx` | Добавить автообновление пока есть pending_payments |
+| `src/components/deals/PaymentDialog.tsx` | Сохранение в localStorage ДО транзакции, редирект для внешних кошельков |
+| `src/components/DealCard.tsx` | Очистка при expired/cancelled статусах |
+| `src/pages/Deals.tsx` | Немедленный refetch при загрузке с pending_payments |
 
