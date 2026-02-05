@@ -195,6 +195,63 @@ async function getFileUrl(botToken: string, fileId: string): Promise<string | nu
   }
 }
 
+// Cache channel avatar to Storage
+async function cacheChannelAvatar(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  botToken: string,
+  channelId: string,
+  photoFileId: string | undefined,
+  existingAvatarUrl: string | null
+): Promise<string | null> {
+  // If no photo — keep existing avatar
+  if (!photoFileId) {
+    console.log("[avatar] No photo file ID, keeping existing");
+    return existingAvatarUrl;
+  }
+
+  try {
+    // 1. Get temporary URL from Telegram
+    const fileUrl = await getFileUrl(botToken, photoFileId);
+    if (!fileUrl) {
+      console.log("[avatar] Could not get file URL, keeping existing");
+      return existingAvatarUrl;
+    }
+
+    // 2. Download image
+    const response = await fetch(fileUrl);
+    if (!response.ok) {
+      console.log("[avatar] Failed to download, keeping existing");
+      return existingAvatarUrl;
+    }
+    const arrayBuffer = await response.arrayBuffer();
+
+    // 3. Upload to storage (upsert if exists)
+    const fileName = `${channelId}.jpg`;
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from("channel-avatars")
+      .upload(fileName, arrayBuffer, {
+        contentType: "image/jpeg",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error("[avatar] Upload error:", uploadError);
+      return existingAvatarUrl;
+    }
+
+    // 4. Get public URL
+    const { data: { publicUrl } } = supabaseAdmin.storage
+      .from("channel-avatars")
+      .getPublicUrl(fileName);
+
+    console.log(`[avatar] Cached avatar for channel ${channelId}: ${publicUrl}`);
+    return publicUrl;
+  } catch (error) {
+    console.error("[avatar] Error caching avatar:", error);
+    return existingAvatarUrl;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -337,10 +394,11 @@ Deno.serve(async (req) => {
     // Get subscriber count
     const subscribersCount = await getChatMemberCount(botToken, chat.id);
 
-    // Get avatar URL if available
+    // Get and cache avatar URL
     let avatarUrl: string | null = null;
     if (chat.photo?.big_file_id) {
-      avatarUrl = await getFileUrl(botToken, chat.photo.big_file_id);
+      // For new channels, we don't have an existing avatar yet
+      avatarUrl = await cacheChannelAvatar(supabase, botToken, chat.id.toString(), chat.photo.big_file_id, null);
     }
 
     // 3. Find owner_id from users table by VERIFIED telegram_id
