@@ -8,6 +8,7 @@ import { useUserChannels, useToggleChannelActive } from "@/hooks/useUserChannels
 import { channelCategories } from "@/data/channelCategories";
 import { cn } from "@/lib/utils";
 import { ChannelTeamCompact } from "./ChannelTeamCompact";
+import { ChannelAvatarWithFallback } from "./ChannelAvatarWithFallback";
 
 interface MyChannelsListProps {
   onAddChannel: () => void;
@@ -67,22 +68,11 @@ export const MyChannelsList = ({ onAddChannel, onBack }: MyChannelsListProps) =>
                 )}
               >
                 <div className="flex items-center gap-4">
-                  <div className={cn(
-                    "w-14 h-14 rounded-xl bg-secondary flex items-center justify-center overflow-hidden flex-shrink-0",
-                    isHidden && "grayscale"
-                  )}>
-                    {channel.avatar_url ? (
-                      <img
-                        src={channel.avatar_url}
-                        alt={channel.title || channel.username}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span className="text-xl font-bold text-muted-foreground">
-                        {(channel.title || channel.username)?.charAt(0) || "?"}
-                      </span>
-                    )}
-                  </div>
+                  <ChannelAvatarWithFallback
+                    src={channel.avatar_url}
+                    name={channel.title || channel.username || "?"}
+                    isHidden={isHidden}
+                  />
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
