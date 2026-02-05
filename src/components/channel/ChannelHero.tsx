@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { CheckCircle2, Crown } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -18,14 +18,22 @@ const ChannelHero: React.FC<ChannelHeroProps> = ({
   verified,
   premium,
 }) => {
+  const [bgImgError, setBgImgError] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
+  
+  const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=6366f1&color=fff&size=200`;
+  const displayBgAvatar = bgImgError ? fallbackAvatar : avatar;
+  const displayAvatar = avatarError ? fallbackAvatar : avatar;
+
   return (
     <div className="relative">
       {/* Background Image */}
       <div className="h-40 overflow-hidden">
         <img
-          src={avatar}
+          src={displayBgAvatar}
           alt={name}
           className="w-full h-full object-cover"
+          onError={() => setBgImgError(true)}
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-background" />
       </div>
@@ -38,7 +46,11 @@ const ChannelHero: React.FC<ChannelHeroProps> = ({
           transition={{ delay: 0.1 }}
         >
           <Avatar className="h-24 w-24 border-4 border-background shadow-lg">
-            <AvatarImage src={avatar} alt={name} />
+            <AvatarImage 
+              src={displayAvatar} 
+              alt={name}
+              onError={() => setAvatarError(true)}
+            />
             <AvatarFallback className="text-2xl font-bold">
               {name.charAt(0)}
             </AvatarFallback>

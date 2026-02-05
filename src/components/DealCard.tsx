@@ -107,6 +107,29 @@ const isVideoUrl = (url: string) => {
   return videoExtensions.some(ext => url.toLowerCase().includes(ext));
 };
 
+// Channel avatar component with fallback
+const ChannelAvatarForDeal = ({ src, name, initial }: { src: string | null | undefined; name: string; initial: string }) => {
+  const [imgError, setImgError] = useState(false);
+  const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random&size=200`;
+  
+  return (
+    <Avatar className="w-12 h-12">
+      {!imgError && src ? (
+        <AvatarImage 
+          src={src} 
+          alt={name}
+          onError={() => setImgError(true)}
+        />
+      ) : imgError ? (
+        <AvatarImage src={fallbackAvatar} alt={name} />
+      ) : null}
+      <AvatarFallback className="bg-secondary text-foreground">
+        {initial}
+      </AvatarFallback>
+    </Avatar>
+  );
+};
+
 // Helper function to get campaign media info for preview
 const getCampaignMediaInfo = (campaign: DealCardProps['campaign']) => {
   if (!campaign) return { firstMedia: null, mediaCount: 0, isVideo: false };
@@ -375,13 +398,12 @@ export const DealCard = ({
             )}
           </div>
         ) : (
-          // Standard Avatar for channel (for advertiser)
-          <Avatar className="w-12 h-12">
-            <AvatarImage src={displayAvatar || undefined} alt={displayTitle} />
-            <AvatarFallback className="bg-secondary text-foreground">
-              {displayInitial}
-            </AvatarFallback>
-          </Avatar>
+          // Standard Avatar for channel (for advertiser) with fallback
+          <ChannelAvatarForDeal 
+            src={displayAvatar} 
+            name={displayTitle}
+            initial={displayInitial}
+          />
         )}
         
         <div className="flex-1 min-w-0">

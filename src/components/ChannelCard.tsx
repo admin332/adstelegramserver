@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, Users, Eye } from 'lucide-react';
@@ -63,6 +63,10 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   acceptedCampaignTypes,
 }) => {
   const navigate = useNavigate();
+  const [imgError, setImgError] = useState(false);
+  
+  const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random&size=200`;
+  const displayAvatar = imgError ? fallbackAvatar : avatar;
 
   const handleLikeClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -142,9 +146,10 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       {/* Background Image - Right Side */}
       <div className="absolute top-0 bottom-0 right-0 w-1/2">
         <img
-          src={avatar}
+          src={displayAvatar}
           alt={name}
           className="w-full h-full object-cover object-center"
+          onError={() => setImgError(true)}
         />
         <div className="absolute inset-0 bg-black/50" />
       </div>
