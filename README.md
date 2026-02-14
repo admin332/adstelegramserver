@@ -490,7 +490,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## Team
 
-Developed by **AGDX Team**
+Developed by **AGADX.COM Team**
 
 ---
 
